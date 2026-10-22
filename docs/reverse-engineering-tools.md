@@ -71,7 +71,11 @@ Cutter commands use the local REA Python bridge and authenticated loopback messa
 The client and plugin must support the current v2 handshake; older peers are
 rejected before dispatch because they cannot preserve cross-caller recovery proof.
 The client checks the final encoded request against the bridge's 16 MiB frame
-limit before dispatch; an oversized command does not retain a cleanup owner.
+limit before dispatch; the 16 MiB budget applies to request payload bytes and
+excludes the terminating LF. The bridge accepts that full payload size and
+rejects larger or incomplete frames while bounding the read; an oversized
+command does not retain a cleanup owner. Hopper uses the same request payload
+budget.
 Each bridge request waits 25000 ms. Discovery admits at most 256 descriptor
 candidates and reads and probes at most eight concurrently. A larger directory
 reports `bridge_directory_capacity_exceeded`. This release has no runtime

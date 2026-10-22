@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import type { JsonValue } from "../domain/jsonValue.js";
@@ -959,5 +960,121 @@ describe("complete Ghidra function body range evidence", () => {
         body: { ...body(), ...change },
       }).ok,
     ).toBe(false);
+  });
+});
+
+describe("Ghidra native instruction decoder context for ARM TMode and MIPS ISA_MODE", () => {
+  it.each([
+    {
+      arch: "ARM:LE:32:v7",
+      register: "TMode",
+      value: "1",
+      description: "Thumb execution mode",
+    },
+    {
+      arch: "ARM:LE:32:v7",
+      register: "TMode",
+      value: "0",
+      description: "ARM 32-bit execution mode",
+    },
+    {
+      arch: "MIPS:LE:32:default",
+      register: "ISA_MODE",
+      value: "1",
+      description: "MIPS16 mode",
+    },
+    {
+      arch: "MIPS:LE:32:default",
+      register: "ISA_MODE",
+      value: "0",
+      description: "Standard MIPS32 mode",
+    },
+  ])(
+    "preserves $description ($register=$value) across boundary",
+    ({ arch, register, value }) => {
+      const instruction = {
+        ...compactInstruction(),
+        architecture: arch,
+        decoder_context: [
+          {
+            register,
+            value,
+            source: "ghidra-program-context",
+          },
+        ],
+      };
+      const parsed = parseFunctionValueFixture(
+        "inspect_native_instruction",
+        instruction,
+      );
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.value).toMatchObject({
+        architecture: arch,
+        decoder_context: [
+          { register, value, source: "ghidra-program-context" },
+        ],
+      });
+    },
+  );
+
+  it("admits null value for uninitialized processor context register", () => {
+    const instruction = {
+      ...compactInstruction(),
+      architecture: "ARM:LE:32:v7",
+      decoder_context: [
+        {
+          register: "TMode",
+          value: null,
+          source: "ghidra-program-context",
+        },
+      ],
+    };
+    const parsed = parseFunctionValueFixture(
+      "inspect_native_instruction",
+      instruction,
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value).toMatchObject({
+      decoder_context: [{ register: "TMode", value: null }],
+    });
+  });
+
+  it("rejects malformed decoder context entries", () => {
+    const emptyRegister = {
+      ...compactInstruction(),
+      decoder_context: [{ register: "", value: "1", source: "ghidra" }],
+    };
+    expect(
+      parseFunctionValueFixture("inspect_native_instruction", emptyRegister).ok,
+    ).toBe(false);
+
+    const emptySource = {
+      ...compactInstruction(),
+      decoder_context: [{ register: "TMode", value: "1", source: "" }],
+    };
+    expect(
+      parseFunctionValueFixture("inspect_native_instruction", emptySource).ok,
+    ).toBe(false);
+  });
+});
+
+describe("Ghidra bridge script processor context contract", () => {
+  it("binds TMode to ARM and ISA_MODE to MIPS in ReaGhidraBridge.java", async () => {
+    const bridgePath = new URL(
+      "../../bridge/ghidra/ReaGhidraBridge.java",
+      import.meta.url,
+    );
+    const content = await readFile(bridgePath, "utf8");
+    expect(content).toContain(
+      'currentProgram.getLanguageID().getIdAsString().startsWith("ARM:")',
+    );
+    expect(content).toContain(
+      'currentProgram.getLanguageID().getIdAsString().startsWith("MIPS:")',
+    );
+    expect(content).toContain('"TMode"');
+    expect(content).toContain('"ISA_MODE"');
+    expect(content).toContain('"ghidra-program-context"');
   });
 });

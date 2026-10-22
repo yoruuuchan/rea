@@ -28,6 +28,10 @@ export interface CapturedScripts {
   readonly sourceMapRequests: readonly WebSourceMapRequest[];
 }
 
+export interface CapturedScriptSnapshot extends CapturedScripts {
+  readonly scriptIds: ReadonlySet<string>;
+}
+
 export interface CaptureScriptsOptions {
   readonly context: CaptureContext;
   readonly events: CdpCaptureEvents;
@@ -52,25 +56,25 @@ type ScriptDraftItem = Omit<
 
 export const captureScripts = async (
   options: CaptureScriptsOptions,
-): Promise<CapturedScripts> => {
+): Promise<CapturedScriptSnapshot> => {
   const { context, events, rawResources, resources, frameIds } = options;
   let state: ScriptDraftState | undefined;
   const drafts: {
     readonly item: ScriptDraftItem;
     readonly sourceMapRawUrl: string | null;
   }[] = [];
-  const scripts = [...events.scripts.values()];
+  const scripts = new Map(events.scripts);
   const commandTimeoutMs = selectedCdpCommandTimeoutMs(
     context.input.command_timeout_ms,
   );
   const deadlineOmission =
     cdpScriptSourceDeadlineOmissionReason(commandTimeoutMs);
   const sourceBudget =
-    context.input.include_script_sources && scripts.length > 0
+    context.input.include_script_sources && scripts.size > 0
       ? new CdpScriptSourceBudget(context.signal, commandTimeoutMs)
       : undefined;
   try {
-    for (const script of scripts) {
+    for (const script of scripts.values()) {
       state ??= {
         context,
         events,
@@ -114,12 +118,23 @@ export const captureScripts = async (
     sourceBudget?.dispose();
   }
   if (!context.input.include_script_sources)
-    events.completeness.exclude(
-      "script_sources",
-      "not_approved",
-      events.scripts.size,
-    );
-  return keyAndBuildInventory(drafts, events.scripts.size);
+    events.completeness.exclude("script_sources", "not_approved", scripts.size);
+  return {
+    ...keyAndBuildInventory(drafts, scripts.size),
+    scriptIds: new Set(scripts.keys()),
+  };
+};
+
+/** Settle once after the last CDP read, before normalizing completeness. */
+export const finalizeScriptInventory = (
+  snapshot: CapturedScriptSnapshot,
+  events: CdpCaptureEvents,
+): WebPageInspection["scripts"] => {
+  let lateCount = 0;
+  for (const scriptId of events.scripts.keys())
+    if (!snapshot.scriptIds.has(scriptId)) lateCount += 1;
+  if (lateCount > 0) events.completeness.drop("scripts", lateCount);
+  return { ...snapshot.inventory, total: snapshot.inventory.total + lateCount };
 };
 
 const buildScriptDraft = (

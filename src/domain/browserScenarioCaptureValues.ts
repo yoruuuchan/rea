@@ -98,7 +98,14 @@ const cookieShape = {
   same_site: z.enum(["Strict", "Lax", "None"]),
 };
 
+/** UTF-8 for well-formed strings; raw 0xff + UTF-16LE otherwise. */
+export const BROWSER_STORAGE_FINGERPRINT_VERSION = 2;
+
 const storageSnapshotSchema = z.strictObject({
+  // Absence retains the legacy, lossy UTF-8 interpretation.
+  fingerprint_version: z
+    .literal(BROWSER_STORAGE_FINGERPRINT_VERSION)
+    .optional(),
   cookies: z.array(
     z.discriminatedUnion("value_state", [
       z.strictObject({ ...cookieShape, ...hashedStorageValueShape }),

@@ -29,6 +29,10 @@ export const MACHO_ARCHITECTURE_POLICIES: Readonly<
     ],
     variantName: /^arm64e\.[A-Za-z0-9_]+$/u,
   },
+  arm64_32: {
+    cpuType: 0x0200000c,
+    subtypes: [{ subtype: 1, name: "arm64_32" }],
+  },
 };
 
 /** Unlisted subtypes follow the preferred slices in FAT table order. */

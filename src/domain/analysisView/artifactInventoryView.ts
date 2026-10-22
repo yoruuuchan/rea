@@ -23,6 +23,7 @@ import {
   validateArtifactInventorySubject,
   parseArtifactInspectionInventoryResult,
   parseArtifactInventoryResult,
+  ArtifactInventoryValidationError,
   type InventorySet,
 } from "../artifactInventoryEvidence.js";
 import type { ArtifactInspectionResult } from "../artifactInspection.js";
@@ -219,7 +220,7 @@ const sourceFailure = (
 ): Result<never, AnalysisError> => {
   if (cause instanceof z.ZodError)
     return err(analysisViewResultInputError(input, cause));
-  if (!(cause instanceof TypeError)) throw cause;
+  if (!(cause instanceof ArtifactInventoryValidationError)) throw cause;
   return err(inputError(cause.message));
 };
 

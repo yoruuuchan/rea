@@ -15,6 +15,7 @@ import { createAnalysisProfile } from "../../domain/analysisProfile.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
+import { AnalysisUnsupportedTargetError } from "../../domain/analysisErrorCore.js";
 import { ProviderSelectionError } from "../../domain/providerSelectionError.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
@@ -607,6 +608,73 @@ const capability = (provider: ProviderIdentity): CapabilityDescriptor => ({
   limitations: [],
 });
 
+describe("analysis provider registry: explicit profile refusals", () => {
+  const refusing = (refusal: AnalysisUnsupportedTargetError) => ({
+    ...candidate("ghidra").provider,
+    resolveAnalysisProfile: () => Promise.resolve(err(refusal)),
+  });
+
+  it("keeps a refusing provider's reason, recovery and evidence in the selection failure", async () => {
+    const capturedOutput = {
+      stdout: "",
+      stderr: "x86-64 only",
+      truncated: false,
+    };
+    const refusal = new AnalysisUnsupportedTargetError(
+      "resolve_analysis_profile",
+      DATABASE_TARGET.path,
+      "The configured extension supports x86-64 only.",
+      {
+        remediationAction: "Omit the extension setting for this target.",
+        capturedOutput,
+        diagnostics: { extension: "fixture" },
+      },
+    );
+    const selected = await new AnalysisProviderRegistry([
+      refusing(refusal),
+    ]).select(DATABASE_TARGET, "ghidra");
+    if (selected.ok) throw new Error("expected a profile refusal");
+    expect(selected.error).toBeInstanceOf(ProviderSelectionError);
+    expect(selected.error.cause).toBe(refusal);
+    expect(projectAnalysisError(selected.error)).toMatchObject({
+      code: "capability_unavailable",
+      message: refusal.message,
+      remediation: { action: "Omit the extension setting for this target." },
+      details: {
+        selection_reason: "target_unsupported",
+        requested_provider_id: "ghidra",
+        candidate_ids: ["ghidra"],
+        rejections: [
+          {
+            provider_id: "ghidra",
+            code: "target_format_unsupported",
+            reason: "The configured extension supports x86-64 only.",
+          },
+        ],
+        captured_output: capturedOutput,
+        diagnostics: { extension: "fixture" },
+      },
+    });
+  });
+
+  it("returns a refusal with unconfirmed cleanup unchanged", async () => {
+    const refusal = new AnalysisUnsupportedTargetError(
+      "resolve_analysis_profile",
+      DATABASE_TARGET.path,
+      "The configured extension supports x86-64 only.",
+      { cleanup: { reason: "probe close failed", resources: ["/tmp/probe"] } },
+    );
+    const selected = await new AnalysisProviderRegistry([
+      refusing(refusal),
+    ]).select(DATABASE_TARGET, "ghidra");
+    if (selected.ok) throw new Error("expected a profile refusal");
+    expect(selected.error).toBe(refusal);
+    expect(projectAnalysisError(selected.error)).toMatchObject({
+      code: "cleanup_incomplete",
+      details: { cleanup: "incomplete", resources: ["/tmp/probe"] },
+    });
+  });
+});
 describe("profile resolution terminal facts", () => {
   it.each([false, true])(
     "preserves a physical profile failure across late caller abort (throws: %s)",

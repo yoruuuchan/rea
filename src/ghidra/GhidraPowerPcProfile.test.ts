@@ -1,7 +1,7 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, parse, relative } from "node:path";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { parseConfig } from "../config/parseConfig.js";
 import type {
   BinaryTarget,
@@ -76,7 +76,19 @@ describe("bounded Ghidra PowerPC admission", () => {
   });
 
   it("lets a configured language replace the lane default", async () => {
-    const installDir = await createTestTempDirectory("rea-ghidra-ppc-");
+    const root =
+      process.platform === "win32" ? join(process.cwd(), "build") : tmpdir();
+    await mkdir(root, { recursive: true });
+    const ownedInstallDir = await mkdtemp(join(root, "rea-ghidra-ppc-"));
+    onTestFinished(async () => {
+      await rm(ownedInstallDir, { recursive: true, force: true });
+    });
+    // The simulated Linux host needs a POSIX absolute path. Keep the owned
+    // native path for cleanup and derive the simulated path on the same drive.
+    const installDir =
+      process.platform === "win32"
+        ? `/${relative(parse(ownedInstallDir).root, ownedInstallDir).replaceAll("\\", "/")}`
+        : ownedInstallDir;
     const languages = join(
       installDir,
       "Ghidra/Processors/PowerPC/data/languages",

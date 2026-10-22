@@ -10,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join, posix } from "node:path";
 import { promisify } from "node:util";
 
 import { z } from "zod";
@@ -160,8 +160,8 @@ export const installMacHopper = async (
         return { status: "failed", reason: "destination_exists" };
       installStage = "mount";
       temporary = await host.createTemporaryDirectory();
-      const packagePath = join(temporary, "hopper.dmg");
-      const mountPath = join(temporary, "mounted");
+      const packagePath = posix.join(temporary, "hopper.dmg");
+      const mountPath = posix.join(temporary, "mounted");
       await host.createMountDirectory(mountPath);
       await host.writePackage(packagePath, archive.bytes);
       if (!(await host.mount(packagePath, mountPath)))
@@ -191,7 +191,7 @@ export const installMacHopper = async (
             : { cleanupFailure: installation.cleanupFailure }),
         };
       bundleCleanupFailure = installation.cleanupFailure;
-      const launcherPath = join(destination, "Contents/MacOS/hopper");
+      const launcherPath = posix.join(destination, "Contents/MacOS/hopper");
       let openFailure: string | undefined;
       try {
         await host.openApplication(destination);
@@ -215,7 +215,7 @@ export const installMacHopper = async (
   let cleanupFailure: string | undefined;
   if (temporary !== undefined) {
     const temporaryPath = temporary;
-    const mountPath = join(temporary, "mounted");
+    const mountPath = posix.join(temporary, "mounted");
     const cleanup = async (): Promise<void> => {
       if (mounted) {
         await host.unmount(mountPath);
@@ -251,9 +251,11 @@ export const installMacHopperBundle = async (
   operations: MacHopperBundleInstallOperations,
   retainCleanup: (cleanup: () => Promise<void>) => void,
 ): Promise<MacHopperBundleInstallResult> => {
-  const stagingRoot = await operations.createStagingRoot(dirname(destination));
-  const stagedBundle = join(stagingRoot, "new.app");
-  const previousBundle = join(stagingRoot, "previous.app");
+  const stagingRoot = await operations.createStagingRoot(
+    posix.dirname(destination),
+  );
+  const stagedBundle = posix.join(stagingRoot, "new.app");
+  const previousBundle = posix.join(stagingRoot, "previous.app");
   let originalBackedUp = false;
   let newCommitted = false;
   let failureReason: "copy" | "launcher_missing" = "copy";
@@ -262,7 +264,7 @@ export const installMacHopperBundle = async (
     await operations.copyBundle(source, stagedBundle);
     failureReason = "launcher_missing";
     await operations.requireLauncher(
-      join(stagedBundle, "Contents/MacOS/hopper"),
+      posix.join(stagedBundle, "Contents/MacOS/hopper"),
     );
     failureReason = "copy";
     if (replaceExisting) {
@@ -369,7 +371,7 @@ export const systemMacHopperInstallHost = (
       const app = entries.find(
         (entry) => entry.isDirectory() && /^Hopper.*\.app$/iu.test(entry.name),
       );
-      return app === undefined ? undefined : join(mountPath, app.name);
+      return app === undefined ? undefined : posix.join(mountPath, app.name);
     },
     async validBundle(appPath) {
       if (
@@ -412,7 +414,7 @@ export const systemMacHopperInstallHost = (
         {
           async createStagingRoot(parent) {
             await mkdir(parent, { recursive: true });
-            return mkdtemp(join(parent, ".rea-hopper-stage-"));
+            return mkdtemp(posix.join(parent, ".rea-hopper-stage-"));
           },
           copyBundle: async (bundle, staged) => {
             await execFileAsync("ditto", [bundle, staged], {

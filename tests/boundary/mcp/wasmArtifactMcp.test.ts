@@ -14,7 +14,8 @@ import { wasmArtifactSummaryViewResultSchema } from "../../../src/domain/analysi
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { createServer } from "../../../src/server/createServer.js";
-import { ok } from "../../../src/domain/result.js";
+import { err, ok } from "../../../src/domain/result.js";
+import { AnalysisInputError } from "../../../src/domain/analysisErrorCore.js";
 import { createApplicationMcpHarness } from "../../fixtures/applicationMcpHarness.js";
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -627,11 +628,14 @@ it("rejects absent or inconsistent WASM source identity before deriving portable
   await harness.client.ping();
 });
 
-it("requires retention for WASM summary delivery while keeping fixed-server complete delivery", async () => {
+it("rejects malformed paths, refuses WASM summary delivery before provider work when retention is unavailable, and keeps fixed-server complete delivery", async () => {
   const value = wasmArtifactFixture();
+  const inspect = vi.fn<WasmArtifactService["provider"]["inspect"]>(() =>
+    Promise.resolve(ok(wasmArtifactExecution(value))),
+  );
   const service = new WasmArtifactService({
     close: () => Promise.resolve(),
-    inspect: () => Promise.resolve(ok(wasmArtifactExecution(value))),
+    inspect,
   });
   const session = createTestBinarySession(() => {
     throw new Error("No deep provider");
@@ -645,9 +649,10 @@ it("requires retention for WASM summary delivery while keeping fixed-server comp
   try {
     await server.connect(b);
     await client.connect(a);
+    const summaryInput = { path: value.artifact.path, detail: "summary" };
     const summary = await client.callTool({
       name: "inspect_wasm_artifact",
-      arguments: { path: value.artifact.path, detail: "summary" },
+      arguments: summaryInput,
     });
     expect(parseMcpToolError(summary)).toMatchObject({
       error: {
@@ -655,14 +660,56 @@ it("requires retention for WASM summary delivery while keeping fixed-server comp
         message: expect.stringContaining("does not retain Evidence"),
       },
     });
-    const complete = await client.callTool({
+    expect(inspect).not.toHaveBeenCalled();
+    const malformed = await client.callTool({
       name: "inspect_wasm_artifact",
-      arguments: { path: value.artifact.path },
+      arguments: {
+        path: "relative.wasm",
+        glue_paths: ["relative.js"],
+        detail: "summary",
+      },
     });
-    expect(complete.isError).not.toBe(true);
-    expect(parseEvidence(complete.structuredContent).normalized_result).toEqual(
-      value,
+    const rejected = parseMcpToolError(malformed).error;
+    expect(rejected.code).toBe("invalid_request");
+    expect(
+      z.object({ issues: z.array(z.unknown()) }).parse(rejected.details).issues,
+    ).toEqual(
+      [["path"], ["glue_paths", 0]].map((path) => ({
+        path,
+        reason: "invalid_format",
+        expected: "regex",
+        message: "must be an absolute local filesystem path",
+      })),
     );
+    expect(inspect).not.toHaveBeenCalled();
+    for (const input of [
+      { path: value.artifact.path },
+      { path: value.artifact.path, detail: "complete" },
+    ]) {
+      const complete = await client.callTool({
+        name: "inspect_wasm_artifact",
+        arguments: input,
+      });
+      expect(complete.isError).not.toBe(true);
+      expect(
+        parseEvidence(complete.structuredContent).normalized_result,
+      ).toEqual(value);
+    }
+    expect(inspect).toHaveBeenCalledTimes(2);
+    inspect.mockImplementation(() =>
+      Promise.resolve(err(new AnalysisInputError("inspect_wasm_artifact"))),
+    );
+    const refused = await client.callTool({
+      name: "inspect_wasm_artifact",
+      arguments: summaryInput,
+    });
+    expect(parseMcpToolError(refused)).toMatchObject({
+      error: {
+        code: "capability_unavailable",
+        message: expect.stringContaining("Select detail complete"),
+      },
+    });
+    expect(inspect).toHaveBeenCalledTimes(2);
     await client.ping();
   } finally {
     await client.close();

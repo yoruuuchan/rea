@@ -66,4 +66,23 @@ describe("Hopper provider capabilities", () => {
       expect(support.reason).toContain("Ghidra");
     }
   });
+  it("declines thin arm64_32 Mach-O targets without a verified lane", () => {
+    const config = parseConfig({});
+    if (!config.ok) throw new Error("expected valid configuration");
+    const provider = new HopperProvider(config.value, silentLogger, {});
+    expect(
+      provider.inspectTargetSupport({
+        path: "/tmp/watch.o",
+        sha256: "a".repeat(64),
+        kind: "executable",
+        format: "mach-o",
+        architecture: "arm64_32",
+        availableArchitectures: ["arm64_32"],
+      }),
+    ).toMatchObject({
+      status: "unsupported",
+      code: "architecture_unsupported",
+      reason: expect.stringContaining("arm64_32"),
+    });
+  });
 });

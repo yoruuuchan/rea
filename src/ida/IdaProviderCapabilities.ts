@@ -2,6 +2,7 @@ import type {
   AnalysisOperation,
   CapabilityDescriptor,
 } from "../application/AnalysisProvider.js";
+import { REGEX_MATCHING_LIMITATION } from "../process/RegexMatcher.js";
 
 /** This version identifies REA's adapter, not IDA or the upstream MCP server. */
 export const IDA_PROVIDER_IDENTITY = Object.freeze({
@@ -98,10 +99,15 @@ export const idaCapabilities = (
         changesPermissions: false,
         requiresRoot: false,
       },
-      limitations:
-        native &&
+      limitations: [
+        ...IDA_LIMITATIONS,
+        ...(native &&
         (operation === "list_strings" || operation === "search_strings")
-          ? [...IDA_LIMITATIONS, IDA_NATIVE_STRING_LIMITATION]
-          : IDA_LIMITATIONS,
+          ? [IDA_NATIVE_STRING_LIMITATION]
+          : []),
+        ...(operation === "search_procedures" || operation === "search_strings"
+          ? [REGEX_MATCHING_LIMITATION]
+          : []),
+      ],
     }),
   );

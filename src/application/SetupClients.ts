@@ -10,6 +10,8 @@ export const failedConfigurationMessage = (
   result: Extract<ClientConfigurationResult, { readonly status: "failed" }>,
 ): string => {
   switch (result.reason) {
+    case "conflict":
+      return "Agent configuration changed during setup. Review the current file and rerun setup.";
     case "target_changed":
       return "The client began reading a different configuration file after the plan was shown, so no change was made. Rerun setup to review the new target.";
     case "target_unavailable":

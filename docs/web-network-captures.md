@@ -270,6 +270,10 @@ not register or wrap the Fiddler MCP server.
   sensitive-value exclusions. Redacted byte fields retain neither original
   bytes nor their digest. Unknown extension names and token-looking query
   parameters do not establish sensitivity.
+  HAR authentication fields, transport URLs and base64 content are interpreted
+  only inside `log.entries`. Similarly named unknown fields in the document
+  container remain opaque evidence; explicit sensitive-value declarations still
+  apply to both scopes.
 
 Mark sensitive literal string/UTF-8 byte values with MCP `sensitive_values`, or
 repeat CLI `--sensitive-value`. These declarations are never persisted in

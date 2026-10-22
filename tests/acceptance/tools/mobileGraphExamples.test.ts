@@ -90,16 +90,36 @@ cliTest(
       ],
     });
     expect(result.exitCode).toBe(1);
-    expect(result.json).toMatchObject({
-      code: "invalid_request",
-      details: {
-        operation: "project_android_application_graph",
-        issues: expect.arrayContaining([
-          expect.objectContaining({
-            message: expect.stringContaining("coverage.status"),
-          }),
-        ]),
+    const projected = result.json;
+    expect(projected).toMatchObject({
+      code: "evidence_integrity_mismatch",
+      category: "integrity_mismatch",
+    });
+    const reason = inventoryIntegrityReason(projected);
+    expect(JSON.parse(reason)).toMatchObject([
+      {
+        code: "invalid_value",
+        values: ["complete", "unknown"],
+        path: ["coverage", "status"],
       },
+    ]);
+    expect(projected).toMatchObject({
+      message: reason,
+      details: { reason },
     });
   },
 );
+
+const inventoryIntegrityReason = (projected: unknown): string => {
+  if (
+    projected === null ||
+    typeof projected !== "object" ||
+    !("details" in projected) ||
+    projected.details === null ||
+    typeof projected.details !== "object" ||
+    !("reason" in projected.details) ||
+    typeof projected.details.reason !== "string"
+  )
+    throw new Error("Inventory rejection omitted an integrity reason");
+  return projected.details.reason;
+};

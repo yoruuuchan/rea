@@ -523,7 +523,7 @@ const lipoMatchesSlice = (
     reported.cpu_subtype_code !== null;
   return (
     (hasPhysicalIdentity || structurallyUnique) &&
-    lipoNameMatches(reported.name, observed.architecture) &&
+    lipoNameMatches(reported.name, observed) &&
     (reported.file_offset === null ||
       reported.file_offset === observed.slice_offset) &&
     (reported.size === null || reported.size === observed.slice_size) &&
@@ -552,11 +552,36 @@ const lipoSubtypeMatches = (
   );
 };
 
-/**
- * Newer lipo names an arm64e ABI variant `arm64e.<variant>` (for example
- * `arm64e.v1` for pointer-auth ABI version 1). The FAT table names that slice
- * `arm64e`; its physical identity is still compared field by field.
- */
-const lipoNameMatches = (reported: string, observed: string): boolean =>
-  reported === observed ||
-  (observed === "arm64e" && /^arm64e\.[A-Za-z0-9_]+$/u.test(reported));
+/** ARM implementation names from cctools libstuff/arch.c, keyed by lipo spelling. */
+const ARM_SUBTYPES: Readonly<Record<string, number>> = {
+  armv4t: 5,
+  armv5: 7,
+  xscale: 8,
+  armv6: 6,
+  armv7: 9,
+  armv7f: 10,
+  armv7s: 11,
+  armv7k: 12,
+  armv6m: 14,
+  armv7m: 15,
+  armv7em: 16,
+  "armv8m.main": 17,
+  "armv8m.base": 18,
+  "armv8.1m.main": 19,
+};
+
+/** Reconcile lipo's specific name with the structural reader's CPU family. */
+const lipoNameMatches = (reported: string, observed: MachoSlice): boolean => {
+  if (reported === observed.architecture) return true;
+  if (observed.cpu_type === 12 && observed.architecture === "arm")
+    return (
+      ARM_SUBTYPES[reported] ===
+      machoCpuSubtypeBase(observed.fat_cpu_subtype ?? observed.cpu_subtype)
+    );
+  // Newer lipo names pointer-auth ABI variants arm64e.<variant>. Their
+  // physical type/subtype, range and alignment are still compared separately.
+  return (
+    observed.architecture === "arm64e" &&
+    /^arm64e\.[A-Za-z0-9_]+$/u.test(reported)
+  );
+};

@@ -161,6 +161,68 @@ cliTest(
   },
 );
 
+cliTest(
+  "resolves dependency names and rpaths containing Unicode line separators",
+  async ({ cli }) => {
+    const app = await fixtureApp();
+    const library = "lib\u2028core.dylib";
+    const directory = "Libraries\u2029Nested";
+    await writeFiles(app, {
+      "Contents/MacOS/App": machoImage({
+        commands: [
+          buildVersionCommand(1),
+          dylibCommand(LC.LOAD_DYLIB, `@loader_path/${library}`),
+          rpathCommand(`@executable_path/${directory}`),
+          dylibCommand(LC.LOAD_DYLIB, "@rpath/libsearch.dylib"),
+        ],
+      }),
+      [`Contents/MacOS/${library}`]: machoImage({
+        fileType: FILE_TYPE.dylib,
+        commands: [buildVersionCommand(1)],
+      }),
+      [`Contents/MacOS/${directory}/libsearch.dylib`]: machoImage({
+        fileType: FILE_TYPE.dylib,
+        commands: [buildVersionCommand(1)],
+      }),
+    });
+    const output = await cli.run({
+      arguments: [
+        "trace-dylib-resolution",
+        app,
+        "--root",
+        "Contents/MacOS/App",
+        "--json",
+      ],
+      environment: ENVIRONMENT,
+    });
+    expect(output.exitCode, output.stderr).toBe(0);
+    const trace = dylibResolutionResultSchema.parse(
+      parseEvidence(output.json).normalized_result,
+    );
+    expect(
+      trace.edges.map(({ install_name, resolution }) => ({
+        install_name,
+        resolution,
+      })),
+    ).toEqual([
+      {
+        install_name: `@loader_path/${library}`,
+        resolution: {
+          status: "resolved",
+          image: `Contents/MacOS/${library}`,
+        },
+      },
+      {
+        install_name: "@rpath/libsearch.dylib",
+        resolution: {
+          status: "resolved",
+          image: `Contents/MacOS/${directory}/libsearch.dylib`,
+        },
+      },
+    ]);
+  },
+);
+
 describe("trace-dylib-resolution CLI", () => {
   cliTest("traces every executable root of an app bundle", async ({ cli }) => {
     const app = await fixtureApp();

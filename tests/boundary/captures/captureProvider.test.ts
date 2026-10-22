@@ -26,7 +26,7 @@ const fixture = async (mode = "ok", failCleanup = false) => {
   await writeFile(
     script,
     `import {readFileSync, writeFileSync, chmodSync, truncateSync} from 'node:fs';
-if (process.argv.includes('--version')) { console.log(${JSON.stringify(mode)} === 'bad-version' ? 'TShark (Wireshark) 3.0.0' : 'TShark (Wireshark) 4.6.9 (fixture)'); console.error('version warning'); }
+if (process.argv.includes('--version')) { console.log(${JSON.stringify(mode)} === 'bad-version' ? 'TShark (Wireshark) 3.0.0' : ${JSON.stringify(mode)} === 'foreign-version' ? 'tcpdump version 4.99.4' : 'TShark (Wireshark) 4.6.9 (fixture)'); console.error('version warning'); }
 else if (${JSON.stringify(mode)} === 'nonzero') { console.error('invalid decoder'); process.exitCode = 1; }
 else if (${JSON.stringify(mode)} === 'malformed-copy') { chmodSync('capture', 0o600); writeFileSync('capture', 'changed'); }
 else if (${JSON.stringify(mode)} === 'oversized-copy') { chmodSync('capture', 0o600); truncateSync('capture', 32 * 1024 * 1024 + 1); console.log('[]'); }
@@ -42,6 +42,7 @@ else { if(readFileSync('capture', 'utf8') !== 'recording bytes') throw Error('wr
   const configuredCommand =
     mode === "symlink" ? join(directory, "configured-tool") : script;
   if (mode === "symlink") await symlink(script, configuredCommand);
+  if (mode === "path") await symlink(script, join(directory, "tshark"));
   const controller = new AbortController();
   let calls = 0;
   let mayClean = !failCleanup;
@@ -50,7 +51,9 @@ else { if(readFileSync('capture', 'utf8') !== 'recording bytes') throw Error('wr
   const provider = new TsharkCaptureProvider(
     {
       ...process.env,
-      REA_TSHARK_COMMAND: configuredCommand,
+      ...(mode === "path"
+        ? { PATH: directory, REA_TSHARK_COMMAND: undefined }
+        : { REA_TSHARK_COMMAND: configuredCommand }),
       REA_TSHARK_PRLIMIT_COMMAND: configuredCommand,
     },
     async (input) => {
@@ -409,6 +412,67 @@ it("refuses unsupported hosts before launching or allocating a workspace", async
   });
 });
 
+it("selects TShark from PATH with the shared rule and records the selection", async () => {
+  const f = await fixture("path");
+  const result = await f.service.inspect({ path: f.path, fields: ["ip.addr"] });
+  if (!result.ok) throw result.error;
+  expect(result.value.normalized_result).toMatchObject({
+    tool: {
+      configured_path: join(f.directory, "tshark"),
+      selection_source: "path",
+      path: join(f.directory, "producer.mjs"),
+    },
+  });
+});
+
+it.each([
+  [
+    "bad-version",
+    "Packet capture inspection currently requires Wireshark 4.x tools",
+  ],
+  [
+    "foreign-version",
+    "Expected TShark 4.x; inspect the selected installation.",
+  ],
+] as const)(
+  "refuses an unadmitted version banner before dissection: %s",
+  async (mode, reason) => {
+    const f = await fixture(mode);
+    const result = await f.service.inspect({
+      path: f.path,
+      fields: ["ip.addr"],
+    });
+    if (result.ok) throw new Error("Expected version refusal");
+    expect(result.error).toMatchObject({
+      _tag: "AnalysisCapabilityUnavailableError",
+      reason: expect.stringContaining(reason),
+    });
+    expect(f.calls()).toBe(1);
+  },
+);
+
+it("refuses a relative REA_TSHARK_COMMAND instead of searching PATH", async () => {
+  const provider = new TsharkCaptureProvider(
+    { REA_TSHARK_COMMAND: "tshark", PATH: "/usr/bin" },
+    async () => {
+      throw new Error("Must not launch");
+    },
+    async () => {
+      throw new Error("Must not allocate");
+    },
+    "linux",
+  );
+  const result = await new PacketCaptureService(provider).inspect({
+    path: "/recording.pcap",
+    fields: ["ip.addr"],
+  });
+  if (result.ok) throw new Error("Expected configuration refusal");
+  expect(result.error).toMatchObject({
+    _tag: "AnalysisCapabilityUnavailableError",
+    reason: "REA_TSHARK_COMMAND must be an absolute path to the tshark binary",
+  });
+});
+
 it("preserves complete Evidence when aborted during post-run integrity checks", async () => {
   const f = await fixture("post-run-abort");
   const result = await f.service.inspect(
@@ -436,6 +500,7 @@ it("preserves configured symlink paths separately from resolved tool identities"
   expect(result.value.normalized_result).toMatchObject({
     tool: {
       configured_path: join(f.directory, "configured-tool"),
+      selection_source: "environment",
       path: join(f.directory, "producer.mjs"),
     },
     resource_limiter: {

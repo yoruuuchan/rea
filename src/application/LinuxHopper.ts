@@ -31,6 +31,16 @@ import {
 
 /** Package-manager output retained per stream without stopping the command. */
 const PACKAGE_MANAGER_OUTPUT_BYTES = 64 * 1024;
+/**
+ * The only host architecture the published Linux packages declare: `dpkg-deb`
+ * reports `Architecture: amd64`, the RPM lead is `x86_64`, and `.PKGINFO` has
+ * `arch = x86_64`.
+ */
+const SUPPORTED_RELEASE_ARCHITECTURE: NodeJS.Architecture = "x64";
+
+/** Hosts the automated Linux Hopper installer supports, for remediation text. */
+export const LINUX_HOPPER_SETUP_HOSTS =
+  "an x86_64 host running Ubuntu 24.04+, Fedora 41+, Nobara 44+, Arch Linux, CachyOS, or Omarchy";
 
 /** Package mutations disclosed before a Linux Hopper installation. */
 export interface LinuxHopperInstallDisclosure {
@@ -77,7 +87,8 @@ interface LinuxDistributionIdentity {
 /**
  * Parsed Linux distribution information used for package selection.
  *
- * `hopperSetupSupported` is the automated Hopper installer's tested list. It is
+ * `hopperSetupSupported` is the automated Hopper installer's tested list,
+ * restricted to hosts whose architecture matches the pinned package. It is
  * narrower than the hosts where REA itself runs, which {@link supportsReaHost}
  * answers from the package family.
  */
@@ -250,8 +261,14 @@ export type LinuxHopperLauncherStatus =
   | "unsupported_hopper_build"
   | "cleanup_failed";
 
-/** Parse an os-release document without executing its shell syntax. */
-export const parseLinuxDistribution = (text: string): LinuxDistribution => {
+/**
+ * Parse an os-release document without executing its shell syntax, and
+ * classify automated Hopper setup for the host architecture.
+ */
+export const parseLinuxDistribution = (
+  text: string,
+  architecture: NodeJS.Architecture,
+): LinuxDistribution => {
   const fields = new Map<string, string>();
   for (const line of text.split("\n")) {
     const match = /^([A-Z_]+)=(.*)$/u.exec(line.trim());
@@ -273,6 +290,7 @@ export const parseLinuxDistribution = (text: string): LinuxDistribution => {
   const packageFamily = packageFamilyFor(id, fields.get("ID_LIKE"));
   const hopperSetupSupported =
     packageFamily !== undefined &&
+    architecture === SUPPORTED_RELEASE_ARCHITECTURE &&
     (id === "arch" ||
       id === "cachyos" ||
       (id === "omarchy" && packageFamily === "arch") ||
@@ -288,12 +306,15 @@ export const parseLinuxDistribution = (text: string): LinuxDistribution => {
     : { ...identity, packageFamily, hopperSetupSupported: false };
 };
 
-/** Read and classify the current Linux distribution. */
-export const readLinuxDistribution = async (): Promise<
-  LinuxDistribution | undefined
-> => {
+/** Read and classify the current Linux distribution on a host architecture. */
+export const readLinuxDistribution = async (
+  architecture: NodeJS.Architecture,
+): Promise<LinuxDistribution | undefined> => {
   try {
-    return parseLinuxDistribution(await readFile("/etc/os-release", "utf8"));
+    return parseLinuxDistribution(
+      await readFile("/etc/os-release", "utf8"),
+      architecture,
+    );
   } catch (cause: unknown) {
     // best-effort cleanup: optional host probing; unknown distribution means unsupported.
     void cause;
@@ -303,7 +324,7 @@ export const readLinuxDistribution = async (): Promise<
 
 /** Download, verify, install, and read back the official Hopper Linux package. */
 export const installLinuxHopper = async (
-  host: LinuxHopperInstallHost = systemLinuxHopperInstallHost(process.env),
+  host: LinuxHopperInstallHost,
   options: {
     readonly signal?: AbortSignal;
   } = {},
@@ -334,7 +355,12 @@ export const installLinuxHopper = async (
       const archiveDownload = await host.download(release.filename, options);
       if (!archiveDownload.ok) return { status: "failed", reason: "download" };
       temporary = await host.createTemporaryDirectory();
-      const archive = join(temporary, `hopper.${distribution.packageFamily}`);
+      // Linux package paths stay POSIX even when this host is exercised from
+      // a non-Linux test process.
+      const archive = posix.join(
+        temporary,
+        `hopper.${distribution.packageFamily}`,
+      );
       await host.writeArchive(archive, archiveDownload.bytes);
       const verified = await host.verifyArchive(
         distribution.packageFamily,
@@ -431,7 +457,7 @@ export const installLinuxHopper = async (
 
 /** Canonical launcher path for a legacy user-local Linux Hopper installation. */
 export const linuxHopperLauncherPath = (home: string): string =>
-  join(home, ".local/share/rea/hopper/bin/Hopper");
+  posix.join(home, ".local/share/rea/hopper/bin/Hopper");
 
 /** REA's managed Linux install path, preferred when no explicit launcher is set. */
 export const REA_MANAGED_LINUX_HOPPER_LAUNCHER = "/opt/hopper/bin/Hopper";
@@ -451,13 +477,18 @@ export const linuxHopperLauncherCandidates = (
   ...systemLinuxHopperLauncherCandidates,
 ];
 
-/** Compose package-manager and linker checks from the selected caller environment. */
+/**
+ * Compose package-manager and linker checks from the selected caller
+ * environment. The distribution comes from the caller's host-fact owner, so
+ * installation follows the same architecture classification as the plan.
+ */
 export const systemLinuxHopperInstallHost = (
   environment: Readonly<NodeJS.ProcessEnv>,
+  distribution: LinuxHopperInstallHost["distribution"],
 ): LinuxHopperInstallHost => {
   const publisher = systemLinuxHopperPublisher(environment);
   return {
-    distribution: readLinuxDistribution,
+    distribution,
     release: (family, signal) => publisher.currentRelease(family, signal),
     download: downloadHopperPackage,
     createTemporaryDirectory: () => mkdtemp(join(tmpdir(), "rea-hopper-")),
@@ -508,7 +539,9 @@ export const systemLinuxHopperPublisher = (
 ): LinuxHopperPublisher =>
   new LinuxHopperPublisher(
     environment,
-    async () => (await readLinuxDistribution())?.packageFamily,
+    // Only the package family is read here; it does not depend on the
+    // architecture that gates automated setup.
+    async () => (await readLinuxDistribution(process.arch))?.packageFamily,
   );
 
 /** Read-only authentication; persistent package retention belongs to approved setup. */

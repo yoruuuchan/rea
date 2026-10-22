@@ -144,21 +144,35 @@ class RecordingLinuxHost implements LinuxHopperInstallHost {
   };
 }
 
+const TESTED_DISTRIBUTIONS = [
+  ['ID=ubuntu\nVERSION_ID="24.04"\n', "deb"],
+  ["ID=fedora\nVERSION_ID=41\n", "rpm"],
+  ['ID=nobara\nVERSION_ID="44"\nID_LIKE="rhel centos fedora"\n', "rpm"],
+  ["ID=arch\n", "arch"],
+  ["ID=cachyos\nID_LIKE=arch\n", "arch"],
+  ['ID=omarchy\nID_LIKE=arch\nVERSION_ID="4.0.4"\n', "arch"],
+] as const;
+
 describe("Linux Hopper host classification", () => {
-  it.each([
-    ['ID=ubuntu\nVERSION_ID="24.04"\n', "deb"],
-    ["ID=fedora\nVERSION_ID=41\n", "rpm"],
-    ['ID=nobara\nVERSION_ID="44"\nID_LIKE="rhel centos fedora"\n', "rpm"],
-    ["ID=arch\n", "arch"],
-    ["ID=cachyos\nID_LIKE=arch\n", "arch"],
-    ['ID=omarchy\nID_LIKE=arch\nVERSION_ID="4.0.4"\n', "arch"],
-  ] as const)(
+  it.each(TESTED_DISTRIBUTIONS)(
     "accepts an explicitly supported distribution",
     (document, family) => {
-      expect(parseLinuxDistribution(document)).toMatchObject({
+      expect(parseLinuxDistribution(document, "x64")).toMatchObject({
         packageFamily: family,
         hopperSetupSupported: true,
       });
+    },
+  );
+
+  it.each(TESTED_DISTRIBUTIONS)(
+    "keeps the x86_64-only Hopper package off an arm64 host running %s",
+    (document, family) => {
+      const distribution = parseLinuxDistribution(document, "arm64");
+      expect(distribution).toMatchObject({
+        packageFamily: family,
+        hopperSetupSupported: false,
+      });
+      expect(supportsReaHost(distribution)).toBe(true);
     },
   );
 
@@ -193,7 +207,9 @@ describe("Linux Hopper host classification", () => {
   ])(
     "rejects vendor/version combinations without a tested Hopper installer",
     (document) => {
-      expect(parseLinuxDistribution(document).hopperSetupSupported).toBe(false);
+      expect(parseLinuxDistribution(document, "x64").hopperSetupSupported).toBe(
+        false,
+      );
     },
   );
 
@@ -207,14 +223,16 @@ describe("Linux Hopper host classification", () => {
   ])(
     "hosts REA on a distribution Hopper has no tested package for: %s",
     (document) => {
-      const distribution = parseLinuxDistribution(document);
+      const distribution = parseLinuxDistribution(document, "x64");
       expect(distribution.hopperSetupSupported).toBe(false);
       expect(supportsReaHost(distribution)).toBe(true);
     },
   );
 
   it("withholds host support from a distribution with no package family", () => {
-    expect(supportsReaHost(parseLinuxDistribution("ID=nixos\n"))).toBe(false);
+    expect(supportsReaHost(parseLinuxDistribution("ID=nixos\n", "x64"))).toBe(
+      false,
+    );
     expect(supportsReaHost(undefined)).toBe(false);
   });
 });
@@ -361,11 +379,14 @@ describe("Linux Hopper cleanup and failure details", () => {
     const directory = await createTestTempDirectory("rea-hopper-status-");
     const launcher = join(directory, "Hopper");
     await writeFile(launcher, "fixture launcher");
-    const host = systemLinuxHopperInstallHost({
-      ...process.env,
-      HOME: directory,
-      XDG_CACHE_HOME: join(directory, "cache"),
-    });
+    const host = systemLinuxHopperInstallHost(
+      {
+        ...process.env,
+        HOME: directory,
+        XDG_CACHE_HOME: join(directory, "cache"),
+      },
+      async () => undefined,
+    );
     const command = vi
       .spyOn(nativeCommands, "execFileOutput")
       .mockResolvedValue({

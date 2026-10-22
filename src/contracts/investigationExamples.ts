@@ -6,11 +6,19 @@ import { parseProcessCapture } from "../domain/process/processCaptureParsing.js"
 import { FUNCTION_COMPARISON_EXAMPLE } from "./functionComparisonExample.js";
 import { EMPTY_PROCESS_CAPTURE_EXAMPLE } from "../domain/process/processCaptureExample.js";
 
+import { parseFunctionEvidence } from "../domain/functionDossierEvidence.js";
 import { compareFunctions } from "../domain/functionComparison.js";
-const comparison = compareFunctions(
-  FUNCTION_COMPARISON_EXAMPLE.left,
-  FUNCTION_COMPARISON_EXAMPLE.right,
-);
+const left = parseFunctionEvidence(FUNCTION_COMPARISON_EXAMPLE.left, {
+  operation: "compare_functions",
+  path: ["left"],
+});
+if (!left.ok) throw left.error;
+const right = parseFunctionEvidence(FUNCTION_COMPARISON_EXAMPLE.right, {
+  operation: "compare_functions",
+  path: ["right"],
+});
+if (!right.ok) throw right.error;
+const comparison = compareFunctions(left.value, right.value);
 
 export const FUNCTION_COMPARISON_EVIDENCE = createEvidence(
   undefined,
@@ -19,16 +27,16 @@ export const FUNCTION_COMPARISON_EVIDENCE = createEvidence(
     predicateType: "rea.function-comparison",
     operation: "compare_functions",
     parameters: {
-      left_evidence_id: FUNCTION_COMPARISON_EXAMPLE.left.evidence_id,
-      right_evidence_id: FUNCTION_COMPARISON_EXAMPLE.right.evidence_id,
+      left_evidence_id: left.value.evidence.evidence_id,
+      right_evidence_id: right.value.evidence.evidence_id,
     },
     result: jsonValueSchema.parse(comparison),
     confidence: "derived",
     authority: "analyst-inference",
     limitations: comparison.limitations,
     evidenceLinks: [
-      FUNCTION_COMPARISON_EXAMPLE.left.evidence_id,
-      FUNCTION_COMPARISON_EXAMPLE.right.evidence_id,
+      left.value.evidence.evidence_id,
+      right.value.evidence.evidence_id,
     ],
   },
 );

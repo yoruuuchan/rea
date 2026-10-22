@@ -6,8 +6,10 @@ import type {
   ArtifactNode,
   ArtifactOccurrence,
 } from "./artifactGraph.js";
+import { AnalysisInputError } from "./analysisErrorCore.js";
 import { evidenceSchema } from "./evidence.js";
 import {
+  ArtifactInventoryCarrierError,
   hasCompleteInventoryCoverage,
   parseArtifactInventoryEvidence,
   type InventorySet,
@@ -95,13 +97,26 @@ export type ArtifactComparisonResult = z.infer<
 >;
 type ArtifactChange = z.infer<typeof artifactChangeSchema>;
 
+const comparisonInventory = (input: unknown, side: "left" | "right") => {
+  try {
+    return parseArtifactInventoryEvidence(input);
+  } catch (cause: unknown) {
+    if (!(cause instanceof ArtifactInventoryCarrierError)) throw cause;
+    throw new AnalysisInputError(
+      "compare_artifacts",
+      { cause, userMessage: cause.message },
+      [{ path: [side], reason: "invalid_value", message: cause.message }],
+    );
+  }
+};
+
 /** Compare complete inventory evidence without treating missing evidence as equality. */
 export const compareArtifacts = (
   leftEvidence: unknown,
   rightEvidence: unknown,
 ): ArtifactComparisonResult => {
-  const left = parseArtifactInventoryEvidence(leftEvidence);
-  const right = parseArtifactInventoryEvidence(rightEvidence);
+  const left = comparisonInventory(leftEvidence, "left");
+  const right = comparisonInventory(rightEvidence, "right");
   const leftComplete = left.inventory.complete;
   const rightComplete = right.inventory.complete;
   const sameScope =

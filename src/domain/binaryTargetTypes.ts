@@ -6,6 +6,7 @@ export const BINARY_ARCHITECTURES = [
   "x86_64",
   "arm",
   "arm64",
+  "arm64_32",
   "mips",
   "6502",
   "riscv",
@@ -63,7 +64,7 @@ export const isElfMetadataArchitecture = (
 /** Recognized family with no ELF metadata member; the header alone is the fact. */
 export type HeaderArchitecture = Exclude<
   BinaryArchitecture,
-  ElfMetadataArchitecture | RawOnlyArchitecture | "hexagon"
+  ElfMetadataArchitecture | RawOnlyArchitecture | "hexagon" | "arm64_32"
 >;
 
 /** Raw ELF facts; family recognition does not establish ISA or ABI support. */
@@ -181,6 +182,15 @@ export type BinaryTarget =
       readonly format: "elf";
       readonly architecture: "hexagon";
       readonly availableArchitectures: readonly "hexagon"[];
+      readonly executableRole?: never;
+      readonly managed?: never;
+    })
+  | (BinaryTargetIdentity & {
+      readonly kind: "executable";
+      readonly format: "mach-o";
+      readonly architecture: "arm64_32";
+      readonly availableArchitectures: readonly "arm64_32"[];
+      readonly universalSlice?: never;
       readonly executableRole?: never;
       readonly managed?: never;
     })

@@ -381,3 +381,16 @@ it("matches a CLI-selected ./ module exactly against its glue reference", () => 
     },
   ]);
 });
+
+it("tests long multi-line glue literals for a .wasm suffix in linear time", () => {
+  const value = `${".wasm#".repeat(32_000)}\nend`;
+  const started = performance.now();
+  expect(
+    associateWasmGlue(`const s = ${JSON.stringify(value)};`, "/glue.js", []),
+  ).toEqual({ parse_status: "complete", references: [] });
+  expect(performance.now() - started).toBeLessThan(1_000);
+  expect(
+    associateWasmGlue("const s = `first\nmodule.wasm?v=1`;", "/glue.js", [])
+      .references,
+  ).toMatchObject([{ value: "first\nmodule.wasm?v=1", line: 1 }]);
+});

@@ -147,30 +147,23 @@ describe("derived MCP operation boundary", () => {
     ).toBe(true);
   });
 
-  it("projects synchronous computation failures into a typed result", async () => {
-    const result = await runDerivedOperation(
-      context(new AbortController()),
-      "compare_artifacts",
-      () => {
-        throw new TypeError("malformed comparison evidence");
-      },
-    );
-
-    expect(result).toMatchObject({
-      ok: false,
-      error: {
-        _tag: "AnalysisInputError",
-        operation: "compare_artifacts",
-        issues: [
-          {
-            path: [],
-            reason: "invalid_value",
-            message: "malformed comparison evidence",
+  it.each([
+    new TypeError("internal type failure"),
+    new Error("internal computation failure"),
+  ])(
+    "preserves an untagged computation failure without calling it invalid input: $name",
+    async (cause) => {
+      await expect(
+        runDerivedOperation(
+          context(new AbortController()),
+          "compare_artifacts",
+          () => {
+            throw cause;
           },
-        ],
-      },
-    });
-  });
+        ),
+      ).rejects.toBe(cause);
+    },
+  );
 
   it("preserves a tagged integrity failure instead of replacing it with invalid input", async () => {
     const failure = new EvidenceIntegrityError(

@@ -9,6 +9,67 @@ const resultValue = (body: string) =>
     "result",
   ).returnSites[0]?.value;
 
+it.each([
+  ["field = shared;", "declare field: { mode: string };", "new Derived()"],
+  [
+    "get field() { return shared; }",
+    "declare field: { mode: string };",
+    "new Derived()",
+  ],
+  [
+    "static field = shared;",
+    "declare static field: { mode: string };",
+    "Derived",
+  ],
+  [
+    "static get field() { return shared; }",
+    "declare static field: { mode: string };",
+    "Derived",
+  ],
+])(
+  "follows inherited references past erased class fields: %s",
+  (base, declaration, receiver) => {
+    expect(
+      resultValue(`
+    const shared = { mode: "initial" };
+    class Base { ${base} }
+    class Derived extends Base { ${declaration} }
+    ${receiver}.field.mode = "updated";
+    return shared.mode;
+  `)?.status,
+    ).toBe("unknown");
+  },
+);
+
+it.each(["field;", "field = { mode: 'other' };"])(
+  "preserves a real derived field's shadowing: %s",
+  (field) => {
+    expect(
+      resultValue(`
+      const shared = { mode: "initial" };
+      class Base { field = shared; }
+      class Derived extends Base { ${field} }
+      const instance = new Derived();
+      if (instance.field) instance.field.mode = "updated";
+      return shared.mode;
+    `),
+    ).toEqual({ status: "literal", value: "initial" });
+  },
+);
+
+it("follows inherited references past an abstract field declaration", () => {
+  expect(
+    resultValue(`
+    const shared = { mode: "initial" };
+    class Base { field = shared; }
+    abstract class Derived extends Base { abstract field: { mode: string }; }
+    const Constructor = Derived as unknown as new () => Base;
+    new Constructor().field.mode = "updated";
+    return shared.mode;
+  `)?.status,
+  ).toBe("unknown");
+});
+
 const mutations = [
   'const shared = { mode: "initial" }; const options = { [key]: shared }; options.foo.mode = "updated"; return shared.mode;',
   'const shared = { mode: "initial" }; const original = [shared]; const copy = [...original]; copy[0].mode = "updated"; return shared.mode;',

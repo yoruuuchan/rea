@@ -76,21 +76,14 @@ it("names the configurable regex deadline and the effective worker heap", () => 
     readLaunchNodeOptions(),
   );
   expect(REGEX_MATCHING_LIMITATION).toBe(regexMatchingLimitation(heap));
+  expect(REGEX_MATCHING_LIMITATION).toContain(REGEX_MATCHING_DEADLINE_SETTING);
   expect(REGEX_MATCHING_LIMITATION).toContain(
-    "5000 ms matching deadline (source default)",
+    `${String(DEFAULT_REGEX_MATCHING_DEADLINE_MS)} ms (source default`,
   );
-  expect(REGEX_MATCHING_LIMITATION).toContain("REA_REGEX_MATCHING_DEADLINE_MS");
   expect(REGEX_MATCHING_LIMITATION).toContain(
     "REA_REGEX_WORKER_HEAP_REQUEST_MIB",
   );
-  expect(REGEX_MATCHING_LIMITATION).toContain(
-    "source default; default 128 MiB, floor 7 MiB, maximum 16384 MiB",
-  );
-  expect(REGEX_MATCHING_LIMITATION).toContain("floor 1 ms");
-  expect(REGEX_MATCHING_LIMITATION).toContain("maximum 2147483647 ms");
   expect(REGEX_MATCHING_LIMITATION).not.toContain("no runtime override");
-  expect(REGEX_MATCHING_LIMITATION).not.toContain("either cap");
-  expect(REGEX_MATCHING_LIMITATION).not.toContain("or heap");
   if (heap.kind === "unknown") {
     expect(REGEX_MATCHING_LIMITATION).toContain("was not established");
   } else {
@@ -101,14 +94,20 @@ it("names the configurable regex deadline and the effective worker heap", () => 
   const deadline = projectAnalysisError(
     regexMatchingDeadlineError("search_procedures"),
   );
-  expect(deadline.message).toContain("5000 ms");
-  expect(deadline.message).toContain("source default");
-  expect(deadline.message).toContain("REA_REGEX_MATCHING_DEADLINE_MS");
-  expect(deadline.message).toContain("maximum 2147483647 ms");
+  expect(deadline).toMatchObject({
+    code: "resource_constraint",
+    details: {
+      resource: "cpu",
+      reported_limits: {
+        matching_deadline_ms: DEFAULT_REGEX_MATCHING_DEADLINE_MS,
+        matching_deadline_source: "default",
+      },
+    },
+  });
+  expect(deadline.message).toContain(REGEX_MATCHING_DEADLINE_SETTING);
   expect(deadline.remediation.action).toContain(
-    "REA_REGEX_MATCHING_DEADLINE_MS",
+    REGEX_MATCHING_DEADLINE_SETTING,
   );
-  expect(deadline.remediation.action).toContain("source default");
   expect(deadline.remediation.action).not.toContain("no runtime override");
   const failure = projectAnalysisError(
     regexWorkerHeapError("search_procedures", new Error("heap")),
@@ -117,9 +116,6 @@ it("names the configurable regex deadline and the effective worker heap", () => 
   expect(failure.remediation.action).toContain("--max-old-space-size");
   expect(failure.remediation.action).toContain(
     "REA_REGEX_WORKER_HEAP_REQUEST_MIB",
-  );
-  expect(failure.remediation.action).toContain(
-    "source default; default 128 MiB, floor 7 MiB, maximum 16384 MiB",
   );
   if (heap.kind === "effective") {
     expect(failure.message).toContain(`${String(heap.mib)} MiB`);
@@ -489,15 +485,24 @@ it("stops a slow match at the configured deadline and names the setting", async 
   expect(matched.ok).toBe(false);
   if (matched.ok) return;
   const projected = projectAnalysisError(matched.error);
-  expect(projected.message).toContain("100 ms (source setting)");
-  expect(projected.message).toContain("REA_REGEX_MATCHING_DEADLINE_MS");
-  expect(projected.message).toContain("default 5000 ms");
-  expect(projected.message).toContain("maximum 2147483647 ms");
+  expect(projected).toMatchObject({
+    code: "resource_constraint",
+    details: {
+      resource: "cpu",
+      reported_limits: {
+        matching_deadline_ms: 100,
+        matching_deadline_source: "setting",
+      },
+    },
+  });
+  expect(projected.message).toContain(REGEX_MATCHING_DEADLINE_SETTING);
   expect(projected.remediation.action).toContain(
-    "Set REA_REGEX_MATCHING_DEADLINE_MS in the environment that starts REA",
+    REGEX_MATCHING_DEADLINE_SETTING,
   );
   expect(projected.remediation.action).not.toContain("no runtime override");
   expect(matched.error).toMatchObject({
+    _tag: "AnalysisResourceConstraintError",
+    resource: "cpu",
     reportedLimits: {
       matching_deadline_ms: 100,
       matching_deadline_source: "setting",

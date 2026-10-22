@@ -367,6 +367,119 @@ describe("bundle comparison MCP integration", () => {
   });
 });
 
+describe("bundle comparison record selections", () => {
+  it.each([
+    {
+      label: "missing left evidence",
+      pairs: (
+        _left: readonly ReturnType<typeof sourceEvidence>[],
+        right: readonly ReturnType<typeof sourceEvidence>[],
+      ) => [
+        {
+          left_evidence_id: sourceEvidence("absent-left").evidence_id,
+          right_evidence_id: right[0]!.evidence_id,
+        },
+      ],
+      path: ["record_pairs", 0, "left_evidence_id"],
+      message: "missing left evidence",
+    },
+    {
+      label: "missing right evidence",
+      pairs: (
+        left: readonly ReturnType<typeof sourceEvidence>[],
+        _right: readonly ReturnType<typeof sourceEvidence>[],
+      ) => [
+        {
+          left_evidence_id: left[0]!.evidence_id,
+          right_evidence_id: sourceEvidence("absent-right").evidence_id,
+        },
+      ],
+      path: ["record_pairs", 0, "right_evidence_id"],
+      message: "missing right evidence",
+    },
+    {
+      label: "duplicate left evidence",
+      pairs: (
+        left: readonly ReturnType<typeof sourceEvidence>[],
+        right: readonly ReturnType<typeof sourceEvidence>[],
+      ) => [
+        {
+          left_evidence_id: left[0]!.evidence_id,
+          right_evidence_id: right[0]!.evidence_id,
+        },
+        {
+          left_evidence_id: left[0]!.evidence_id,
+          right_evidence_id: right[1]!.evidence_id,
+        },
+      ],
+      path: ["record_pairs", 1, "left_evidence_id"],
+      message: "one-to-one",
+    },
+    {
+      label: "duplicate right evidence",
+      pairs: (
+        left: readonly ReturnType<typeof sourceEvidence>[],
+        right: readonly ReturnType<typeof sourceEvidence>[],
+      ) => [
+        {
+          left_evidence_id: left[0]!.evidence_id,
+          right_evidence_id: right[0]!.evidence_id,
+        },
+        {
+          left_evidence_id: left[1]!.evidence_id,
+          right_evidence_id: right[0]!.evidence_id,
+        },
+      ],
+      path: ["record_pairs", 1, "right_evidence_id"],
+      message: "one-to-one",
+    },
+  ])(
+    "reports the precise path for $label without publishing Evidence",
+    async ({ pairs, path, message }) => {
+      const root = await createTestTempDirectory(
+        "rea-bundle-pairs-invalid-mcp-",
+      );
+      roots.push(root);
+      const left = [sourceEvidence("left-1"), sourceEvidence("left-2")];
+      const right = [sourceEvidence("right-1"), sourceEvidence("right-2")];
+      const leftPath = join(root, "left.json");
+      const rightPath = join(root, "right.json");
+      await Promise.all([
+        writeFile(
+          leftPath,
+          serializeEvidenceBundle(createEvidenceBundle(left)),
+        ),
+        writeFile(
+          rightPath,
+          serializeEvidenceBundle(createEvidenceBundle(right)),
+        ),
+      ]);
+      const connected = await connect();
+      try {
+        const result = await connected.client.callTool({
+          name: "compare_bundles",
+          arguments: {
+            left_bundle_path: leftPath,
+            right_bundle_path: rightPath,
+            record_pairs: pairs(left, right),
+          },
+        });
+        expect(parseMcpToolError(result).error).toMatchObject({
+          code: "invalid_request",
+          category: "invalid_input",
+          message: expect.stringContaining(message),
+          details: {
+            issues: [expect.objectContaining({ path })],
+          },
+        });
+        expect(connected.session.exportEvidenceBundle().records).toEqual([]);
+      } finally {
+        await connected.close();
+      }
+    },
+  );
+});
+
 const connect = async () => {
   const session = createTestBinarySession(() => ({
     health: () => Promise.resolve(),
@@ -381,6 +494,7 @@ const connect = async () => {
   await client.connect(clientTransport);
   return {
     client,
+    session,
     close: async () => {
       await Promise.allSettled([
         client.close(),

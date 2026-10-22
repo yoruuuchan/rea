@@ -1,3 +1,6 @@
+import { artifactInventoryResultSchema } from "./artifactGraph.js";
+import { artifactManifestId } from "./artifactIdentity.js";
+import { EvidenceIntegrityError } from "./evidenceErrors.js";
 import { freezeJsonSnapshot } from "./immutableJson.js";
 import { expect, it } from "vitest";
 import { z } from "zod";
@@ -5,6 +8,8 @@ import { z } from "zod";
 import { ARTIFACT_COMPARISON_EXAMPLE } from "../contracts/artifactComparisonExample.js";
 import { createArtifactInspection } from "./artifactInspection.js";
 import {
+  ArtifactInventoryValidationError,
+  ArtifactInventoryCarrierError,
   parseArtifactInventoryEvidence,
   parseArtifactInspectionInventoryResult,
 } from "./artifactInventoryEvidence.js";
@@ -45,9 +50,17 @@ it("rejects an inspection carrier whose Evidence subject disagrees with its nest
     ...target,
     digest: { sha256: "a".repeat(64) },
   });
-  expect(() => parseArtifactInventoryEvidence(carrier)).toThrow(
-    "Artifact inspection Evidence subject does not match its root manifest",
-  );
+  try {
+    parseArtifactInventoryEvidence(carrier);
+    throw new Error("Expected the mismatched subject to be rejected");
+  } catch (cause: unknown) {
+    expect(cause).toBeInstanceOf(EvidenceIntegrityError);
+    expect(cause).toMatchObject({
+      message:
+        "Artifact inspection Evidence subject does not match its root manifest",
+      cause: expect.any(ArtifactInventoryValidationError),
+    });
+  }
 });
 
 it("rejects an inspection declaration whose root manifest disagrees with its nested inventory", () => {
@@ -112,3 +125,57 @@ it.each([0, 1])(
     );
   },
 );
+
+it("keeps a commitment failure discovered across individually incomplete pages as Evidence integrity", () => {
+  const complete = artifactInventoryResultSchema.parse(
+    inventoryEvidence.normalized_result,
+  );
+  const graphDigest = "f".repeat(64);
+  const manifest = {
+    ...complete.manifest,
+    graph_sha256: graphDigest,
+    manifest_id: artifactManifestId(
+      complete.manifest.root_artifact_id,
+      graphDigest,
+    ),
+  };
+  const page = (includeNodes: boolean) =>
+    createEvidence(
+      {
+        path: target.local_path,
+        sha256: target.digest.sha256,
+        format: target.format,
+      },
+      inventoryEvidence.provider,
+      {
+        operation: "inventory_artifact",
+        parameters: {},
+        confidence: "observed",
+        authority: "shipped-artifact",
+        result: jsonValueSchema.parse({
+          ...complete,
+          manifest,
+          nodes: includeNodes ? complete.nodes : [],
+          occurrences: includeNodes ? [] : complete.occurrences,
+        }),
+      },
+    );
+  const nodes = page(true);
+  const occurrences = page(false);
+  expect(parseArtifactInventoryEvidence(nodes).inventory.complete).toBe(false);
+  expect(parseArtifactInventoryEvidence(occurrences).inventory.complete).toBe(
+    false,
+  );
+  expect(() => parseArtifactInventoryEvidence([nodes, occurrences])).toThrow(
+    EvidenceIntegrityError,
+  );
+});
+
+it("reports incompatible independently valid manifests as caller composition", () => {
+  expect(() =>
+    parseArtifactInventoryEvidence([
+      ARTIFACT_COMPARISON_EXAMPLE.left,
+      ARTIFACT_COMPARISON_EXAMPLE.right,
+    ]),
+  ).toThrow(ArtifactInventoryCarrierError);
+});

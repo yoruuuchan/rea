@@ -4,16 +4,19 @@ import type {
 } from "./binaryTargetTypes.js";
 import { err, ok, type Result } from "./result.js";
 
+/** CPU families an ELF e_machine can name; arm64_32 is a Mach-O-only CPU type. */
+type ElfArchitecture = Exclude<
+  BinaryArchitecture,
+  RawOnlyArchitecture | "arm64_32"
+>;
+
 export interface ElfFixedHeader {
   readonly elfClass: 32 | 64;
   readonly byteOrder: "little" | "big";
   readonly headerSize: number;
   readonly machine: number;
   readonly osAbi: number;
-  readonly architecture: Exclude<
-    BinaryArchitecture,
-    RawOnlyArchitecture
-  > | null;
+  readonly architecture: ElfArchitecture | null;
 }
 
 /**
@@ -72,7 +75,7 @@ export const readElfFixedHeader = (
 
 export const elfArchitecture = (
   machine: number,
-): Exclude<BinaryArchitecture, RawOnlyArchitecture> | undefined => {
+): ElfArchitecture | undefined => {
   switch (machine) {
     case 3:
       return "x86";

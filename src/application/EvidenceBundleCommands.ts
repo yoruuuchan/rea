@@ -4,7 +4,6 @@ import { requireAuthenticationHeadroom } from "./JsonAuthenticationHeadroom.js";
 
 import {
   EvidenceFileError,
-  EvidenceIntegrityError,
   type PublishedEvidenceFile,
 } from "../domain/evidenceErrors.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
@@ -256,15 +255,7 @@ export const compareEvidenceBundlesCommand = async (input: {
   ]);
   if (!left.ok) return left;
   if (!right.ok) return right;
-  try {
-    return ok(jsonValueSchema.parse(compareBundles(left.value, right.value)));
-  } catch (cause: unknown) {
-    return err(
-      new EvidenceIntegrityError("Evidence bundle comparison failed", {
-        cause,
-      }),
-    );
-  }
+  return ok(jsonValueSchema.parse(compareBundles(left.value, right.value)));
 };
 
 const projectWrite = (

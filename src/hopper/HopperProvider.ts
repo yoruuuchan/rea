@@ -16,10 +16,7 @@ import type {
 } from "../application/AnalysisProvider.js";
 import type { AnalysisProfileCommitment } from "../domain/analysisProfile.js";
 import type { AppConfig } from "../config/types.js";
-import {
-  isElfMetadataArchitecture,
-  type BinaryTarget,
-} from "../domain/binaryTargetTypes.js";
+import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import type { Logger } from "pino";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
@@ -41,6 +38,7 @@ import { HopperApplicationLauncher } from "./BridgeLauncher.js";
 import {
   hopperDeclinedArchitectureReason,
   hopperLoaderArgsForTarget,
+  isHopperDeclinedArchitecture,
   resolveHopperAnalysisProfile,
 } from "./HopperAnalysisProfile.js";
 import { mapHopperFileOffset } from "./HopperFileOffset.js";
@@ -159,10 +157,7 @@ export class HopperProvider implements AnalysisProviderCandidate {
         reason: null,
         diagnostics,
       };
-    if (
-      isElfMetadataArchitecture(target.architecture) ||
-      target.architecture === "hexagon"
-    )
+    if (isHopperDeclinedArchitecture(target.architecture))
       return {
         status: "unsupported",
         code: "architecture_unsupported",

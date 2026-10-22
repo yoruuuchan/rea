@@ -14,6 +14,9 @@ from typing import Any, Optional, Protocol, Sequence
 BAD_ADDRESSES = (-1, 0xFFFFFFFFFFFFFFFF, None)
 # The native label setter truncates NSString names at this UTF-16 extent.
 HOPPER_SYMBOL_NAME_UTF16_UNITS = 1024
+# Maximum request JSON payload size in bytes, excluding its trailing LF.
+# Matches the Cutter bridge's MAX_FRAME_BYTES payload ceiling.
+MAX_REQUEST_BYTES = 16 * 1024 * 1024
 _rea_session_document = None
 _search_inventory_cache = {}
 _pseudocode_cache = {}
@@ -1060,8 +1063,22 @@ def _serve_connection(connection):
     should_stop = False
     try:
         while True:
-            line = file.readline()
+            # Bound the read itself. The payload budget excludes LF, so permit
+            # one additional byte for the delimiter while still refusing an
+            # oversized unterminated peer without waiting for EOF.
+            line = file.readline(MAX_REQUEST_BYTES + 1)
             if not line:
+                break
+            if not line.endswith(b"\n"):
+                message = (
+                    "Bridge request exceeds the %d-byte payload limit"
+                    % MAX_REQUEST_BYTES
+                    if len(line) > MAX_REQUEST_BYTES
+                    else "Incomplete bridge request frame"
+                )
+                _write_message(file, {"id": 0, "error": _safe_diagnostic(
+                    InvalidRequestError(message)
+                )})
                 break
             request_id = None
             authenticated = False

@@ -4,7 +4,7 @@ import type { BinarySessionPort } from "../application/binary/BinarySessionPort.
 import { toolContract } from "../contracts/toolContracts.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
-import { describeValidationFailure } from "../domain/evidenceBundle.js";
+import { describeValidationFailure } from "../domain/validationFailure.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
 import {
   createEvidence,

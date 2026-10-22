@@ -830,7 +830,13 @@ describe("artifact comparison fragment integrity", () => {
         [conflictingScope, ...leftFragments.slice(1)],
         rightFragments,
       ),
-    ).toThrow(/coverage declaration/u);
+    ).toThrowError(
+      expect.objectContaining({
+        _tag: "AnalysisInputError",
+        userMessage: expect.stringContaining("coverage declaration"),
+        issues: [expect.objectContaining({ path: ["left"] })],
+      }),
+    );
   }, 15_000);
 
   it("rejects non-inventory and tampered Evidence", async () => {
@@ -844,8 +850,12 @@ describe("artifact comparison fragment integrity", () => {
       parameters: {},
       result: evidence.normalized_result,
     });
-    expect(() => compareArtifacts(wrongOperation, evidence)).toThrow(
-      /inspect_artifact/u,
+    expect(() => compareArtifacts(wrongOperation, evidence)).toThrowError(
+      expect.objectContaining({
+        _tag: "AnalysisInputError",
+        userMessage: expect.stringContaining("inspect_artifact"),
+        issues: [expect.objectContaining({ path: ["left"] })],
+      }),
     );
     const mismatchedSubject = createEvidence(
       { path: root, sha256: "f".repeat(64), format: "directory" },

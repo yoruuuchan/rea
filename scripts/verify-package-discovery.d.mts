@@ -15,7 +15,8 @@ export interface SetupHostFacts {
 /**
  * Derive agent setup support from the doctor node check and automated Hopper
  * installer applicability from the facts their owners parse. Applicability is
- * undefined when its owning fact is unavailable.
+ * undefined when its owning fact is unavailable. On Linux, Hopper readiness is
+ * required only where the automated installer applies.
  */
 export function packageSetupSupport(
   checks:

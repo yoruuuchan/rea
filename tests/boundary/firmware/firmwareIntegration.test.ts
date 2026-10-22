@@ -619,6 +619,12 @@ it.each(["depth", "dependency", "link"])(
           continuation: expect.stringContaining("installs nothing"),
         },
       ]);
+    const linkLimitation = expect.stringContaining(
+      "Unblob rewrites absolute targets relative to the extraction root",
+    );
+    if (mode === "link")
+      expect(result.value.limitations).toContainEqual(linkLimitation);
+    else expect(result.value.limitations).not.toContainEqual(linkLimitation);
     if (mode === "link") {
       expect(normalized.unpublished_entries).toEqual([
         {

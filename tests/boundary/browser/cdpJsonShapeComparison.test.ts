@@ -213,6 +213,84 @@ describe("selected JSON body-shape coverage", () => {
     },
   );
 
+  it.each([
+    {
+      name: "an omitted JSON body",
+      request: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        hasPostData: true,
+      },
+    },
+    {
+      name: "an unparseable JSON body",
+      request: {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        postData: "{",
+      },
+    },
+  ])(
+    "keeps $name partial after a response shape arrives",
+    async ({ request }) => {
+      const before = captureBody("response", "[123]", request);
+      const after = captureBody("response", "[123]", request);
+      for (const capture of [before, after]) {
+        capture.completeness.attach_limited_sections = [];
+        expect(capture.completeness.unavailable_sections).toContain(
+          "json_body_shapes",
+        );
+        expect(capture.network.requests[0]?.body_shapes).toMatchObject({
+          status: "partial",
+          request: null,
+          response: { root_type: "array" },
+        });
+      }
+      expect(
+        (await compareCaptures(before, after)).dimensions.network,
+      ).toMatchObject({ status: "unknown", total_changes: 0 });
+    },
+  );
+
+  it.each([
+    { name: "a bodiless GET", request: { method: "GET", headers: {} } },
+    {
+      name: "a bodiless JSON-typed GET",
+      request: {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      },
+    },
+    {
+      name: "an omitted body without a media type",
+      request: { method: "POST", headers: {}, hasPostData: true },
+    },
+    {
+      name: "an omitted form body",
+      request: {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        hasPostData: true,
+      },
+    },
+  ])("includes the response shape for $name", async ({ request }) => {
+    const before = captureBody("response", "[123]", request);
+    const after = captureBody("response", "[123]", request);
+    for (const capture of [before, after]) {
+      capture.completeness.attach_limited_sections = [];
+      expect(capture.completeness.unavailable_sections).not.toContain(
+        "json_body_shapes",
+      );
+      expect(capture.network.requests[0]?.body_shapes).toMatchObject({
+        status: "included",
+        request: null,
+      });
+    }
+    expect(
+      (await compareCaptures(before, after)).dimensions.network,
+    ).toMatchObject({ status: "unchanged", total_changes: 0 });
+  });
+
   it("ignores shapes when either capture did not request them", async () => {
     const before = captureBody("request", "[123]");
     const after = structuredClone(before);
@@ -293,7 +371,15 @@ const compareCaptures = async (
   return webCaptureDiffSchema.parse(evidence.normalized_result);
 };
 
-const captureBody = (source: BodySource, body: string): WebPageInspection => {
+const captureBody = (
+  source: BodySource,
+  body: string,
+  request: Record<string, unknown> = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    postData: source === "request" ? body : "{}",
+  },
+): WebPageInspection => {
   const events = new CdpCaptureEvents(
     inspectWebPageInputSchema.parse({
       cdp_endpoint: "http://127.0.0.1:9222",
@@ -310,12 +396,7 @@ const captureBody = (source: BodySource, body: string): WebPageInspection => {
     params: {
       requestId: "request-1",
       type: "Fetch",
-      request: {
-        url: `${ORIGIN}/api`,
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        postData: source === "request" ? body : "{}",
-      },
+      request: { url: `${ORIGIN}/api`, ...request },
       initiator: { type: "script" },
     },
   });

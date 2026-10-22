@@ -111,7 +111,7 @@ schemas, exec schema and host rendering are unmeasured. Final same-backend
 controls and optional-discovery measurements are recorded separately in JSON.
 
 Actual Codex CLI trials use the runnable
-[agent harness](../../experiments/analysis-efficiency/javascript-facts-agent.mjs),
+[agent harness](https://github.com/morluto/rea/blob/42e1a17d6e6c0487f17be0bae248553c4caba7f7/experiments/analysis-efficiency/javascript-facts-agent.mjs),
 installed CLI 0.161.0, requested alias `gpt-5.6-terra` / high, unchanged questions
 per pair, and fresh processes/MCP. Restricted baseline tools are analysis and
 export; candidate adds the existing `inspect_analysis_view`. Both can reach the
@@ -194,7 +194,7 @@ execution as unknown; the candidate still exported once. The one invalid
 disabled-host attempt (37.679 s / 5.070758 CPU s / 880,414,720 B) is preserved
 as a harness failure, with unavailable operation counts.
 
-Use the [specific artifact oracle](../../experiments/analysis-efficiency/javascript-facts-grade.py) on the compact JSON:
+Use the [specific artifact oracle](https://github.com/morluto/rea/blob/42e1a17d6e6c0487f17be0bae248553c4caba7f7/experiments/analysis-efficiency/javascript-facts-grade.py) on the compact JSON:
 
 ```sh
 python3 experiments/analysis-efficiency/javascript-facts-grade.py \

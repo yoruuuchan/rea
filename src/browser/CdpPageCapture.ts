@@ -25,7 +25,10 @@ import {
   allowedSanitizedUrl,
   delayWithCancellation,
 } from "./CdpCaptureValues.js";
-import { captureScripts } from "./CdpPageCaptureScripts.js";
+import {
+  captureScripts,
+  finalizeScriptInventory,
+} from "./CdpPageCaptureScripts.js";
 import { captureWorkers } from "./CdpPageCaptureWorkers.js";
 import type { WebSourceMapRequest } from "./WebSourceMapFetcher.js";
 
@@ -180,6 +183,7 @@ const captureAuthorizedPage = async (
   // enabled through the final capture, so account for eligible responses that
   // arrived while those reads were pending.
   state.events.settleUnexaminedResponseBodies();
+  const scriptInventory = finalizeScriptInventory(scripts, state.events);
   state.events.recordScriptMetadataBudgetExclusions();
   return {
     inspection: normalizedInspection(state, {
@@ -187,7 +191,7 @@ const captureAuthorizedPage = async (
       frames,
       dom,
       accessibility,
-      scripts: scripts.inventory,
+      scripts: scriptInventory,
       resources,
       workers,
       storage: storageCapture.value,

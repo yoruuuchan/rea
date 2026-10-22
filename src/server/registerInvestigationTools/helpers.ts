@@ -19,9 +19,6 @@ export const comparisonClosure = (comparisons: readonly Evidence[]): string[] =>
     ]),
   );
 
-export const functionEvidenceIds = (records: readonly Evidence[]): string[] =>
-  uniqueIds(records.map(({ evidence_id }) => evidence_id));
-
 const uniqueIds = (ids: readonly string[]): string[] =>
   [...new Set(ids)].sort((left, right) =>
     compareUnicodeCodePoints(left, right),

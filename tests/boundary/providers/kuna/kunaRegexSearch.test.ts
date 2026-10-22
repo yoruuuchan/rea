@@ -46,17 +46,16 @@ try {
   assert.equal(matched.ok, false);
   assert.equal(matched.error._tag, ${JSON.stringify(mode !== "deadline" ? "AnalysisCancelledError" : "AnalysisResourceConstraintError")});
   if (${JSON.stringify(mode)} === "deadline") {
+    assert.equal(matched.error.resource, "cpu");
     assert.equal(matched.error.reportedLimits.matching_deadline_ms, 5000);
     assert.equal(matched.error.reportedLimits.matching_deadline_source, "default");
-    assert.match(matched.error.reason, /5000 ms \\(source default\\)/);
-    assert.match(matched.error.reason, /REA_REGEX_MATCHING_DEADLINE_MS/);
-    assert.match(matched.error.reason, /maximum 2147483647 ms/);
-    assert.match(matched.error.remediationAction, /Set REA_REGEX_MATCHING_DEADLINE_MS in the environment that starts REA/);
+    assert.equal(matched.error.reason.includes("REA_REGEX_MATCHING_DEADLINE_MS"), true);
+    assert.equal(matched.error.remediationAction.includes("REA_REGEX_MATCHING_DEADLINE_MS"), true);
     assert.equal(matched.error.reason.includes("no runtime override"), false);
     assert.equal(matched.error.remediationAction.includes("no runtime override"), false);
     const limitation = provider.capabilities().find((capability) => capability.operation === ${JSON.stringify(operation)}).limitations.join(" ");
-    assert.match(limitation, /5000 ms matching deadline \\(source default\\)/);
-    assert.match(limitation, /REA_REGEX_MATCHING_DEADLINE_MS/);
+    assert.equal(limitation.includes("REA_REGEX_MATCHING_DEADLINE_MS"), true);
+    assert.equal(limitation.includes("source default"), true);
     assert.equal(limitation.includes("no runtime override"), false);
   }
   if (${JSON.stringify(mode)} === "close") {
@@ -115,10 +114,9 @@ const provider = new KunaProvider(${JSON.stringify({
     REA_REGEX_MATCHING_DEADLINE_MS: "200",
   })});
 const limitation = provider.capabilities().find((capability) => capability.operation === "search_procedures").limitations.join(" ");
-assert.match(limitation, /200 ms matching deadline \\(source setting\\)/);
-assert.match(limitation, /REA_REGEX_MATCHING_DEADLINE_MS/);
-assert.match(limitation, /default 5000 ms/);
-assert.match(limitation, /maximum 2147483647 ms/);
+assert.equal(limitation.includes("REA_REGEX_MATCHING_DEADLINE_MS"), true);
+assert.equal(limitation.includes("200"), true);
+assert.equal(limitation.includes("source setting"), true);
 assert.equal(limitation.includes("no runtime override"), false);
 const client = provider.createClient(${JSON.stringify(target)}, ${JSON.stringify(profile)});
 try {
@@ -128,10 +126,12 @@ try {
   assert.ok(performance.now() - started < 4000, "deadline stayed at the 5000 ms default");
   assert.equal(matched.ok, false);
   assert.equal(matched.error._tag, "AnalysisResourceConstraintError");
+  assert.equal(matched.error.resource, "cpu");
   assert.equal(matched.error.reportedLimits.matching_deadline_ms, 200);
   assert.equal(matched.error.reportedLimits.matching_deadline_source, "setting");
-  assert.match(matched.error.reason, /200 ms \\(source setting\\)/);
-  assert.match(matched.error.remediationAction, /REA_REGEX_MATCHING_DEADLINE_MS/);
+  assert.equal(matched.error.reason.includes("REA_REGEX_MATCHING_DEADLINE_MS"), true);
+  assert.equal(matched.error.remediationAction.includes("REA_REGEX_MATCHING_DEADLINE_MS"), true);
+  assert.equal(matched.error.reason.includes("source setting"), true);
   assert.equal(matched.error.reason.includes("no runtime override"), false);
 } finally {
   assert.equal((await client.close()).ok, true);

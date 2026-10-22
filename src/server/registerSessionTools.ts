@@ -88,6 +88,7 @@ interface ProcessToolRegistration {
     typeof toolContract<"capture_process_scenario">
   >;
   readonly resourceScope: ProcessCaptureResourceScope;
+  readonly environment: Readonly<NodeJS.ProcessEnv>;
 }
 
 const registerProcessTools = ({
@@ -96,6 +97,7 @@ const registerProcessTools = ({
   logger,
   captureContract,
   resourceScope,
+  environment,
 }: ProcessToolRegistration): void => {
   const admission = withAdmittedAnalysis({ kind: "session", session });
   server.registerTool(
@@ -117,7 +119,7 @@ const registerProcessTools = ({
                 input,
                 context.mcpReq.signal,
                 process.platform,
-                process.env,
+                environment,
                 undefined,
                 undefined,
                 progress,
@@ -223,6 +225,8 @@ const registerOpenLifecycleTool = (
 /** Register MCP-only target lifecycle operations on a long-lived session. */
 export interface SessionToolOptions extends Partial<SessionAvailabilityProbes> {
   readonly artifactResources: ArtifactResourceScope;
+  /** Server environment snapshot that process capture resolves and inherits. */
+  readonly environment: Readonly<NodeJS.ProcessEnv>;
   readonly startedAt?: string;
   readonly availabilityPolicy?: () => AvailabilityPolicy;
 }
@@ -381,6 +385,7 @@ export const registerSessionTools = (
     logger,
     captureContract,
     resourceScope: processResources,
+    environment: options.environment,
   });
   const closeServer = server.close.bind(server);
   server.close = async () => {

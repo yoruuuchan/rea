@@ -5,6 +5,7 @@ import { appleResourceKeyFields } from "../../domain/apple/appleAssetCatalog.js"
 import {
   interfaceBuilderConnectionFieldNames,
   isInterfaceBuilderConnectionClass,
+  isSourceLessAppKitAnnotationConnector,
   isUIKitRuntimeConnectionClass,
 } from "../../domain/apple/interfaceBuilderKeyedArchive.js";
 import { DirectoryArtifactReader } from "../DirectoryArtifactReader.js";
@@ -54,7 +55,6 @@ import {
 const MAX_AGGREGATE_INPUT_BYTES = 32 * 1024 * 1024;
 const MAX_AGGREGATE_DECODE_BYTES = 256 * 1024 * 1024;
 const MAX_REPORTED_OMITTED_ARCHIVES = 64;
-
 /** Decode compiled Interface Builder archives from a local app bundle. */
 export const analyzeInterfaceBuilderBundle = async (input: {
   readonly bundlePath: string;
@@ -611,6 +611,9 @@ const projectNibArchive = (
     if (!isInterfaceBuilderConnectionClass(className)) continue;
     const values = object.values;
     const connectionFields = interfaceBuilderConnectionFieldNames(className);
+    // A source-less known AppKit annotation names one object, not a connection.
+    // Unknown connectors and annotations with an encoded source remain evidence.
+    if (isSourceLessAppKitAnnotationConnector(className, values)) continue;
     const source = reference(values[connectionFields.source]);
     if (source === null) {
       unresolvedConnections += 1;

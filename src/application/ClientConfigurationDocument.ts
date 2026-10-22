@@ -1674,10 +1674,11 @@ export const clientRegistrationEntry = (
         ...(Object.keys(environment).length === 0 ? {} : { env: environment }),
       };
     case "opencode_v2":
-      // V2 connects servers unless `disabled` is true.
+      // Override lower-priority disabled flags when refreshing a V2 registration.
       return {
         type: "local",
         command: [...command],
+        disabled: false,
         ...(Object.keys(environment).length === 0
           ? {}
           : { environment: { ...environment } }),

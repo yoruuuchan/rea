@@ -140,6 +140,43 @@ describe("Ghidra MIPS soft-float storage report", () => {
   });
 });
 
+describe("Ghidra disabled analyzer report", () => {
+  const valid = {
+    format: "rea-ghidra-disabled-analyzers-v1",
+    analyzers: [
+      { name: "Decompiler Switch Analysis", status: "disabled" },
+      { name: "Objective-C Message Analyzer", status: "not_applicable" },
+    ],
+  };
+  it("accepts disabled and not-applicable outcomes in configured order", () => {
+    const parsed = parseGhidraSessionInfo(
+      { ...session(), disabled_analyzers: valid },
+      expected,
+    );
+    if (!parsed.ok) throw parsed.error;
+    expect(parsed.value.disabled_analyzers).toEqual(valid);
+  });
+  it.each([
+    [
+      "an unknown analyzer reported as accepted",
+      {
+        ...valid,
+        analyzers: [{ name: "REA Unknown Analyzer", status: "unknown" }],
+      },
+    ],
+    ["an empty outcome list", { ...valid, analyzers: [] }],
+    ["another report format", { ...valid, format: "rea-ghidra-seeds-v1" }],
+    ["an undeclared field", { ...valid, skipped: [] }],
+  ])("rejects %s", (_label, report) => {
+    expect(
+      parseGhidraSessionInfo(
+        { ...session(), disabled_analyzers: report },
+        expected,
+      ).ok,
+    ).toBe(false);
+  });
+});
+
 describe("Ghidra mutation handshake", () => {
   it("requires the exact mutation authority and rejects duplicate capabilities", () => {
     const value = session();

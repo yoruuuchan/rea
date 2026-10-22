@@ -205,12 +205,7 @@ const artifactInventoryValues = (
       ? [inventory.manifest.manifest_id]
       : inventory.occurrences.map(({ occurrence_id: id }) => id);
   } catch (cause: unknown) {
-    if (
-      cause instanceof TypeError ||
-      cause instanceof z.ZodError ||
-      cause instanceof EvidenceIntegrityError
-    )
-      return [];
+    if (cause instanceof EvidenceIntegrityError) return [];
     throw cause;
   }
 };
@@ -224,11 +219,7 @@ const isProcessCaptureEvidence = (evidence: LedgerEvidence): boolean => {
       return false;
     case "invalid-evidence":
     case "invalid-capture":
-      if (
-        parsed.error.cause instanceof TypeError ||
-        parsed.error.cause instanceof z.ZodError
-      )
-        return false;
+      if (parsed.error.cause instanceof z.ZodError) return false;
       throw parsed.error.cause;
   }
 };

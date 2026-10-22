@@ -3,6 +3,24 @@ import * as t from "@babel/types";
 import { parseJavaScriptSource } from "../domain/javascript/javascriptSourceParser.js";
 import { traverseJavaScriptAst } from "../domain/javascript/javascriptSemanticTraversal.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
+
+/**
+ * `.` cannot cross a line terminator and `$` only matches at the end of the
+ * literal, so a `.wasm` suffix can only occur on its last line. Testing that
+ * line alone keeps long multi-line literals linear.
+ */
+const endsWithWasmReference = (value: string): boolean =>
+  /\.wasm(?:[?#].*)?$/iu.test(
+    value.slice(
+      Math.max(
+        value.lastIndexOf("\n"),
+        value.lastIndexOf("\r"),
+        value.lastIndexOf(" "),
+        value.lastIndexOf(" "),
+      ) + 1,
+    ),
+  );
+
 /** Associate visible literals with selected candidates without asserting data flow or URL identity. */
 export const associateWasmGlue = (
   source: string,
@@ -43,7 +61,7 @@ export const associateWasmGlue = (
       if (
         value === undefined ||
         value === null ||
-        !/\.wasm(?:[?#].*)?$/iu.test(value) ||
+        !endsWithWasmReference(value) ||
         node.loc == null
       )
         return;

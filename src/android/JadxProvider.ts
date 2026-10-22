@@ -125,6 +125,22 @@ interface PendingCleanup {
   reportedErrors: WeakRef<AnalysisError>[];
 }
 
+/** Every descriptor owner nested in one rejected close, without treating a later owner as the first. */
+const retainedCleanupOwners = (
+  cause: unknown,
+): ReadonlySet<OwnedFileHandle> => {
+  const owners = new Set<OwnedFileHandle>();
+  const visit = (value: unknown, seen: Set<unknown>): void => {
+    if (typeof value !== "object" || value === null || seen.has(value)) return;
+    seen.add(value);
+    if (!(value instanceof RegularFileCleanupFailure)) return;
+    owners.add(value.owner);
+    if (value.outcome.kind === "failed") visit(value.outcome.cause, seen);
+  };
+  visit(cause, new Set());
+  return owners;
+};
+
 const cleanupResources = (resources: PendingCleanup): readonly string[] => [
   ...(resources.session === undefined
     ? []
@@ -166,16 +182,22 @@ const cleanup = async (
     sessionCloseFailed = true;
     sessionCloseCause = cause;
   }
+  const tracked = retainedCleanupOwners(resources.operationCause);
+  const trackedInMap = [...tracked].filter((owner) =>
+    resources.fileHandles.has(owner),
+  );
   const fileCloseCauses: unknown[] = [];
   for (const owner of resources.fileHandles.keys()) {
     try {
       await owner.close();
+      resources.fileHandles.delete(owner);
+      // One descriptor's release clears only that owner. The admission error
+      // stays incomplete until every owner from the same close failure is gone.
       if (
-        resources.operationCause instanceof RegularFileCleanupFailure &&
-        resources.operationCause.owner === owner
+        trackedInMap.length > 0 &&
+        trackedInMap.every((candidate) => !resources.fileHandles.has(candidate))
       )
         resources.previousError?.resolveCleanup();
-      resources.fileHandles.delete(owner);
     } catch (cause: unknown) {
       fileCloseCauses.push(cause);
     }
@@ -214,6 +236,8 @@ const cleanup = async (
     return err(cleanupFailure(resources, cleanupError));
   }
   try {
+    // Child descriptors are released above. The workspace root follows only
+    // after those owners confirm close.
     await root?.close();
     resources.root = undefined;
   } catch (cause) {
@@ -510,12 +534,16 @@ export class JadxProvider implements AndroidAnalysisPort {
           root.failureSignal === undefined
             ? signal
             : AbortSignal.any([signal, root.failureSignal]);
+        const retainSnapshot = (path: string, owner: OwnedFileHandle): void => {
+          fileHandles.set(owner, path);
+        };
         const engine = await snapshotAndroidEngine(
           configuration.jar,
           jarHash,
           root.path,
           request.operation,
           workspaceSignal,
+          retainSnapshot,
         );
         const snapshot = await snapshotAndroidTarget(
           target.path,
@@ -523,6 +551,7 @@ export class JadxProvider implements AndroidAnalysisPort {
           root.path,
           request.operation,
           workspaceSignal,
+          retainSnapshot,
         );
         const bridge = join(root.path, "ReaJadxBridge.java");
         await copyFile(BRIDGE_SOURCE, bridge);

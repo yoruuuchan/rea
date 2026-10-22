@@ -10,6 +10,40 @@ import { createJavaScriptArtifactReader } from "../../../../src/artifacts/javasc
 import { analyzeJavaScriptArtifactFiles } from "../../../../src/application/javascript/JavaScriptArtifactAnalysis.js";
 import { buildJavaScriptArtifactGraph } from "../../../../src/application/javascript/JavaScriptArtifactGraphBuilder.js";
 
+it("keeps an endpoint uncertain after mutation through a declared inherited field", async () => {
+  const root = await createTestTempDirectory("rea-js-erased-field-");
+  await writeFile(
+    join(root, "app.ts"),
+    `
+    const options = { url: "/before" };
+    class Base { field = options; }
+    class Derived extends Base { declare field: { url: string }; }
+    new Derived().field.url = "/after";
+    const target = options.url;
+    fetch(target);
+  `,
+  );
+  const snapshot = await scanCanonicalArtifactInventory(root, {});
+  const reader = createJavaScriptArtifactReader(root, "directory");
+  try {
+    const files = await readJavaScriptArtifactFiles(reader, snapshot);
+    const analysis = analyzeJavaScriptArtifactFiles(files);
+    const graph = buildJavaScriptArtifactGraph(snapshot, files, analysis);
+    const endpoints = graph.nodes.filter(({ kind }) => kind === "endpoint");
+    expect(endpoints).toHaveLength(1);
+    expect(endpoints[0]?.observations[0]).toMatchObject({
+      properties: { value: "target", resolution: "partial" },
+      evidence: {
+        authority: "ast-static-analysis",
+        state: "observed",
+        limitations: [expect.stringContaining("not an exact literal")],
+      },
+    });
+  } finally {
+    await reader.close();
+  }
+});
+
 it("keeps ambiguous endpoint candidates inferred through artifact graph projection", async () => {
   const root = await createTestTempDirectory("rea-js-endpoint-certainty-");
   await writeFile(join(root, "app.js"), 'form.get("shared"); fetch("shared");');

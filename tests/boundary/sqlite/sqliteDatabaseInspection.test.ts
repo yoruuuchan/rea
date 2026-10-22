@@ -235,6 +235,53 @@ it("counts schema names once when enforcing the complete reply budget", async ()
   );
 });
 
+it("keeps unrelated catalog names outside the selected-table reply budget", async () => {
+  const path = await createDatabase(
+    "CREATE TABLE selected(value TEXT); INSERT INTO selected VALUES ('retained');",
+  );
+  const producer = new DatabaseSync(path);
+  try {
+    producer.exec("BEGIN");
+    for (let index = 0; index < 60; index++) {
+      const name = `unrelated_${index}_${"x".repeat(300 * 1024)}`;
+      producer.exec(`CREATE TABLE "${name}" (value TEXT)`);
+    }
+    producer.exec("COMMIT");
+  } finally {
+    producer.close();
+  }
+  const selected = inspectSqliteDatabaseSnapshot(path, {
+    path,
+    table: "selected",
+  });
+  expect(selected.schema).toMatchObject({
+    scope: "selected_table",
+    completeness: "complete",
+    tables: [{ name: "selected" }],
+    indexes: [],
+    views: [],
+    triggers: [],
+  });
+  expect(selected.schema.tables).toHaveLength(1);
+  expect(selected.rows).toMatchObject({
+    returned_rows: 1,
+    values: [[{ type: "text", value: "retained" }]],
+  });
+  expect(() =>
+    inspectSqliteDatabaseSnapshot(path, { path, table: "absent" }),
+  ).toThrowError(
+    expect.objectContaining({
+      reason: "selection",
+      message:
+        "Selected ordinary table does not exist with that exact name: absent",
+    }),
+  );
+  for (const schema_scope of ["inventory", "database"] as const)
+    expect(() =>
+      inspectSqliteDatabaseSnapshot(path, { path, schema_scope }),
+    ).toThrowError(expect.objectContaining({ reason: "output-limit" }));
+});
+
 it("rejects malformed schema bytes instead of returning replacement text", async () => {
   const path = await createDatabase(
     "CREATE TABLE records(value TEXT /*schema-marker*/)",

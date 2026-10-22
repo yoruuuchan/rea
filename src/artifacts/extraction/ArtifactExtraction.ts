@@ -39,10 +39,7 @@ import type {
   ArtifactResourceOwner,
   ArtifactResourceScope,
 } from "../ArtifactResourceScope.js";
-import {
-  isMachOFormat,
-  type BinaryTarget,
-} from "../../domain/binaryTargetTypes.js";
+import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import type { ArtifactInventorySnapshot } from "../../domain/artifactInventorySnapshot.js";
 import { scanArtifactInventoryInScope } from "../inventory/ArtifactInventory.js";
 import type { ArtifactIntegrityPolicyName } from "../../domain/artifactIntegrityPolicy.js";
@@ -439,11 +436,14 @@ const requireExtractableFormat = async (
 ): Promise<boolean> => {
   const format = input.inputFormat;
   const directory = (await lstat(path)).isDirectory();
+  // A thin Mach-O has no child entries of its own: inventory lists only its
+  // root unless it carries an embedded pack, so it takes the same pack probe
+  // as ELF and PE while only the universal container has a slice reader.
   if (
     !directory &&
     format !== "asar" &&
     format !== "godot-pck" &&
-    !isMachOFormat(format) &&
+    format !== "mach-o-universal" &&
     !isZipPackageFormat(format)
   ) {
     const pack = await withArtifactRegularFile(
@@ -453,7 +453,8 @@ const requireExtractableFormat = async (
       async (handle) => {
         const size = (await handle.stat()).size;
         if (await locateGodotPck(handle, size, signal)) return true;
-        if (format !== "elf" && format !== "pe") return false;
+        if (format !== "elf" && format !== "pe" && format !== "mach-o")
+          return false;
         abortIfNeeded(signal);
         const packaged = await containsPyInstallerArchive(handle, size, signal);
         abortIfNeeded(signal);

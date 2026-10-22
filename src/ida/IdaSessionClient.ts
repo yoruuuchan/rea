@@ -152,6 +152,29 @@ class IdaCleanupError extends ProviderAdapterError {
   }
 }
 
+/**
+ * A worker that is still tearing down can remain in inventory with its identity
+ * already cleared: an empty `session_id`, `owned: false` and `is_active: false`,
+ * while `input_path` still names the private copy. Such a row establishes no
+ * live session, so the private-input arm must not report it as a blocker. The
+ * owning worker is matched by its own session ID separately, and a genuine peer
+ * on the same input keeps a session ID, so neither case is weakened.
+ *
+ * Limited to `backend: "worker"`: a gui row belongs to an IDA instance REA does
+ * not control, and the observed teardown shape covers workers only, so a gui
+ * row keeps blocking release whatever its flags say.
+ */
+const isReleasedWorkerRow = (entry: {
+  readonly session_id: string;
+  readonly owned: boolean;
+  readonly is_active: boolean;
+  readonly backend: "worker" | "gui";
+}): boolean =>
+  entry.backend === "worker" &&
+  entry.session_id === "" &&
+  entry.owned === false &&
+  entry.is_active === false;
+
 /** Serial read-only session whose lifecycle authority excludes an attached GUI. */
 export class IdaSessionClient implements AnalysisClient {
   #tail: Promise<void> = Promise.resolve();
@@ -873,11 +896,12 @@ export class IdaSessionClient implements AnalysisClient {
           );
           const remaining = inventory.sessions.filter(
             (entry) =>
-              entry.session_id === this.#database ||
-              sameIdaHostPath(
-                entry.input_path,
-                this.#workspace?.inputPath ?? "",
-              ),
+              !isReleasedWorkerRow(entry) &&
+              (entry.session_id === this.#database ||
+                sameIdaHostPath(
+                  entry.input_path,
+                  this.#workspace?.inputPath ?? "",
+                )),
           );
           if (this.#recordBlockingSessions(remaining))
             throw new AnalysisProtocolError(

@@ -2260,12 +2260,30 @@ export const miStringField = (
     : undefined;
 };
 
+// GDB resolves its built-in aliases before abbreviations, so `p` is print, never
+// python. Of the prefixes of the commands classified below, only these four
+// name another command (checked against GDB 18.1).
+const GDB_BUILTIN_ALIASES: ReadonlyMap<string, string> = new Map([
+  ["d", "delete"],
+  ["p", "print"],
+  ["s", "step"],
+  ["t", "thread"],
+]);
+
+/** The first console word, lowercased, with GDB's built-in aliases resolved. */
+const gdbCommandWord = (command: string): string | undefined => {
+  const word = /^\s*([^\s;]+)/u.exec(command)?.[1]?.toLowerCase();
+  return word === undefined
+    ? undefined
+    : (GDB_BUILTIN_ALIASES.get(word) ?? word);
+};
+
 /** @internal Classify commands that can invalidate the configured output sink. */
 export const gdbOneShotCommandMayInvalidateDetachProof = (
   command: string,
 ): boolean => {
   if (commandMayChangeInferiorOutput(command)) return true;
-  const firstToken = /^\s*([^\s;]+)/u.exec(command)?.[1]?.toLowerCase();
+  const firstToken = gdbCommandWord(command);
   if (
     firstToken !== undefined &&
     (["source", "define", "alias"].some((name) =>
@@ -2285,7 +2303,7 @@ export const commandMayChangeInferiorOutput = (command: string): boolean => {
   const setting = /^\s*(?:set|with)\s+(\S+)/iu.exec(command)?.[1];
   const maySetInferiorTty =
     setting !== undefined && "inferior-tty".startsWith(setting.toLowerCase());
-  const firstToken = /^\s*([^\s;]+)/u.exec(command)?.[1]?.toLowerCase();
+  const firstToken = gdbCommandWord(command);
   const mayBeTtyCommand =
     firstToken !== undefined && "tty".startsWith(firstToken);
   const mayDefineAlias =

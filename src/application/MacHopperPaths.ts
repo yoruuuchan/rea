@@ -1,18 +1,18 @@
 import { readdirSync } from "node:fs";
-import { join } from "node:path";
+import { posix } from "node:path";
 
 export const MAC_HOPPER_APPLICATION_DIRECTORY = "/Applications";
 export const MAC_HOPPER_APPLICATION_NAME = "Hopper Disassembler.app";
 export const MAC_HOPPER_USER_APPLICATIONS_DIRECTORY = "Applications";
 
-export const MAC_HOPPER_SYSTEM_LAUNCHER = join(
+export const MAC_HOPPER_SYSTEM_LAUNCHER = posix.join(
   MAC_HOPPER_APPLICATION_DIRECTORY,
   MAC_HOPPER_APPLICATION_NAME,
   "Contents/MacOS/hopper",
 );
 
 export const macHopperUserApplicationPath = (homeDirectory: string): string =>
-  join(
+  posix.join(
     homeDirectory,
     MAC_HOPPER_USER_APPLICATIONS_DIRECTORY,
     MAC_HOPPER_APPLICATION_NAME,
@@ -22,14 +22,17 @@ export const macHopperApplicationRoots = (
   homeDirectory: string,
 ): readonly string[] => [
   MAC_HOPPER_APPLICATION_DIRECTORY,
-  join(homeDirectory, MAC_HOPPER_USER_APPLICATIONS_DIRECTORY),
+  posix.join(homeDirectory, MAC_HOPPER_USER_APPLICATIONS_DIRECTORY),
 ];
 
 export const macHopperCanonicalLauncherCandidates = (
   homeDirectory: string,
 ): readonly string[] => [
   MAC_HOPPER_SYSTEM_LAUNCHER,
-  join(macHopperUserApplicationPath(homeDirectory), "Contents/MacOS/hopper"),
+  posix.join(
+    macHopperUserApplicationPath(homeDirectory),
+    "Contents/MacOS/hopper",
+  ),
 ];
 
 /** Build deterministic candidates from the discovered app bundle names. */
@@ -46,7 +49,7 @@ export const macHopperRenamedLauncherCandidates = (
             MAC_HOPPER_APPLICATION_NAME.toLocaleLowerCase("en-US"),
       )
       .sort()
-      .map((name) => join(root, name, "Contents/MacOS/hopper")),
+      .map((name) => posix.join(root, name, "Contents/MacOS/hopper")),
   );
 
 const localBundleNames = (root: string): readonly string[] => {

@@ -395,7 +395,7 @@ it.each(["existing", "first-run"] as const)(
 
     expect(await fs.readFile(replacement, "utf8")).toBe(foreign);
     expect((await fs.lstat(path)).isSymbolicLink()).toBe(true);
-    expect(result).toMatchObject({ status: "failed", reason: "rollback" });
+    expect(result).toMatchObject({ status: "failed", reason: "conflict" });
     if (kind === "existing")
       expect(await fs.readFile(`${path}.rea.backup`, "utf8")).toBe(original);
   },
@@ -423,7 +423,7 @@ it("retains a replacement regular file when readback fails", async () => {
   );
 
   expect(await fs.readFile(path, "utf8")).toBe(foreign);
-  expect(result).toMatchObject({ status: "failed", reason: "rollback" });
+  expect(result).toMatchObject({ status: "failed", reason: "conflict" });
   expect(await fs.readFile(`${path}.rea.backup`, "utf8")).toBe(original);
 });
 
@@ -502,7 +502,7 @@ it("rejects a replaced publication even when the replacement passes registration
       {},
       ["rea", "mcp"],
     ),
-  ).toMatchObject({ status: "failed", reason: "rollback" });
+  ).toMatchObject({ status: "failed", reason: "conflict" });
   expect(await fs.readFile(path, "utf8")).toBe(foreign);
   expect(await fs.readFile(`${path}.rea.backup`, "utf8")).toBe(original);
 });
@@ -525,7 +525,7 @@ it("retains concurrent edits to the published inode rather than overwriting them
       {},
       ["rea", "mcp"],
     ),
-  ).toMatchObject({ status: "failed", reason: "rollback" });
+  ).toMatchObject({ status: "failed", reason: "conflict" });
   expect(await fs.readFile(path, "utf8")).toBe(edited);
   expect(await fs.readFile(`${path}.rea.backup`, "utf8")).toBe(original);
 });

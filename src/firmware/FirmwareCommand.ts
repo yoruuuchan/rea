@@ -66,6 +66,10 @@ export const firmwareToolUnavailable = (
     userMessage: reason,
   });
 
+/** Firmware engines run only on Linux; discovery and execution share this check. */
+export const firmwareHostSupported = (platform: NodeJS.Platform): boolean =>
+  platform === "linux";
+
 /** Resolve explicitly supplied executable paths; never install or search for engines. */
 export const resolveFirmwareCommand = async (
   environment: Readonly<Record<string, string | undefined>>,
@@ -78,7 +82,7 @@ export const resolveFirmwareCommand = async (
     engine === "binwalk" ? "REA_BINWALK_COMMAND" : "REA_UNBLOB_COMMAND";
   const configured = environment[variable];
   if (
-    process.platform !== "linux" ||
+    !firmwareHostSupported(process.platform) ||
     configured === undefined ||
     !isAbsolute(configured)
   )

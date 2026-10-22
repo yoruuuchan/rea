@@ -625,12 +625,14 @@ class _BridgeServer(threading.Thread):
         data = bytearray()
         deadline = time.monotonic() + AUTH_FRAME_TIMEOUT_SECONDS
         while b"\n" not in data:
-            if len(data) >= MAX_FRAME_BYTES:
+            if len(data) > MAX_FRAME_BYTES:
                 raise ValueError("frame-limit-exceeded")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise socket.timeout("authentication frame timed out")
             connection.settimeout(remaining)
+            # MAX_FRAME_BYTES limits the JSON payload; the terminating LF is
+            # framing and may be the one byte beyond that payload budget.
             part = connection.recv(min(65536, MAX_FRAME_BYTES + 1 - len(data)))
             if not part:
                 raise ValueError("incomplete authentication frame")

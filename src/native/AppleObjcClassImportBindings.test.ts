@@ -201,4 +201,25 @@ describe("Objective-C import binding address inspection", () => {
       },
     });
   });
+
+  it("keeps an explicitly truncated empty candidate scan partial", () => {
+    expect(
+      inspectObjcClassImportBindings(
+        createInput({ addresses: [], addressesComplete: false }),
+      ),
+    ).toMatchObject({
+      bindings: [],
+      coverage: {
+        status: "partial",
+        examined: 0,
+        decoded: 0,
+        reason: expect.stringContaining("max_records limit"),
+      },
+    });
+    expect(
+      inspectObjcClassImportBindings(
+        createInput({ addresses: [], addressesComplete: true }),
+      ).coverage,
+    ).toMatchObject({ status: "not_requested", reason: null, examined: 0 });
+  });
 });

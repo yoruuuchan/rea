@@ -6,6 +6,10 @@ import { ConfigurationError } from "../domain/configurationErrors.js";
 import { SUPPORTED_NODE_VERSION_PROSE } from "../domain/runtimeVersion.js";
 import { FakeSetupHost, options } from "./Setup.fixture.js";
 import { runSetup } from "./Setup.js";
+import {
+  parseLinuxDistribution,
+  type LinuxDistribution,
+} from "./LinuxHopper.js";
 import type { SetupProgressEvent } from "./SetupTypes.js";
 
 describe("setup workflow", () => {
@@ -316,7 +320,7 @@ describe("setup scoped readiness", () => {
     expect(result.status).toBe("needs_human");
     expect(host.hopperInstalls).toBe(0);
     expect(result.remediation).toBe(
-      "Automated Hopper setup supports Ubuntu 24.04+, Fedora 41+, Nobara 44+, 64-bit Arch Linux, CachyOS, and Omarchy; configure an existing supported provider instead.",
+      "Automated Hopper setup requires an x86_64 host running Ubuntu 24.04+, Fedora 41+, Nobara 44+, Arch Linux, CachyOS, or Omarchy; configure an existing supported provider instead.",
     );
   });
 
@@ -346,4 +350,178 @@ describe("setup scoped readiness", () => {
       JAVA_HOME: "/usr/lib/jvm/jdk-21",
     });
   });
+});
+
+const unsupportedDebian = {
+  id: "debian",
+  versionId: "13",
+  packageFamily: "deb",
+  hopperSetupSupported: false,
+} as const;
+const supportedUbuntu = {
+  id: "ubuntu",
+  versionId: "24.04",
+  packageFamily: "deb",
+  hopperSetupSupported: true,
+} as const;
+const unsupportedLinux =
+  "Automated Hopper setup requires an x86_64 host running Ubuntu 24.04+, Fedora 41+, Nobara 44+, Arch Linux, CachyOS, or Omarchy; configure an existing supported provider instead.";
+const unhealthyManualClientHost = (
+  platform: NodeJS.Platform,
+  facts: {
+    readonly version?: string | undefined;
+    readonly distribution?: LinuxDistribution;
+  },
+) => {
+  const host = new FakeSetupHost(platform);
+  host.version = facts.version;
+  host.distribution = facts.distribution;
+  host.doctorHealthy = false;
+  host.clients = [
+    {
+      name: "grok_bot",
+      displayName: "Grok Bot",
+      configPath: "/fixture/home/.grokbot",
+      format: "unsupported",
+    },
+  ];
+  return host;
+};
+const manualClientSetup = {
+  ...options(true),
+  clientIds: ["grok_bot"],
+  installSkill: false,
+};
+const proposesHopper = async (host: FakeSetupHost) =>
+  (
+    await runSetup(
+      {
+        ...options(false),
+        proposeHopper: true,
+        dryRun: true,
+        clientIds: [],
+        installSkill: false,
+      },
+      host,
+    )
+  ).plannedActions.some(({ kind }) => kind === "install_hopper");
+
+describe("setup Hopper install eligibility", () => {
+  it.each([
+    {
+      label: "Windows",
+      platform: "win32",
+      refusal:
+        "REA supports Hopper on macOS and selected x86_64 Linux distributions.",
+    },
+    {
+      label: "macOS 11",
+      platform: "darwin",
+      version: "11.7",
+      refusal: "Upgrade to macOS 12 or newer.",
+    },
+    {
+      label: "macOS with an unknown version",
+      platform: "darwin",
+      version: undefined,
+      refusal: "Upgrade to macOS 12 or newer.",
+    },
+    {
+      label: "an unsupported Linux distribution",
+      platform: "linux",
+      distribution: unsupportedDebian,
+      refusal: unsupportedLinux,
+    },
+    {
+      label: "Ubuntu on arm64",
+      platform: "linux",
+      distribution: parseLinuxDistribution(
+        'ID=ubuntu\nVERSION_ID="24.04"',
+        "arm64",
+      ),
+      refusal: unsupportedLinux,
+    },
+    {
+      label: "an unidentified Linux distribution",
+      platform: "linux",
+      refusal: unsupportedLinux,
+    },
+  ] as const)(
+    "neither offers nor accepts an unsupported Hopper installation on $label",
+    async ({ platform, refusal, ...facts }) => {
+      const host = unhealthyManualClientHost(platform, facts);
+
+      const advised = await runSetup(manualClientSetup, host);
+      expect(advised.status).toBe("needs_human");
+      expect(advised.remediation).not.toContain("--install-hopper");
+      expect(advised.remediation).toContain(
+        "Run rea doctor and apply each reported remediation.",
+      );
+      expect(advised.remediation).toContain("hosted computer");
+      expect(await proposesHopper(host)).toBe(false);
+
+      const requested = await runSetup(
+        { ...manualClientSetup, installHopper: true },
+        host,
+      );
+      expect(requested).toMatchObject({
+        status: "needs_human",
+        remediation: refusal,
+        appliedActions: [],
+      });
+      expect(host.hopperInstalls).toBe(0);
+    },
+  );
+
+  it.each([
+    { label: "macOS 14", platform: "darwin", version: "14.5" },
+    {
+      label: "a supported Linux distribution",
+      platform: "linux",
+      distribution: supportedUbuntu,
+    },
+  ] as const)(
+    "offers a Hopper installation that succeeds on $label",
+    async ({ platform, ...facts }) => {
+      const host = unhealthyManualClientHost(platform, facts);
+
+      const advised = await runSetup(manualClientSetup, host);
+      expect(advised.status).toBe("needs_human");
+      expect(advised.remediation).toContain(
+        "Rerun with --yes --install-hopper",
+      );
+      expect(advised.remediation).toContain("hosted computer");
+      expect(await proposesHopper(host)).toBe(true);
+
+      const followed = await runSetup(
+        { ...manualClientSetup, installHopper: true },
+        host,
+      );
+      expect(followed.appliedActions).toContain("installed_hopper");
+      expect(host.hopperInstalls).toBe(1);
+    },
+  );
+
+  it.each([
+    { version: "", installs: false },
+    { version: "14beta", installs: false },
+    { version: "12", installs: true },
+    { version: "12.0", installs: true },
+  ])(
+    "decides an explicit Hopper installation for macOS %j",
+    async ({ version, installs }) => {
+      const host = new FakeSetupHost("darwin");
+      host.version = version;
+
+      const result = await runSetup(options(true, true), host);
+
+      expect(result.appliedActions.includes("installed_hopper")).toBe(installs);
+      expect(host.hopperInstalls).toBe(installs ? 1 : 0);
+      if (!installs)
+        expect(result).toMatchObject({
+          status: "needs_human",
+          remediation: "Upgrade to macOS 12 or newer.",
+        });
+    },
+  );
 });

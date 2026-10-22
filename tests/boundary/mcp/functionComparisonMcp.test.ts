@@ -1,3 +1,4 @@
+import { functionSnapshotFixture } from "../../../src/domain/functionDossierEvidence.fixture.js";
 import { ok as resultOk } from "../../../src/domain/result.js";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { describe, expect, it, onTestFinished } from "vitest";
@@ -338,7 +339,10 @@ it.each([
               relationshipCoverage: { status: "complete" },
             },
           );
-    const result = compareFunctions(left, right);
+    const result = compareFunctions(
+      functionSnapshotFixture(left),
+      functionSnapshotFixture(right),
+    );
     expect(result.status).toBe(status);
     const provider = {
       id: "rea-function-comparison",
@@ -411,16 +415,11 @@ it.each([
     if (inconsistent !== null) {
       const rejected = await verification(inconsistent.evidence_id);
       expect(parseMcpToolError(rejected).error).toMatchObject({
-        code: "invalid_request",
+        code: "evidence_integrity_mismatch",
         details: {
-          issues: [
-            {
-              reason: "invalid_value",
-              message: expect.stringContaining(
-                "Function comparison status contradicts its dimensions or function match",
-              ),
-            },
-          ],
+          reason: expect.stringContaining(
+            "Function comparison status contradicts its dimensions or function match",
+          ),
         },
       });
       expect(harness.session.evidenceById(inconsistent.evidence_id)).toEqual(

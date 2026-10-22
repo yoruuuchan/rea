@@ -4,6 +4,7 @@ import {
   browserEndpointSchema,
   browserObservationEndpointSchema,
   browserOriginSchema,
+  recordedBrowserOriginSchema,
   recordedBrowserObservationEndpointSchema,
   sanitizeEndpointCandidate,
   sanitizeBrowserUrl,
@@ -27,6 +28,20 @@ describe("browser observation contracts", () => {
       "file:///tmp/page.html",
     ])
       expect(browserOriginSchema.safeParse(value).success, value).toBe(false);
+  });
+
+  it("accepts only canonical recorded HTTP origins", () => {
+    expect(recordedBrowserOriginSchema.parse("https://app.example.test")).toBe(
+      "https://app.example.test",
+    );
+    for (const value of [
+      "https://%2A.example.com",
+      "https://*.example.com",
+      "https://Example.COM:443",
+    ])
+      expect(recordedBrowserOriginSchema.safeParse(value).success, value).toBe(
+        false,
+      );
   });
 
   it("accepts only literal loopback HTTP CDP endpoints", () => {

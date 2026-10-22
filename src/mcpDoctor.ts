@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
 import { createCatalogIdentity } from "./catalogIdentity.js";
+import { jsonOutputParts } from "./cli/jsonOutput.js";
 import {
   compactPresentationForMcpInputSchemaProfile,
   parseMcpInputSchemaProfile,
@@ -324,7 +325,11 @@ const inspectProductionMcpSession = async (
  */
 export const runProductionMcpDoctorCli = async (
   arguments_: readonly string[],
-  input: { readonly dispatcherPath: string; readonly packageRoot: string },
+  input: {
+    readonly dispatcherPath: string;
+    readonly packageRoot: string;
+    readonly stdoutIsTerminal: boolean;
+  },
 ): Promise<{ readonly output: string; readonly exitCode: number }> => {
   const started = performance.now();
   const parsed = parseOutputArguments(arguments_);
@@ -332,10 +337,11 @@ export const runProductionMcpDoctorCli = async (
     if (parsed.help)
       return { output: `${renderMcpDoctorHelp()}\n`, exitCode: 0 };
     return {
-      output: `${Formatter.format(
+      output: renderOutput(
         { code: "VALIDATION_ERROR", message: parsed.message },
         parsed.format,
-      )}\n`,
+        input.stdoutIsTerminal,
+      ),
       exitCode: 1,
     };
   }
@@ -356,7 +362,7 @@ export const runProductionMcpDoctorCli = async (
       }
     : result;
   return {
-    output: `${Formatter.format(outputValue, parsed.format)}\n`,
+    output: renderOutput(outputValue, parsed.format, input.stdoutIsTerminal),
     exitCode: result.healthy ? 0 : 1,
   };
 };
@@ -438,6 +444,15 @@ type McpDoctorArguments =
       readonly format: OutputFormat;
       readonly message: string;
     };
+
+const renderOutput = (
+  value: unknown,
+  format: OutputFormat,
+  stdoutIsTerminal: boolean,
+): string =>
+  format === "json" || format === "jsonl"
+    ? [...jsonOutputParts(value, format, stdoutIsTerminal)].join("")
+    : `${Formatter.format(value, format)}\n`;
 
 const parseOutputArguments = (
   arguments_: readonly string[],

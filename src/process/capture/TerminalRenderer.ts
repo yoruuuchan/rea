@@ -131,14 +131,14 @@ export class TerminalRenderer {
     let bytes = 0;
     for (let row = 0; row < this.#terminal.rows; row += 1) {
       const line = buffer.getLine(buffer.viewportY + row);
-      const paddedLine = (
-        line?.translateToString(false, 0, this.#terminal.cols) ?? ""
-      ).padEnd(this.#terminal.cols, " ");
+      const renderedLine =
+        line?.translateToString(false, 0, this.#terminal.cols) ??
+        " ".repeat(this.#terminal.cols);
       const trailingSpaceBytes = Buffer.byteLength(
-        paddedLine.match(TRAILING_SPACES)?.[0] ?? "",
+        renderedLine.match(TRAILING_SPACES)?.[0] ?? "",
       );
       const normalized = this.options.normalize(
-        paddedLine,
+        renderedLine,
         Math.min(Number.MAX_SAFE_INTEGER, remainingBytes + trailingSpaceBytes),
       );
       if (normalized.state === "over_budget") {

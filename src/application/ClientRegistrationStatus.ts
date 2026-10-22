@@ -356,13 +356,21 @@ export const readClientRegistrationInspections = async (
   );
 };
 
+// Codex and Kimi Code load a server marked `disabled: true` and honor only
+// `enabled`; Devin loads one marked `enabled: false` and honors only `disabled`.
+const ignoresDisabledKey = new Set(["codex", "kimi"]);
+const ignoresEnabledKey = new Set(["devin"]);
+
 const registrationActivation = (
   registration: z.output<typeof registrationSchema>,
   client: SetupClient,
   parsed: ClientConfigurationDocument,
 ): "enabled" | "disabled" =>
-  (client.format !== "grok" && registration.disabled === true) ||
+  (client.format !== "grok" &&
+    !ignoresDisabledKey.has(client.name) &&
+    registration.disabled === true) ||
   (registration.enabled === false &&
+    !ignoresEnabledKey.has(client.name) &&
     !clientServerForcedEnabled(parsed, PRODUCT_IDENTITY.mcpServerKey)) ||
   ((parsed.dialect === "zcode" || parsed.dialect === "zcode_fallback") &&
     registration.enable === false) ||

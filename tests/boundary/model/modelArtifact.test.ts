@@ -738,6 +738,80 @@ it.each(malformed)(
   },
 );
 
+it.each([640, 896, 1152, 1408, 66_176])(
+  "admits safetensors header length %s whose prefix bytes resemble a pickle protocol marker",
+  async (length) => {
+    const header = JSON.stringify({
+      weight: { dtype: "F32", shape: [1], data_offsets: [0, 4] },
+    });
+    const fixture = safetensorsFixture(
+      header.padEnd(length, " "),
+      Buffer.alloc(4),
+    );
+    const { provider, path } = await providerAt(fixture.bytes);
+    const result = await provider.inspect({ path, hash: "header" });
+    if (!result.ok) throw result.error;
+    expect(result.value).toMatchObject({ format: "safetensors" });
+    expect(result.value.tensors.map(({ name }) => name)).toEqual(["weight"]);
+  },
+);
+
+it.each([
+  // Protocol 2 pickle of {"a": 1}: PROTO 2, EMPTY_DICT, BINPUT 0, ...
+  ["a real pickle", Buffer.from("80027d710058010000006171014b01732e", "hex")],
+  // Protocol 2 pickle of {}: six bytes, shorter than a safetensors prefix.
+  ["an empty dict", Buffer.from("80027d71002e", "hex")],
+  // Protocol 4 FRAME pickle of {"a": 1}.
+  [
+    "a protocol 4 frame",
+    Buffer.from("8004950a000000000000007d948c0161944b01732e", "hex"),
+  ],
+  // The magic number torch.save writes first in its legacy format.
+  [
+    "the legacy torch.save magic",
+    Buffer.from("80028a0a6cfc9c46f9206aa850192e", "hex"),
+  ],
+  // Protocol 2 pickle of "x{": its brace lands at offset 8.
+  [
+    "a brace after an inadmissible length",
+    Buffer.from("80025802000000787b71002e", "hex"),
+  ],
+  [
+    "an in-file length without a JSON brace",
+    Buffer.concat([
+      Buffer.from("8002000000000000", "hex"),
+      Buffer.alloc(644, 0x2e),
+    ]),
+  ],
+] as const)(
+  "refuses pickle protocol bytes followed by %s",
+  async (_case, bytes) => {
+    const { provider, path } = await providerAt(bytes);
+    const result = await provider.inspect({ path, hash: "header" });
+    if (result.ok) throw new Error("Pickle admitted");
+    expect(result.error).toMatchObject({
+      _tag: "AnalysisUnsupportedTargetError",
+      reason: expect.stringContaining("PyTorch pickle"),
+    });
+  },
+);
+
+it("reports a truncated safetensors header whose length resembles a pickle marker as malformed", async () => {
+  const fixture = safetensorsFixture(
+    JSON.stringify({
+      weight: { dtype: "F32", shape: [1], data_offsets: [0, 4] },
+    }).padEnd(896, " "),
+    Buffer.alloc(4),
+  );
+  const { provider, path } = await providerAt(fixture.bytes.subarray(0, 500));
+  const result = await provider.inspect({ path, hash: "header" });
+  if (result.ok) throw new Error("Truncated model was accepted");
+  expect(result.error).toMatchObject({
+    _tag: "BinaryTargetError",
+    constraint: "file_format_rejected",
+  });
+});
+
 it("bounds expansion before allocation and distinguishes unsupported pickle, version and paths", async () => {
   const fixture = ggufFixture();
   fixture.bytes.writeBigUInt64LE(0xffffffffffffffffn, 8);

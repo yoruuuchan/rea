@@ -3,6 +3,7 @@ import {
   projectCartesianCandidates,
 } from "../bridgeCandidateProjection.js";
 import { z } from "zod";
+import { AnalysisInputError } from "../analysisErrorCore.js";
 
 import {
   hasCompleteInventoryCoverage,
@@ -160,9 +161,19 @@ export const projectHarmonyApplication = (
 const harmonyRootFormat = (format: string): RootFormat => {
   const root = HARMONY_ROOT_FORMATS.find((candidate) => candidate === format);
   if (root === undefined)
-    throw new TypeError(
-      `HarmonyOS application projection requires HAP, HSP, or App Pack inventory Evidence (got ${format})`,
-    );
+    throw new AnalysisInputError("project_harmony_application_graph", {}, [
+      {
+        path: [
+          "inventory_evidence",
+          0,
+          "normalized_result",
+          "manifest",
+          "root_format",
+        ],
+        reason: "invalid_value",
+        message: `HarmonyOS application projection requires HAP, HSP, or App Pack inventory Evidence (got ${format})`,
+      },
+    ]);
   return root;
 };
 

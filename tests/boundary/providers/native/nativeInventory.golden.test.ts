@@ -708,6 +708,40 @@ it("reads exports from the symbol table without llvm-nm's dyld-info pass", async
   expect(nmCommands(execution.value.result)).toEqual(nmArguments);
 });
 
+it("keeps an export name ending in a carriage return distinct", async () => {
+  // Captured from a clang executable exporting "trailing\r" and "trailing".
+  const names = "__mh_execute_header\n_main\ntrailing\ntrailing\r\n";
+  const { runner, nmArguments } = symbolTableRunner(
+    {
+      "dyld_info:-exports": [
+        "fixture [arm64]:",
+        "    -exports:",
+        "        offset      symbol",
+        "        0x00000000  __mh_execute_header",
+        "        0x00000338  _main",
+        "        0x00000330  trailing",
+        "        0x00000328  trailing\r",
+        "",
+      ].join("\n"),
+    },
+    { symbolTable: names, withDyldInfo: names },
+  );
+  const execution = await new NativeMacOSProvider({}, runner, "darwin")
+    .createClient(machoTarget("/private/fixture"))
+    .execute("inspect_macho", {});
+  if (!execution.ok) throw execution.error;
+  expect(nmArguments).toHaveLength(1);
+  const exported = (
+    execution.value.result as {
+      exports: { items: { name: string; address: string | null }[] };
+    }
+  ).exports.items.filter(({ name }) => name.startsWith("trailing"));
+  expect(exported).toEqual([
+    expect.objectContaining({ name: "trailing", address: "0x100000330" }),
+    expect.objectContaining({ name: "trailing\r", address: "0x100000328" }),
+  ]);
+});
+
 it("reruns nm with its dyld-info pass when a stripped symbol table omits trie exports", async () => {
   const trieNames = await fixture("dyld-inventory/stripped-swift-nm.txt");
   const { runner, nmArguments } = symbolTableRunner(

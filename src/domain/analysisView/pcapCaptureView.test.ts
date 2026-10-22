@@ -74,6 +74,23 @@ const diagnostics = (offset: number, limit: number) =>
     limit,
   }) as const;
 
+it("reads historical capture Evidence without inventing executable identity", () => {
+  const result = projectAnalysisView(capture(""), { kind: "summary" });
+  if (!result.ok) throw result.error;
+  if (result.value.kind !== "summary")
+    throw new Error("Expected a packet summary.");
+  if (!("client" in result.value.summary))
+    throw new Error("Expected packet client facts.");
+  expect(result.value.summary.client).toMatchObject({
+    tshark_resolved_path: null,
+    tshark_sha256: null,
+    tshark_identity_status: "unresolved",
+    capinfos_resolved_path: null,
+    capinfos_sha256: null,
+    capinfos_identity_status: "unresolved",
+  });
+});
+
 it("pages diagnostics without splitting a surrogate pair", () => {
   const parent = capture("ab😀cd");
   expect(projectAnalysisView(parent, diagnostics(3, 2))).toMatchObject({

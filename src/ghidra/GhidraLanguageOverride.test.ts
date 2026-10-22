@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse, relative } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestTempDirectory } from "../../tests/fixtures/temporaryDirectory.js";
 import { parseConfig } from "../config/parseConfig.js";
@@ -51,7 +51,7 @@ const MIPS_LDEFS = `<?xml version="1.0" encoding="UTF-8"?>
 `;
 
 const pe: BinaryTarget = {
-  path: "/fixture.exe",
+  path: process.platform === "win32" ? "C:\\fixture.exe" : "/fixture.exe",
   sha256: "a".repeat(64),
   kind: "executable",
   format: "pe",
@@ -79,14 +79,25 @@ const legacyMips: BinaryTarget = {
 };
 
 let installDir = "";
+let ownedInstallDir = "";
 beforeAll(async () => {
-  installDir = await mkdtemp(join(tmpdir(), "rea-ghidra-languages-"));
+  const root =
+    process.platform === "win32" ? join(process.cwd(), "build") : tmpdir();
+  await mkdir(root, { recursive: true });
+  ownedInstallDir = await mkdtemp(join(root, "rea-ghidra-languages-"));
+  // The simulated Linux host needs a POSIX absolute path. Keep the owned
+  // native path for cleanup and derive the simulated path on the same drive.
+  installDir =
+    process.platform === "win32"
+      ? `/${relative(parse(ownedInstallDir).root, ownedInstallDir).replaceAll("\\", "/")}`
+      : ownedInstallDir;
   const languages = join(installDir, "Ghidra/Processors/x86/data/languages");
   await mkdir(languages, { recursive: true });
   await writeFile(join(languages, "x86.ldefs"), X86_LDEFS);
 });
 afterAll(async () => {
-  await rm(installDir, { recursive: true, force: true });
+  if (ownedInstallDir !== "")
+    await rm(ownedInstallDir, { recursive: true, force: true });
 });
 
 const provider = (environment: Record<string, string>) => {

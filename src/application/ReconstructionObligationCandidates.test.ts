@@ -322,7 +322,10 @@ it("keeps each semantic candidate bound to its own file and authority context", 
     createEvidenceBundle([...sourceRecords, application]),
     [],
   );
-  expect(generated.limitations).toEqual([]);
+  expect(generated.limitations).toEqual([
+    `Semantic graph ${semanticGraph.graph_id} coverage is unknown; omitted candidates remain unknown.`,
+    `Semantic graph ${semanticGraph.graph_id}: Semantic relations are unavailable in this minimal example.`,
+  ]);
   expect(generated.candidates).toHaveLength(requests.length);
   for (const [index, node] of requests.entries()) {
     const source = sourceRecords[Math.floor(index / 2)];

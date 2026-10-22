@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import type { BinaryTarget } from "../../src/domain/binaryTargetTypes.js";
+import type {
+  BinaryTarget,
+  HeaderArchitecture,
+} from "../../src/domain/binaryTargetTypes.js";
 import type { InspectSignature } from "../../src/domain/native/nativeInspection.js";
 import { ok } from "../../src/domain/result.js";
 import type {
@@ -106,6 +109,7 @@ export const nativeMachoTarget = (
 ): BinaryTarget & {
   readonly kind: "executable";
   readonly format: "mach-o";
+  readonly architecture: HeaderArchitecture;
 } => ({
   path,
   ...(sourcePath === undefined ? {} : { sourcePath }),

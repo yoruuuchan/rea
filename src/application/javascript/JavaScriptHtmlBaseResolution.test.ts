@@ -105,6 +105,23 @@ describe("HTML base href dot segments", () => {
       });
     },
   );
+  it.each([
+    ["app.js/", "/assets/", "assets/app.js"],
+    ["app.js/.", "/assets/", "assets/app.js"],
+    ["?cache=1", "/assets/app.js/", "assets/app.js"],
+  ])(
+    "keeps directory-form HTML reference %s with base %s distinct from %s",
+    (declared, base, directory) => {
+      expect(resolve(declared, base)).toMatchObject({
+        declared_path: declared,
+        resolution_status: "not-found",
+        resolved_path: null,
+        limitations: [
+          `The HTML reference resolves to directory ${directory}, not an exact selected application file.`,
+        ],
+      });
+    },
+  );
 });
 describe("HTML base href empty segments", () => {
   it("lets the script reference remove an empty segment from the base", () => {

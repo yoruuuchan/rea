@@ -294,6 +294,55 @@ it.each([
   },
 );
 
+it.each([
+  {
+    architecture: "x64",
+    hopperSetupSupported: true,
+    code: "download_failed",
+    downloads: 1,
+  },
+  {
+    architecture: "arm64",
+    hopperSetupSupported: false,
+    code: "unsupported_host",
+    downloads: 0,
+  },
+] as const)(
+  "installs Linux Hopper from the selected doctor host's $architecture classification",
+  async ({ architecture, hopperSetupSupported, code, downloads }) => {
+    // Installation must follow the doctor host's facts, never the ambient
+    // os-release and process.arch. A refused download keeps the supported case
+    // from writing or invoking a package manager.
+    const fetch = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(null, { status: 403 }));
+    const host = systemSetupHost(
+      createDoctorHostFixture({
+        platform: "linux",
+        architecture,
+        linuxDistribution: () =>
+          Promise.resolve({
+            id: "ubuntu",
+            versionId: "24.04",
+            packageFamily: "deb",
+            hopperSetupSupported,
+          }),
+      }),
+      { HOME: "/fixture/home" },
+    );
+    try {
+      expect(await host.installHopper(false)).toMatchObject({
+        status: "failed",
+        code,
+      });
+      expect(fetch).toHaveBeenCalledTimes(downloads);
+    } finally {
+      fetch.mockRestore();
+      await host.close?.();
+    }
+  },
+);
+
 it("registers the selected Windows package runner after canonicalizing environment aliases", async () => {
   const environment = snapshotEnvironment(
     {

@@ -1,6 +1,6 @@
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -42,12 +42,25 @@ describe("macOS Hopper launcher paths", () => {
   });
 
   it("finds renamed user bundles through the runtime filesystem scan", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "rea-hopper-paths-"));
+    // Keep native ownership for all I/O, including UNC temporary directories.
+    // On Windows, a checkout-relative home models POSIX separators without
+    // discarding the drive/share or normalizing a UNC prefix through posix.join.
+    const root =
+      process.platform === "win32" ? join(process.cwd(), "build") : tmpdir();
+    await mkdir(root, { recursive: true });
+    const temporary = await mkdtemp(join(root, "rea-hopper-paths-"));
+    const home =
+      process.platform === "win32"
+        ? relative(process.cwd(), temporary).replaceAll("\\", "/")
+        : temporary;
     const appDirectory = join(temporary, "Applications", "Hopper Preview.app");
     try {
       await mkdir(appDirectory, { recursive: true });
-      expect([...macHopperLauncherCandidates(temporary)]).toContain(
-        join(appDirectory, "Contents/MacOS/hopper"),
+      expect([...macHopperLauncherCandidates(home)]).toContain(
+        posix.join(
+          home,
+          "Applications/Hopper Preview.app/Contents/MacOS/hopper",
+        ),
       );
     } finally {
       await rm(temporary, { recursive: true, force: true });

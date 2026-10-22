@@ -200,6 +200,18 @@ const contentDigestKey = (node: ApplicationNode): string | null =>
 
 const moduleSourceDigestKey = (node: ApplicationNode): string | null => {
   if (node.kind !== "javascript-module") return null;
+  // An export binding is identified within its whole application root, so its
+  // id changes with any sibling file. Its own file's bytes and exported name
+  // identify it across versions, as `source_sha256` does a source module.
+  if (
+    node.identity.strategy === "artifact-local-key" &&
+    node.identity.namespace === "module-export"
+  ) {
+    const name = uniqueStringProperty(node, "exported_name");
+    return name === null
+      ? null
+      : `module-export\0${node.identity.artifact_sha256}\0${name}`;
+  }
   const value = uniqueStringProperty(node, "source_sha256");
   return value === null ? null : `module-source\0${node.kind}\0${value}`;
 };

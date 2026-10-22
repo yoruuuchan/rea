@@ -255,14 +255,29 @@ const readSchema = (
     );
   let selectedTable: SelectedTableFacts | undefined;
   const metadata = new Map<string, z.output<typeof tableRow>>();
-  // Names bound the minimum eventual schema output while metadata is collected.
-  // The full schema objects below account for them in the actual reply budget.
+  const selectedKey =
+    selectedName === undefined ? undefined : sqliteIdentifierKey(selectedName);
+  const unresolvedVirtualTables: { name: string; prefix: string }[] = [];
+  // Names bound eventual output only when the whole catalog is requested.
+  // Selected scope retains one table and at most one possible shadow parent;
+  // unrelated names are examined without retaining them or charging the reply.
   const metadataBudget = new OutputBudget();
   for (const raw of db.prepare("PRAGMA main.table_list").iterate()) {
     const value = tableRow.parse(raw);
-    if (value.schema === "main") {
+    if (value.schema !== "main") continue;
+    if (selectedName === undefined) {
       metadataBudget.retain(value.name);
       metadata.set(value.name, value);
+    } else if (value.name === selectedName) {
+      metadata.set(value.name, value);
+    }
+    if (value.type === "virtual" && value.ncol === 0) {
+      const prefix = sqliteIdentifierKey(`${value.name}_`);
+      if (
+        selectedKey === undefined ||
+        (unresolvedVirtualTables.length === 0 && selectedKey.startsWith(prefix))
+      )
+        unresolvedVirtualTables.push({ name: value.name, prefix });
     }
   }
   // A trigger stores its target as written in CREATE TRIGGER, which SQLite
@@ -278,12 +293,6 @@ const readSchema = (
     );
     return foldedNames.get(sqliteIdentifierKey(written)) ?? written;
   };
-  const unresolvedVirtualTables = [...metadata.values()]
-    .filter((value) => value.type === "virtual" && value.ncol === 0)
-    .map((value) => ({
-      name: value.name,
-      prefix: sqliteIdentifierKey(`${value.name}_`),
-    }));
   const shadowParentOf = (
     name: string,
     listed: z.output<typeof tableRow>,

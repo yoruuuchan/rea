@@ -163,10 +163,7 @@ const registerCoverageCommand = (cli: CliInstance, logger: Logger): void =>
     workflow: async (input) => {
       const { evaluateReconstructionCoverage } =
         await import("../application/ReconstructionCoverageService.js");
-      const result = evaluateReconstructionCoverage(input);
-      return result.ok
-        ? { ok: true, value: jsonValueSchema.parse(result.value) }
-        : result;
+      return evaluateReconstructionCoverage(input);
     },
   });
 

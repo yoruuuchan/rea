@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-
 import {
   changedBehaviorResultSchema,
   findChangedBehavior,
@@ -236,12 +235,32 @@ describe("changed behavior", () => {
       ]),
     );
   });
+});
 
-  it("rejects bundles, duplicate comparisons, and malformed exact results", () => {
-    const valid = comparison("compare_process_captures", processResult());
-    expect(() => aggregate([valid, valid])).toThrow(
-      /duplicate comparison Evidence/u,
+describe("changed-behavior input and Evidence validation", () => {
+  it("rejects an empty comparison selection", () => {
+    expect(() => findChangedBehavior({ comparisons: [] })).toThrowError(
+      expect.objectContaining({
+        _tag: "AnalysisInputError",
+        operation: "find_changed_behavior",
+        userMessage: "Provide at least one comparison Evidence item.",
+        issues: [expect.objectContaining({ path: ["comparisons"] })],
+      }),
     );
+  });
+
+  it("rejects duplicate comparison selection with the repeated item path", () => {
+    const valid = comparison("compare_process_captures", processResult());
+    expect(() => aggregate([valid, valid])).toThrowError(
+      expect.objectContaining({
+        _tag: "AnalysisInputError",
+        operation: "find_changed_behavior",
+        issues: [expect.objectContaining({ path: ["comparisons", 1] })],
+      }),
+    );
+  });
+
+  it("rejects a comparison operation unsupported by this workflow", () => {
     const bundle = createEvidence(
       undefined,
       { id: "rea-bundle-comparison", name: "Bundle", version: "1" },
@@ -255,26 +274,60 @@ describe("changed behavior", () => {
         evidenceLinks: [left.evidence_id, right.evidence_id],
       },
     );
-    expect(() => aggregate([bundle])).toThrow(
-      /requires process, artifact, or function/u,
+    expect(() => aggregate([bundle])).toThrowError(
+      expect.objectContaining({
+        _tag: "AnalysisInputError",
+        userMessage: expect.stringContaining(
+          "requires process, artifact, or function",
+        ),
+        issues: [expect.objectContaining({ path: ["comparisons", 0] })],
+      }),
     );
+  });
+
+  it("classifies a malformed Evidence envelope as an integrity failure", () => {
+    const valid = comparison("compare_process_captures", processResult());
+    const malformedEvidence = { ...valid, evidence_id: "ev_invalid" };
+    expect(() => aggregate([malformedEvidence])).toThrowError(
+      expect.objectContaining({
+        _tag: "EvidenceIntegrityError",
+        cause: expect.any(Error),
+      }),
+    );
+  });
+
+  it("classifies an invalid authenticated result payload as an integrity failure", () => {
     const malformed = comparison("compare_process_captures", {
       status: "unchanged",
     });
-    expect(() => aggregate([malformed])).toThrow();
+    expect(() => aggregate([malformed])).toThrowError(
+      expect.objectContaining({
+        _tag: "EvidenceIntegrityError",
+        cause: expect.any(Error),
+      }),
+    );
+  });
+
+  it("rejects contradictory dimensions in authenticated comparison results", () => {
     const contradictory = comparison(
       "compare_process_captures",
       processResult({ status: "unchanged", terminal: "changed" }),
     );
-    expect(() => aggregate([contradictory])).toThrow(
-      /contradicts its dimensions/u,
+    expect(() => aggregate([contradictory])).toThrowError(
+      expect.objectContaining({ _tag: "EvidenceIntegrityError" }),
     );
+  });
+
+  it("rejects nested citations outside the top-level Evidence closure", () => {
     const danglingNested = comparison(
       "compare_artifacts",
       artifactResult([`ev_${"f".repeat(64)}`, right.evidence_id]),
     );
-    expect(() => aggregate([danglingNested])).toThrow(
-      /outside its top-level closure/u,
+    expect(() => aggregate([danglingNested])).toThrowError(
+      expect.toSatisfy(
+        (error: { _tag?: unknown; cause?: unknown }) =>
+          error._tag === "EvidenceIntegrityError" && error.cause === undefined,
+      ),
     );
   });
 });

@@ -87,6 +87,10 @@ export default defineConfig({
         items: [
           { text: "MCP contracts", link: "/mcp-contracts" },
           { text: "Tool design", link: "/tool-design" },
+          {
+            text: "Admission limits and recovery",
+            link: "/design/limits-and-recovery",
+          },
           { text: "Testing", link: "/testing" },
           { text: "Client verification", link: "/client-verification" },
           {

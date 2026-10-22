@@ -74,6 +74,12 @@ import {
 const OPERATION = "inspect_evm_interface";
 const HOST_REQUIREMENT =
   "Initial real-verified offline EVM interface profile supports Linux x64 only.";
+
+/** The EVM interface profile runs only on Linux x64; discovery and execution share this check. */
+export const evmHostSupported = (
+  platform: NodeJS.Platform,
+  arch: string,
+): boolean => platform === "linux" && arch === "x64";
 export const EVM_PRLIMIT_COMMAND_DEFAULT = "/usr/bin/prlimit";
 
 export interface EvmLimiterProbeFileSystem {
@@ -115,7 +121,7 @@ const selectEvmLimiter = async (
   throwIfAborted();
   const platform = probes?.platform ?? process.platform;
   const arch = probes?.arch ?? process.arch;
-  if (platform !== "linux" || arch !== "x64") return undefined;
+  if (!evmHostSupported(platform, arch)) return undefined;
 
   const path =
     environment.REA_EVM_PRLIMIT_COMMAND ?? EVM_PRLIMIT_COMMAND_DEFAULT;
@@ -424,7 +430,7 @@ export class EvmoleInterfaceProvider implements EvmInterfacePort {
         throw new AnalysisCancelledError(OPERATION, {
           cause: options.signal.reason,
         });
-      if (process.platform !== "linux" || process.arch !== "x64")
+      if (!evmHostSupported(process.platform, process.arch))
         throw new AnalysisCapabilityUnavailableError(
           EVMOLE_PROVIDER_IDENTITY.id,
           OPERATION,

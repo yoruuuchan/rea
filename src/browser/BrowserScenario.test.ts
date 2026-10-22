@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import { BrowserScenarioSecrets } from "./BrowserScenarioSecrets.js";
@@ -118,6 +120,60 @@ describe("browser scenario secret redaction", () => {
       secrets.sanitizeUrl("https://app.example.test/?token=a%2fb%3F").url,
     ).toBe("https://app.example.test/?token=[REDACTED:session]");
     expect(secrets.fingerprint("stored a%2fb%3F")).toEqual({
+      value_state: "redacted-secret",
+      value_sha256: null,
+    });
+  });
+});
+
+describe("storage value fingerprint encoding", () => {
+  const secrets = BrowserScenarioSecrets.resolve(
+    browserScenarioSchema.parse(baseScenario()),
+    {
+      REA_TEST_SESSION: "declared-session",
+      REA_TEST_PASSWORD: "declared-password",
+      REA_TEST_COOKIE: "declared-cookie",
+    },
+  );
+  if (secrets === undefined) throw new Error("Expected resolved secrets");
+
+  it.each(["", "ordinary", "\u0000", "\u0620", "\ufffd", "\ud83d\ude00"])(
+    "preserves the UTF-8 digest of well-formed %j",
+    (value) => {
+      expect(secrets.fingerprint(value)).toEqual({
+        value_state: "hashed",
+        value_sha256: createHash("sha256").update(value).digest("hex"),
+      });
+    },
+  );
+
+  it.each([
+    ["\ud800", "\ud801"],
+    ["\ud800", "\ufffd"],
+    ["\ud801", "\ufffd"],
+    ["\udc00", "\ufffd"],
+    ["prefix\ud800suffix", "prefix\ud801suffix"],
+    ["\ud800\ud801", "\ud801\ud800"],
+    ["\udc00\ud800", "\ud800\udc00"],
+    // Bare UTF-16LE fallback would alias the UTF-8 bytes 00 d8 a0 00.
+    ["\ud800\u00a0", "\u0000\u0620\u0000"],
+  ])("distinguishes code-unit values %j and %j", (left, right) => {
+    expect(secrets.fingerprint(left).value_sha256).not.toBe(
+      secrets.fingerprint(right).value_sha256,
+    );
+  });
+
+  it("fixes the v2 fallback byte contract to raw FF followed by UTF-16LE", () => {
+    expect(secrets.fingerprint(String.fromCharCode(0xd800, 0x00a0))).toEqual({
+      value_state: "hashed",
+      value_sha256: createHash("sha256")
+        .update(Buffer.from([0xff, 0x00, 0xd8, 0xa0, 0x00]))
+        .digest("hex"),
+    });
+  });
+
+  it("redacts a declared secret before encoding an unpaired suffix", () => {
+    expect(secrets.fingerprint("declared-session\ud800")).toEqual({
       value_state: "redacted-secret",
       value_sha256: null,
     });

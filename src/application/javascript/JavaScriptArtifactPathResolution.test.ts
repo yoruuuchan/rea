@@ -3184,18 +3184,20 @@ describe("url-reference directory and empty-segment semantics", () => {
     "/dist/worker.js/.",
     "./worker.js/.?cache=1#entry",
   ])("keeps directory-form URLs distinct from files: %s", (declaredPath) => {
-    expect(
-      resolve({
-        declaredPath,
-        sourcePath: "dist/app.mjs",
-        context: "url-reference",
-        files: fileMap([file("dist/worker.js", "root")]),
-      }),
-    ).toMatchObject({
-      declared_path: declaredPath,
-      resolution_status: "not-found",
-      resolved_path: null,
-    });
+    for (const context of ["url-reference", "html-reference"] as const)
+      expect(
+        resolve({
+          declaredPath,
+          sourcePath: "dist/app.mjs",
+          context,
+          files: fileMap([file("dist/worker.js", "root")]),
+        }),
+        context,
+      ).toMatchObject({
+        declared_path: declaredPath,
+        resolution_status: "not-found",
+        resolved_path: null,
+      });
   });
 
   it.each([

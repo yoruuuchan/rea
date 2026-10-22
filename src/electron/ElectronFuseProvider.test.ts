@@ -25,6 +25,9 @@ import { readElectronFuseImage } from "./ElectronFuseReader.js";
 
 const provider = new ElectronFuseProvider();
 
+const symlinkDirectory = (target: string, path: string): Promise<void> =>
+  symlink(target, path, process.platform === "win32" ? "dir" : undefined);
+
 const inspect = async (path: string) => {
   const result = await provider.inspect({ path });
   if (!result.ok) throw result.error;
@@ -265,7 +268,7 @@ describe("Electron fuse path and container admission", () => {
     await mkdir(join(versions, "A"), { recursive: true });
     const binary = join(versions, "A", "Electron Framework");
     await writeFile(binary, image.bytes);
-    await symlink("A", join(versions, "Current"));
+    await symlinkDirectory("A", join(versions, "Current"));
     await symlink(
       "Versions/Current/Electron Framework",
       join(versions, "..", "Electron Framework"),
@@ -470,6 +473,40 @@ describe("direct Electron Framework binary selection", () => {
       ],
     });
   });
+
+  it.runIf(process.platform === "win32")(
+    "walks a backslash-separated Windows link target before accepting a file",
+    async () => {
+      const { app, framework } = await frameworkFixture(
+        "rea-electron-fuses-nested-escape-backslash-",
+      );
+      const versions = join(framework, "Versions");
+      await mkdir(join(app, "Contents", "Other", "subdir"), {
+        recursive: true,
+      });
+      await writeFile(
+        join(app, "Contents", "Other", "subdir", "Electron Framework"),
+        elfFuseImage([ELECTRON_FUSE_STATE_BYTES.enabled]).bytes,
+      );
+      await symlinkDirectory("../../../Other", join(versions, "nested"));
+      await symlinkDirectory("nested\\subdir", join(versions, "Current"));
+
+      const result = await provider.inspect({
+        path: join(versions, "Current", "Electron Framework"),
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error).toMatchObject({
+        _tag: "AnalysisInputError",
+        issues: [
+          expect.objectContaining({
+            path: ["path"],
+            message: expect.stringContaining("escapes"),
+          }),
+        ],
+      });
+    },
+  );
 
   it("rejects a framework directory that is a symlink outside the bundle", async () => {
     const root = await createTestTempDirectory(
@@ -771,7 +808,7 @@ it("follows the active framework binary while an inactive A version remains", as
       thinFuseImage([state]).bytes,
     );
   }
-  await symlink("B", join(framework, "Versions", "Current"));
+  await symlinkDirectory("B", join(framework, "Versions", "Current"));
   await symlink(
     "Versions/Current/Electron Framework",
     join(framework, "Electron Framework"),

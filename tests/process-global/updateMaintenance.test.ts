@@ -130,6 +130,28 @@ describe("OMP integration maintenance", () => {
 });
 
 describe("maintenance activation and layered configuration", () => {
+  it("leaves an inherited disabled OpenCode V2 registration outside maintenance", async () => {
+    const upper = await writeClient(
+      "opencode",
+      JSON.stringify({ mcp: { servers: {} }, theme: "user-selected" }),
+    );
+    const lower = join(home, ".config", "opencode", "config.json");
+    const originalLower = JSON.stringify({
+      mcp: {
+        servers: {
+          rea: { type: "local", command: [entryPoint, "mcp"], disabled: true },
+        },
+      },
+    });
+    await writeFile(lower, originalLower);
+    const originalUpper = await readFile(upper, "utf8");
+    await expect(
+      existingMaintenanceScope(home, entryPoint, process.env),
+    ).resolves.toMatchObject({ clients: [] });
+    expect(await readFile(lower, "utf8")).toBe(originalLower);
+    expect(await readFile(upper, "utf8")).toBe(originalUpper);
+  });
+
   it("leaves a natively disabled ZCode registration outside maintenance", async () => {
     const configPath = await writeClient(
       "zcode",

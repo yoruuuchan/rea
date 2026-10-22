@@ -255,6 +255,13 @@ export class IdaProvider implements AnalysisProviderCandidate {
         } lane. Select a supported Ghidra profile instead.`,
         diagnostics,
       };
+    if (target.kind === "executable" && target.architecture === "arm64_32")
+      return {
+        status: "unsupported",
+        code: "architecture_unsupported",
+        reason: "REA's IDA adapter has no verified arm64_32 lane.",
+        diagnostics,
+      };
     if (target.kind !== "executable")
       return {
         status: "unsupported",

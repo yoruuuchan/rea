@@ -10,7 +10,6 @@ import { correlateStaticAndRuntime } from "../domain/staticRuntimeCorrelation.js
 import {
   comparisonClosure,
   evidenceClosure,
-  functionEvidenceIds,
   isIncomplete,
   recordWorkflowEvidence,
 } from "./registerInvestigationTools/helpers.js";
@@ -139,7 +138,7 @@ const registerCallPath = (
         async () => {
           const closure = evidenceClosure(
             session,
-            functionEvidenceIds(input.functions),
+            input.functions.map(({ evidence_id }) => evidence_id),
           );
           if (!closure.ok)
             return server.delivery.toCallToolResult(closure, contract);

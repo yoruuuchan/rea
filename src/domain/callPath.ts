@@ -1,12 +1,15 @@
+import { z } from "zod";
 import { relationshipCoverageLimitations } from "./relationshipCoverage.js";
 import {
   callPathInputSchema,
   callPathResultSchema,
-  type CallPathInput,
   type CallPathResult,
   type OutputCallPath,
 } from "./callPathSchemas.js";
-import { parseNativeAddress } from "./native/nativeAddress.js";
+import { AnalysisInputError } from "./analysisErrorCore.js";
+import { analysisInputErrorFromIssues } from "./inputIssueProjection.js";
+import { readEvidencePayload } from "./evidenceValidation.js";
+import { nativeAddressInputSchema } from "./native/nativeAddress.js";
 import {
   parseFunctionEvidence,
   type FunctionSnapshot,
@@ -78,9 +81,21 @@ interface SearchState {
   readonly limitations: readonly string[];
 }
 
+const callPathEnvelopeSchema = callPathInputSchema.extend({
+  functions: z.array(z.unknown()).min(1),
+});
+
 /** Reconstruct direct-callee paths from explicit analyze_function Evidence. */
-export const buildCallPath = (input: CallPathInput): CallPathResult => {
-  const parsed = callPathInputSchema.parse(input);
+export const buildCallPath = (input: unknown): CallPathResult => {
+  const selected = callPathEnvelopeSchema.safeParse(input);
+  if (!selected.success)
+    throw analysisInputErrorFromIssues(
+      "build_call_path",
+      selected.error.issues,
+      input,
+      { cause: selected.error },
+    );
+  const parsed = selected.data;
   const { snapshots, graph } = prepareCallGraph(parsed);
   const search = inspectSearch({
     graph,
@@ -128,30 +143,55 @@ export const buildCallPath = (input: CallPathInput): CallPathResult => {
   });
 };
 
-const prepareCallGraph = (input: CallPathInput) => {
-  const snapshots = parseSnapshots(input.functions);
+const prepareCallGraph = (input: z.infer<typeof callPathEnvelopeSchema>) => {
+  const { snapshots, graph } = parseSnapshots(input.functions);
   assertCompatible(snapshots);
   if (!snapshots.has(input.start.address))
-    throw new TypeError(
+    throw invalidCallPathSelection(
+      ["start", "address"],
       `No analyze_function Evidence was supplied for start ${input.start.address}`,
     );
-  return { snapshots, graph: createGraph(snapshots) };
+  return { snapshots, graph };
 };
 
 const parseSnapshots = (
-  groups: CallPathInput["functions"],
-): Map<string, FunctionSnapshot> => {
+  groups: readonly unknown[],
+): {
+  readonly snapshots: Map<string, FunctionSnapshot>;
+  readonly graph: CallGraph;
+} => {
   const snapshots = new Map<string, FunctionSnapshot>();
-  for (const group of groups) {
-    const snapshot = parseFunctionEvidence(group);
-    const address = parseNativeAddress(snapshot.dossier.procedure.address);
-    for (const callee of snapshot.dossier.callees)
-      parseNativeAddress(callee.address);
+  const graph = new CallGraph();
+  for (const [index, group] of groups.entries()) {
+    const parsed = parseFunctionEvidence(group, {
+      operation: "build_call_path",
+      path: ["functions", index],
+    });
+    if (!parsed.ok) throw parsed.error;
+    const snapshot = parsed.value;
+    const parsedAddress = readEvidencePayload(
+      nativeAddressInputSchema,
+      snapshot.dossier.procedure.address,
+    );
+    if (!parsedAddress.ok) throw parsedAddress.error;
+    const address = parsedAddress.value;
     if (snapshots.has(address))
-      throw new TypeError(`Duplicate function Evidence for ${address}`);
+      throw invalidCallPathSelection(
+        ["functions", index],
+        `Duplicate function Evidence for ${address}`,
+      );
+    graph.mergeNode(address);
+    for (const callee of snapshot.dossier.callees) {
+      const parsedCallee = readEvidencePayload(
+        nativeAddressInputSchema,
+        callee.address,
+      );
+      if (!parsedCallee.ok) throw parsedCallee.error;
+      graph.mergeDirectedEdge(address, parsedCallee.value);
+    }
     snapshots.set(address, snapshot);
   }
-  return snapshots;
+  return { snapshots, graph };
 };
 
 const assertCompatible = (
@@ -166,30 +206,29 @@ const assertCompatible = (
       snapshot.subject.format !== first.subject.format ||
       snapshot.subject.architecture !== first.subject.architecture
     )
-      throw new TypeError("Call-path Evidence mixes artifact subjects");
+      throw invalidCallPathSelection(
+        ["functions"],
+        "Call-path Evidence mixes artifact subjects",
+      );
     if (
       snapshot.evidence.provider.id !== first.evidence.provider.id ||
       snapshot.evidence.provider.name !== first.evidence.provider.name ||
       snapshot.evidence.provider.version !== first.evidence.provider.version
     )
-      throw new TypeError("Call-path Evidence mixes providers");
+      throw invalidCallPathSelection(
+        ["functions"],
+        "Call-path Evidence mixes providers",
+      );
   }
 };
 
-const createGraph = (
-  snapshots: ReadonlyMap<string, FunctionSnapshot>,
-): CallGraph => {
-  const graph = new CallGraph();
-  for (const [address, snapshot] of snapshots) {
-    graph.mergeNode(address);
-    for (const callee of snapshot.dossier.callees) {
-      const calleeAddress = parseNativeAddress(callee.address);
-      graph.mergeNode(calleeAddress);
-      graph.mergeDirectedEdge(address, calleeAddress);
-    }
-  }
-  return graph;
-};
+const invalidCallPathSelection = (
+  path: readonly (string | number)[],
+  message: string,
+): AnalysisInputError =>
+  new AnalysisInputError("build_call_path", { userMessage: message }, [
+    { path, reason: "invalid_value", message },
+  ]);
 
 interface SearchInput {
   readonly graph: CallGraph;
@@ -204,16 +243,6 @@ const inspectSearch = ({
   start,
   goal,
 }: SearchInput): SearchState => {
-  if (!graph.hasNode(start))
-    return {
-      graph,
-      snapshots,
-      explored: { nodes: 0, edges: 0, depth_reached: 0 },
-      exhaustive: false,
-      limitations: [
-        `No analyze_function Evidence was supplied for start ${start}`,
-      ],
-    };
   const reached = new Map<string, number>([[start, 0]]);
   const queue = [start];
   const limitations: string[] = [];

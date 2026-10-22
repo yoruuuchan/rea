@@ -7,9 +7,11 @@ import type {
 } from "../domain/model/modelArtifact.js";
 import { ModelHeaderReader } from "./ModelHeaderReader.js";
 import {
+  MODEL_HEADER_BYTES,
   ModelFormatFailure,
   ModelReportBudget,
   rejectModel,
+  rejectPickle,
 } from "./ModelFormat.js";
 import { safetensorsBits } from "./ModelTensorTypes.js";
 
@@ -154,11 +156,19 @@ export const readSafetensorsHeader = async (
   tensors: ModelTensor[];
 }> => {
   const budget = new ModelReportBudget();
+  // Lengths such as 640 (80 02 ...) also begin like a pickle PROTO opcode.
+  const protocol = first[1] ?? 0;
+  const pickle = first[0] === 0x80 && protocol >= 2 && protocol <= 5;
+  if (pickle && reader.size < 9) rejectPickle();
   const second = await reader.take(4);
   reader.excludeSafetensorsLengthPrefix();
   const length =
     BigInt(first.readUInt32LE()) + (BigInt(second.readUInt32LE()) << 32n);
-  if (length === 0n || (await reader.take(1))[0] !== 0x7b)
+  const brace = length === 0n ? undefined : (await reader.take(1))[0];
+  // A brace after an admissible length is safetensors, even if truncated.
+  if (pickle && (brace !== 0x7b || length > BigInt(MODEL_HEADER_BYTES)))
+    rejectPickle();
+  if (brace !== 0x7b)
     rejectModel("File does not contain a GGUF or safetensors header");
   if (length > BigInt(Number.MAX_SAFE_INTEGER))
     throw new ModelFormatFailure(

@@ -1,6 +1,10 @@
 import { classifyClientRegistrationCommand } from "./ClientRegistrationIdentity.js";
 import type { LinuxPackageFamily } from "./HopperReleaseFeed.js";
-import { linuxHopperInstallDisclosure } from "./LinuxHopper.js";
+import {
+  linuxHopperInstallDisclosure,
+  LINUX_HOPPER_SETUP_HOSTS,
+  type LinuxDistribution,
+} from "./LinuxHopper.js";
 import type { SkillDestination } from "./SetupSkill.js";
 import { macHopperInstallDisclosure } from "./MacHopper.js";
 import { macHopperUserApplicationPath } from "./MacHopperPaths.js";
@@ -21,10 +25,16 @@ import type { DoctorReport } from "./Doctor.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 import { CURRENT_ENTRYPOINT_PATH } from "../process/CurrentEntrypointPath.js";
 
+/** Whether automated Hopper installation can run on this host, and why not. */
+export type HopperInstallEligibility =
+  | { readonly supported: true }
+  | { readonly supported: false; readonly remediation: string };
+
 /** Read-only setup facts shared by client selection and preflight. */
 export interface SetupDiscovery {
   readonly initialDoctor: Awaited<ReturnType<SetupHost["doctor"]>>;
   readonly installHopper: boolean;
+  readonly hopperInstall: HopperInstallEligibility;
   readonly clients: readonly SetupClient[];
   readonly detectedClientIds: readonly string[];
   readonly defaultClientIds: readonly string[];
@@ -54,14 +64,16 @@ export const discoverSetupState = async (input: {
     input.host.platform === "linux"
       ? await input.host.linuxDistribution()
       : undefined;
-  const hopperInstallSupported =
-    (input.host.platform === "darwin" &&
-      majorVersion((await input.host.macosVersion()) ?? "0") >= 12) ||
-    (input.host.platform === "linux" &&
-      linuxDistribution?.hopperSetupSupported === true);
+  const hopperInstall = hopperInstallEligibility(
+    input.host.platform,
+    input.host.platform === "darwin"
+      ? await input.host.macosVersion()
+      : undefined,
+    linuxDistribution,
+  );
   const installHopper =
     input.forceHopperInstall ||
-    (hopperInstallSupported &&
+    (hopperInstall.supported &&
       input.proposeHopper &&
       (!input.providerConfigured || linuxHopperRepairNeeded));
   const [clients, detectedClients] = await Promise.all([
@@ -118,6 +130,7 @@ export const discoverSetupState = async (input: {
   return {
     initialDoctor,
     installHopper,
+    hopperInstall,
     clients,
     detectedClientIds: [...detectedIds],
     defaultClientIds,
@@ -362,8 +375,47 @@ const linuxDisclosure = (family: LinuxPackageFamily) => {
   };
 };
 
-const majorVersion = (version: string): number =>
-  Number.parseInt(version.split(".")[0] ?? "0", 10);
+/** Refuse a selected Hopper installation this host cannot run, before mutation. */
+export const hopperInstallRefusal = (
+  discovery: Pick<SetupDiscovery, "installHopper" | "hopperInstall">,
+): string | undefined =>
+  discovery.installHopper && !discovery.hopperInstall.supported
+    ? discovery.hopperInstall.remediation
+    : undefined;
+
+/**
+ * Decide automated Hopper installation once from the host facts read during
+ * discovery, so proposals, explicit requests, and recovery advice agree. An
+ * unknown or unparseable macOS version and an unidentified Linux distribution
+ * are not eligible.
+ */
+const hopperInstallEligibility = (
+  platform: NodeJS.Platform,
+  macosVersion: string | undefined,
+  linuxDistribution: LinuxDistribution | undefined,
+): HopperInstallEligibility => {
+  if (platform === "darwin") {
+    const major =
+      macosVersion === undefined
+        ? undefined
+        : /^(\d+)(?:\.|$)/u.exec(macosVersion)?.[1];
+    return major !== undefined && Number(major) >= 12
+      ? { supported: true }
+      : { supported: false, remediation: "Upgrade to macOS 12 or newer." };
+  }
+  if (platform === "linux")
+    return linuxDistribution?.hopperSetupSupported === true
+      ? { supported: true }
+      : {
+          supported: false,
+          remediation: `Automated Hopper setup requires ${LINUX_HOPPER_SETUP_HOSTS}; configure an existing supported provider instead.`,
+        };
+  return {
+    supported: false,
+    remediation:
+      "REA supports Hopper on macOS and selected x86_64 Linux distributions.",
+  };
+};
 
 const clientConfigurationDetail = (
   client: SetupClient,

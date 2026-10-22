@@ -23,6 +23,7 @@ import {
 import { AnalysisOutputError } from "../../domain/analysisErrorCore.js";
 import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
 import { createEvidence, type Evidence } from "../../domain/evidence.js";
+import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
 import type { JsonValue } from "../../domain/jsonValue.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import {
@@ -30,6 +31,7 @@ import {
   MAX_REVERSE_COMMAND_TIMEOUT_MS,
   objdumpInputSchema,
   rizinInputSchema,
+  type RizinInput,
 } from "../../domain/reverseEngineering.js";
 import type {
   ReverseEngineeringCommandPort,
@@ -82,6 +84,23 @@ export type ReverseEngineeringServiceRuntimeOptions = Omit<
   ReverseEngineeringServiceOptions,
   "commands" | "environment"
 >;
+
+/** Resolve one command for shared execution and adapter admission decisions. */
+export const resolveRizinCommandRequest = (
+  input: unknown,
+): Result<RizinInput, AnalysisInputError> => {
+  const parsed = rizinInputSchema.safeParse(input);
+  return parsed.success
+    ? ok(parsed.data)
+    : err(
+        analysisInputErrorFromIssues(
+          "execute_rizin_command",
+          parsed.error.issues,
+          input,
+          { cause: parsed.error },
+        ),
+      );
+};
 
 /** Shared application workflow for caller-selected local analysis commands. */
 export class ReverseEngineeringService {
@@ -234,18 +253,24 @@ export class ReverseEngineeringService {
     rawInput: unknown,
     options: { readonly signal?: AbortSignal } = {},
   ): Promise<Result<Evidence, AnalysisError>> {
-    const parsed = rizinInputSchema.safeParse(rawInput);
-    if (!parsed.success)
-      return Promise.resolve(
-        err(new AnalysisInputError("execute_rizin_command")),
-      );
-    const { command_timeout_ms: commandTimeoutMs, ...input } = parsed.data;
+    const parsed = resolveRizinCommandRequest(rawInput);
+    return parsed.ok
+      ? this.executeRizinCommandValidated(parsed.value, options)
+      : Promise.resolve(parsed);
+  }
+
+  /** Execute owner-validated input after the adapter has admitted its target. */
+  executeRizinCommandValidated(
+    request: RizinInput,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<Result<Evidence, AnalysisError>> {
+    const { command_timeout_ms: commandTimeoutMs, ...input } = request;
     const command = this.#commands.rizin(input);
     return this.#observe(
       "execute_rizin_command",
       command,
       input.path,
-      commandTimeoutMs === undefined ? input : parsed.data,
+      commandTimeoutMs === undefined ? input : request,
       options.signal,
       commandTimeoutMs ?? DEFAULT_REVERSE_COMMAND_TIMEOUT_MS,
     );

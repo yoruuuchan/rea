@@ -109,6 +109,57 @@ const edgeFor = (
   return edge;
 };
 
+it.each(["\n", "\r", "\r\n", "\u2028", "\u2029"])(
+  "preserves line terminator %j in dependency names and rpaths",
+  async (separator) => {
+    const direct = `lib${separator}direct.dylib`;
+    const fromExecutable = `libexecutable.dylib${separator}`;
+    const directory = `Libraries${separator}Nested`;
+    const trace = await traceDylibLoading(
+      memoryView({
+        [MAIN]: executable({
+          dependencies: [
+            dependency(`@loader_path/${direct}`),
+            dependency(`@executable_path/${fromExecutable}`),
+            dependency("@rpath/libsearch.dylib"),
+          ],
+          rpaths: [`@loader_path/${directory}`],
+        }),
+        [`Contents/MacOS/${direct}`]: parsed(slice()),
+        [`Contents/MacOS/${fromExecutable}`]: parsed(slice()),
+        [`Contents/MacOS/${directory}/libsearch.dylib`]: parsed(slice()),
+      }),
+      { roots: [MAIN] },
+    );
+    expect(trace.edges.map(({ resolution }) => resolution)).toEqual([
+      { status: "resolved", image: `Contents/MacOS/${direct}` },
+      { status: "resolved", image: `Contents/MacOS/${fromExecutable}` },
+      {
+        status: "resolved",
+        image: `Contents/MacOS/${directory}/libsearch.dylib`,
+      },
+    ]);
+  },
+);
+
+it.each(["@loader_path_suffix", "@executable_path_suffix", "@loader_path\n"])(
+  "does not expand a lookalike path token %j",
+  async (token) => {
+    const name = `${token}/lib.dylib`;
+    const trace = await traceDylibLoading(
+      memoryView({
+        [MAIN]: executable({ dependencies: [dependency(name)] }),
+        "Contents/MacOS/lib.dylib": parsed(slice()),
+      }),
+      { roots: [MAIN] },
+    );
+    expect(edgeFor(trace, MAIN, name).resolution).toEqual({
+      status: "undetermined",
+      image: null,
+    });
+  },
+);
+
 describe("dyld path expansion", () => {
   it("searches the loading image's rpaths before its loaders'", async () => {
     const core = "Contents/Frameworks/Core.framework/Versions/A/Core";

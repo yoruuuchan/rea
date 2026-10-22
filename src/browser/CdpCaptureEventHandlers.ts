@@ -334,7 +334,7 @@ export const handleRequestWillBeSent = (
       line: integerOrNull(initiatorFrame?.lineNumber),
       column: integerOrNull(initiatorFrame?.columnNumber),
     },
-    body_shapes: requestBodyShape(state, request),
+    body_shapes: requestBodyShape(state, requestId, request),
   });
   const timestamp = numberValue(params.timestamp);
   if (timestamp === undefined) state.networkRequestTimestamps.delete(requestId);

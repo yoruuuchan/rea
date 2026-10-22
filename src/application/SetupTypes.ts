@@ -30,6 +30,11 @@ export interface SetupInitialState {
 /** Result of one backup/write/readback transaction. */
 export type ClientConfigurationResult =
   | {
+      readonly status: "failed";
+      readonly reason: "conflict";
+      readonly backupPath?: string;
+    }
+  | {
       readonly status: "unchanged" | "configured" | "skipped";
       readonly backupPath?: string;
     }

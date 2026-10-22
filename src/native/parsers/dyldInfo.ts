@@ -16,8 +16,10 @@ export const parseDyldSymbols = (
   knownExportNames: ReadonlySet<string> = new Set(),
 ) => {
   const offsets = /^\s*offset\s+symbol\s*$/mu.test(output);
-  return output.split(/\r?\n/u).flatMap<ParsedDyldSymbol>((rawLine) => {
-    const line = rawLine.trim();
+  // dyld_info ends rows with LF. A carriage return before it belongs to the
+  // symbol name, so export rows keep their trailing text.
+  return output.split("\n").flatMap<ParsedDyldSymbol>((rawLine) => {
+    const line = mode === "exports" ? rawLine.trimStart() : rawLine.trim();
     if (mode === "imports") {
       const imported =
         /^(?:0x[\da-f]+\s+)?(.+?)(?:\s+\[([^\]]+)\])?\s+\(from (.+)\)$/iu.exec(
@@ -54,9 +56,9 @@ export const parseDyldSymbols = (
             : { sourceSymbol: reexport.sourceSymbol }),
         },
       ];
-    const exported = /^(0x[\da-f]+)\s+(.+?)(?:\s+\[([^\]]+)\])?$/iu.exec(line);
+    const exported = /^(0x[\da-f]+)\s+(.+?)(?:\s+\[([^\]]+)\])?$/isu.exec(line);
     if (exported?.[1] === undefined || exported[2] === undefined) return [];
-    const rawName = /^0x[\da-f]+\s+(.+)$/iu.exec(line)?.[1];
+    const rawName = /^0x[\da-f]+\s+(.+)$/isu.exec(line)?.[1];
     const literalName = rawName !== undefined && knownExportNames.has(rawName);
     // If nm establishes both interpretations, the textual row cannot bind an address or flags.
     // Let the caller retain the exact nm names without guessing which one owns this row.

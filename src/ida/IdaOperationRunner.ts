@@ -9,7 +9,12 @@ import {
 import {
   analysisSearchPredicate,
   analysisSearchQuerySchema,
+  type AnalysisSearchQuery,
 } from "../domain/analysisSearch.js";
+import {
+  matchRegexValues,
+  REGEX_MATCHING_LIMITATION,
+} from "../process/RegexMatcher.js";
 import {
   AnalysisInputError,
   AnalysisCancelledError,
@@ -584,6 +589,29 @@ export class IdaOperationRunner {
     };
   }
 
+  private async searchItems<T extends { readonly value: string }>(
+    operation: IdaOperation,
+    items: T[],
+    query: AnalysisSearchQuery | undefined,
+  ): Promise<T[]> {
+    if (query === undefined) return items;
+    if (query.mode === "literal") {
+      const matches = analysisSearchPredicate(query);
+      return items.filter(({ value }) => matches(value));
+    }
+    this.limitations.push(REGEX_MATCHING_LIMITATION);
+    const matched = await matchRegexValues({
+      operation,
+      pattern: query.pattern,
+      caseSensitive: query.case_sensitive,
+      values: items.map(({ value }) => value),
+      signal: this.options.signal,
+    });
+    if (!matched.ok) throw matched.error;
+    const indices = new Set(matched.value);
+    return items.filter((_, index) => indices.has(index));
+  }
+
   async run(
     operation: IdaOperation,
     parameters: Readonly<Record<string, JsonValue>>,
@@ -592,16 +620,12 @@ export class IdaOperationRunner {
       operation === "search_procedures" || operation === "search_strings"
         ? analysisSearchQuerySchema.parse(parameters)
         : undefined;
-    const matches =
-      query === undefined ? undefined : analysisSearchPredicate(query);
     if (operation === "list_procedures" || operation === "search_procedures") {
       const items = (await this.functions()).map((fn) => ({
         address: fn.address,
         value: fn.name,
       }));
-      return matches === undefined
-        ? items
-        : items.filter(({ value }) => matches(value));
+      return this.searchItems(operation, items, query);
     }
     if (operation === "list_strings" || operation === "search_strings") {
       const nativePattern =
@@ -609,8 +633,8 @@ export class IdaOperationRunner {
           ? nativeLiteralSearchPattern(query.pattern, query.case_sensitive)
           : undefined;
       const items = await this.strings(nativePattern);
-      return matches !== undefined
-        ? items.filter(({ value }) => matches(value))
+      return query !== undefined
+        ? this.searchItems(operation, items, query)
         : parameters.address === undefined
           ? items
           : items.filter(

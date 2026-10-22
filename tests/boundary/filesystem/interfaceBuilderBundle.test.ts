@@ -834,6 +834,94 @@ cliTest(
   },
 );
 
+cliTest(
+  "compiled CLI omits only source-less keyed archive annotation connectors",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-ib-keyed-annotations-");
+    const bundle = join(root, "Example.app");
+    const contents = join(bundle, "Contents");
+    const resources = join(contents, "Resources");
+    await mkdir(resources, { recursive: true });
+    await mkdir(join(contents, "MacOS"), { recursive: true });
+    await writeFile(
+      join(contents, "MacOS", "App"),
+      thinMach(0xfeedfacf, 0x0100000c),
+    );
+    await writeFile(
+      join(contents, "Info.plist"),
+      "<plist><dict><key>CFBundleExecutable</key><string>App</string></dict></plist>",
+    );
+    await writeFile(
+      join(resources, "Annotations.nib"),
+      buildBinary({
+        $archiver: "NSKeyedArchiver",
+        $version: 100000,
+        $objects: [
+          "$null",
+          {
+            $class: { UID: 9 },
+            NSSource: { UID: 7 },
+            NSDestination: { UID: 8 },
+            NSLabel: "outlet",
+          },
+          { $class: { UID: 10 }, NSDestination: { UID: 8 } },
+          { $class: { UID: 11 }, AXDestinationArchiveKey: { UID: 8 } },
+          { $class: { UID: 12 }, NSObject: { UID: 8 } },
+          { $class: { UID: 13 }, NSDestination: { UID: 8 } },
+          {
+            $class: { UID: 10 },
+            NSSource: null,
+            NSDestination: { UID: 8 },
+          },
+          { $class: { UID: 14 } },
+          { $class: { UID: 14 } },
+          {
+            $classname: "NSNibOutletConnector",
+            $classes: ["NSNibOutletConnector", "NSNibConnector", "NSObject"],
+          },
+          {
+            $classname: "NSIBHelpConnector",
+            $classes: ["NSIBHelpConnector", "NSObject"],
+          },
+          {
+            $classname: "NSNibAXAttributeConnector",
+            $classes: ["NSNibAXAttributeConnector", "NSObject"],
+          },
+          {
+            $classname: "NSIBUserDefinedRuntimeAttributesConnector",
+            $classes: ["NSIBUserDefinedRuntimeAttributesConnector", "NSObject"],
+          },
+          {
+            $classname: "NSFutureConnector",
+            $classes: ["NSFutureConnector", "NSObject"],
+          },
+          { $classname: "NSView", $classes: ["NSView", "NSObject"] },
+        ],
+        $top: { root: { UID: 1 } },
+      }),
+    );
+
+    const output = await cli.run({
+      arguments: ["decode-interface-builder", bundle, "--json"],
+      environment: { REA_LOG_LEVEL: "silent", REA_ANALYSIS_PROVIDER: "auto" },
+    });
+    expect(output.exitCode, output.stderr).toBe(0);
+    const result = interfaceBuilderAnalysisSchema.parse(
+      parseEvidence(output.json).normalized_result,
+    );
+    expect(result.documents[0]?.connection_count).toBe(3);
+    expect(result.graph.coverage).toContainEqual(
+      expect.objectContaining({
+        facet: "connections:Contents/Resources/Annotations.nib",
+        status: "partial",
+        reason: "connection_unresolved",
+        examined: 1,
+        omitted: 2,
+      }),
+    );
+  },
+);
+
 it("projects an NIBArchive binding as an unsupported partial connection", async () => {
   const root = await createTestTempDirectory("rea-ib-nibarchive-binding-");
   const bundle = join(root, "Example.app");
@@ -1477,6 +1565,210 @@ describe("NIBArchive ownerless connector accounting", () => {
       }),
     );
   });
+});
+
+describe("NIBArchive single-object connectors", () => {
+  it("does not count tooltip, accessibility or runtime attribute connectors as ownerless", async () => {
+    const root = await createTestTempDirectory("rea-ib-annotation-");
+    const bundle = join(root, "Example.app");
+    await mkdir(bundle, { recursive: true });
+    // Xcode encodes a tooltip, an accessibility description and user-defined
+    // runtime attributes as connector objects that name one object and no
+    // NSSource, beside the outlet that is the only connection here.
+    await writeFile(
+      join(bundle, "Window.nib"),
+      encodeNibArchiveFixture({
+        classes: [
+          "NSCustomObject",
+          "NSButton",
+          "NSNibOutletConnector",
+          "NSIBHelpConnector",
+          "NSNibAXAttributeConnector",
+          "NSIBUserDefinedRuntimeAttributesConnector",
+          "NSString",
+          "NSArray",
+          "NSNumber",
+        ],
+        objects: [
+          { classIndex: 0, values: {} },
+          { classIndex: 1, values: {} },
+          {
+            classIndex: 2,
+            values: {
+              NSSource: { ref: 0 },
+              NSDestination: { ref: 1 },
+              NSLabel: { ref: 6 },
+            },
+          },
+          {
+            classIndex: 3,
+            values: {
+              NSDestination: { ref: 1 },
+              NSFile: { ref: 7 },
+              NSMarker: { ref: 8 },
+            },
+          },
+          {
+            classIndex: 4,
+            values: {
+              AXDestinationArchiveKey: { ref: 1 },
+              AXAttributeTypeArchiveKey: { ref: 9 },
+              AXAttributeValueArchiveKey: { ref: 10 },
+            },
+          },
+          {
+            classIndex: 5,
+            values: {
+              NSObject: { ref: 1 },
+              NSValues: { ref: 11 },
+              NSKeyPaths: { ref: 12 },
+            },
+          },
+          { classIndex: 6, values: { "NS.bytes": "button" } },
+          { classIndex: 6, values: { "NS.bytes": "NSToolTipHelpKey" } },
+          { classIndex: 6, values: { "NS.bytes": "Change text style" } },
+          { classIndex: 6, values: { "NS.bytes": "AXDescription" } },
+          { classIndex: 6, values: { "NS.bytes": "text style" } },
+          {
+            classIndex: 7,
+            values: {
+              NSInlinedValue: false,
+              UINibEncoderEmptyKey: { ref: 13 },
+            },
+          },
+          {
+            classIndex: 7,
+            values: {
+              NSInlinedValue: false,
+              UINibEncoderEmptyKey: { ref: 14 },
+            },
+          },
+          { classIndex: 8, values: { "NS.intval": 4 } },
+          { classIndex: 6, values: { "NS.bytes": "layer.cornerRadius" } },
+        ],
+      }),
+    );
+
+    const analysis = await analyzeInterfaceBuilderBundle({
+      bundlePath: bundle,
+      targetSha256: "e".repeat(64),
+    });
+
+    expect(analysis.graph.coverage).toContainEqual(
+      expect.objectContaining({
+        facet: "connections:Window.nib",
+        status: "complete",
+        reason: null,
+        examined: 1,
+        omitted: 0,
+      }),
+    );
+    expect(analysis.documents).toContainEqual(
+      expect.objectContaining({
+        relative_path: "Window.nib",
+        connection_count: 1,
+      }),
+    );
+    expect(analysis.graph.truncated).toBe(false);
+    expect(analysis.limitations).not.toContain(
+      "Some recognized NIBArchive connectors declare no resolvable owner; they carry no connection evidence and are reported as omissions.",
+    );
+  });
+});
+
+// Only an absent NSSource marks an annotation; an encoded but unusable one is
+// still a connection whose owner cannot be resolved.
+describe("NIBArchive connectors with unusable sources", () => {
+  it("keeps an unknown AppKit connector without NSSource unresolved", async () => {
+    const root = await createTestTempDirectory("rea-ib-unknown-connector-");
+    const bundle = join(root, "Example.app");
+    await mkdir(bundle, { recursive: true });
+    await writeFile(
+      join(bundle, "Window.nib"),
+      encodeNibArchiveFixture({
+        classes: ["NSCustomObject", "NSButton", "NSFutureConnector"],
+        objects: [
+          { classIndex: 0, values: {} },
+          { classIndex: 1, values: {} },
+          { classIndex: 2, values: { NSDestination: { ref: 1 } } },
+        ],
+      }),
+    );
+
+    const analysis = await analyzeInterfaceBuilderBundle({
+      bundlePath: bundle,
+      targetSha256: "e".repeat(64),
+    });
+
+    expect(analysis.graph.coverage).toContainEqual(
+      expect.objectContaining({
+        facet: "connections:Window.nib",
+        status: "partial",
+        reason: "connection_unresolved",
+        omitted: 1,
+      }),
+    );
+    expect(analysis.graph.truncated).toBe(true);
+    expect(analysis.limitations).toContain(
+      "Some recognized NIBArchive connectors declare no resolvable owner; they carry no connection evidence and are reported as omissions.",
+    );
+  });
+
+  it.each([
+    ["NSNibOutletConnector", "nil", null],
+    ["NSNibOutletConnector", "a non-reference value", 7],
+    ["NSIBHelpConnector", "nil", null],
+  ] as const)(
+    "still counts %s whose NSSource is %s as ownerless",
+    async (className, _label, source) => {
+      const root = await createTestTempDirectory("rea-ib-unusable-source-");
+      const bundle = join(root, "Example.app");
+      await mkdir(bundle, { recursive: true });
+      await writeFile(
+        join(bundle, "Window.nib"),
+        encodeNibArchiveFixture({
+          classes: [
+            "NSCustomObject",
+            "NSButton",
+            "NSNibOutletConnector",
+            "NSIBHelpConnector",
+            "NSString",
+          ],
+          objects: [
+            { classIndex: 0, values: {} },
+            { classIndex: 1, values: {} },
+            {
+              classIndex: className === "NSNibOutletConnector" ? 2 : 3,
+              values: {
+                NSSource: source,
+                NSDestination: { ref: 1 },
+                NSLabel: { ref: 3 },
+              },
+            },
+            { classIndex: 4, values: { "NS.bytes": "button" } },
+          ],
+        }),
+      );
+
+      const analysis = await analyzeInterfaceBuilderBundle({
+        bundlePath: bundle,
+        targetSha256: "e".repeat(64),
+      });
+
+      expect(analysis.graph.coverage).toContainEqual(
+        expect.objectContaining({
+          facet: "connections:Window.nib",
+          status: "partial",
+          reason: "connection_unresolved",
+          omitted: 1,
+        }),
+      );
+      expect(analysis.graph.truncated).toBe(true);
+      expect(analysis.limitations).toContain(
+        "Some recognized NIBArchive connectors declare no resolvable owner; they carry no connection evidence and are reported as omissions.",
+      );
+    },
+  );
 });
 
 // This exact file is already selected by the unchanged native Apple CI lane.

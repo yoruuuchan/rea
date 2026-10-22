@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-import { AnalysisProtocolError } from "../domain/analysisErrorCore.js";
-import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import { AnalysisInputError } from "../domain/analysisErrorCore.js";
+import { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
   createEvidence,
   type Evidence,
@@ -11,7 +11,8 @@ import {
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import type { MobileApplicationProjectionWithSources } from "../domain/mobileApplicationGraphProjection.js";
 import { err, ok, type Result } from "../domain/result.js";
-import { requestInputError, workflowInputError } from "./workflowInputError.js";
+import { requestInputError } from "./workflowInputError.js";
+import { ArtifactInventoryCarrierError } from "../domain/artifactInventoryEvidence.js";
 
 interface InventoryProjectionInput {
   readonly inventory_evidence: readonly Evidence[];
@@ -42,7 +43,6 @@ interface InventoryProjectionOptions<
   readonly predicateType: string;
   readonly provider: EvidenceProvider;
   readonly subjectFormat: (first: Evidence) => EvidenceSubjectTarget["format"];
-  readonly protocolError: string;
 }
 
 /** Parse one inventory projection and wrap its deterministic result in Evidence. */
@@ -92,10 +92,25 @@ export const projectInventoryEvidence = <
       sources: projected.sources,
     });
   } catch (cause: unknown) {
-    return err(
-      cause instanceof TypeError || cause instanceof z.ZodError
-        ? workflowInputError(options.operation, cause)
-        : new AnalysisProtocolError(options.protocolError, { cause }),
-    );
+    if (cause instanceof AnalysisError) return err(cause);
+    if (cause instanceof ArtifactInventoryCarrierError)
+      return err(
+        new AnalysisInputError(
+          options.operation,
+          { cause, userMessage: cause.message },
+          [
+            {
+              path: [
+                "inventory_evidence",
+                ...(cause.index === undefined ? [] : [cause.index]),
+                ...(cause.index === undefined ? [] : ["operation"]),
+              ],
+              reason: "invalid_value",
+              message: cause.message,
+            },
+          ],
+        ),
+      );
+    throw cause;
   }
 };

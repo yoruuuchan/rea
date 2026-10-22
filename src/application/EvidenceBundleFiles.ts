@@ -1,9 +1,9 @@
 import { requireAuthenticationHeadroom } from "./JsonAuthenticationHeadroom.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
 
+import { describeValidationFailure } from "../domain/validationFailure.js";
 import {
   describeEvidenceBundleFailure,
-  describeValidationFailure,
   parseImmutableEvidenceBundle,
   parseEvidenceBundle,
   type EvidenceBundle,

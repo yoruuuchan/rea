@@ -762,3 +762,56 @@ describe("trace_feature requirements", () => {
     ).toMatchObject({ available: false, reason: "provider_missing" });
   });
 });
+
+const HOST_RESTRICTED_TOOLS = [
+  ["inspect_packet_capture", "packetCapture", "packetCaptureEnabled"],
+  ["inspect_packet_fields", "packetCapture", "packetCaptureEnabled"],
+  ["decode_signal_recording", "signalRecording", "signalRecordingEnabled"],
+  ["inspect_signal_decoders", "signalRecording", "signalRecordingEnabled"],
+  ["inspect_evm_interface", "evmInterface", "evmInterfaceEnabled"],
+  ["inspect_binary_layout", "binaryLayout", "binaryLayoutEnabled"],
+  ["inspect_recorded_crash", "recordedCrash", "recordedCrashEnabled"],
+  [
+    "inspect_firmware_regions",
+    "firmwareInspection",
+    "firmwareInspectionEnabled",
+  ],
+  ["extract_firmware", "firmwareExtraction", "firmwareExtractionEnabled"],
+  [
+    "recover_javascript_sources",
+    "javascriptRecovery",
+    "javascriptRecoveryEnabled",
+  ],
+] as const;
+
+describe("host-restricted integrations", () => {
+  it.each(HOST_RESTRICTED_TOOLS)(
+    "reports %s on an unsupported host before its configuration",
+    (name, feature, enabledField) => {
+      const availability = (enabled: boolean, hostUnsupported: boolean) =>
+        buildCapabilityInventory(
+          { open: false, capabilities: [] },
+          {
+            processCaptureEnabled: true,
+            ...({ [enabledField]: enabled } as Record<
+              typeof enabledField,
+              boolean
+            >),
+            hostUnsupported: { [feature]: hostUnsupported },
+          },
+        ).find((tool) => tool.name === name);
+      expect(availability(true, true)).toMatchObject({
+        available: false,
+        reason: "unsupported_host",
+      });
+      expect(availability(false, false)).toMatchObject({
+        available: false,
+        reason: "provider_missing",
+      });
+      expect(availability(true, false)).toMatchObject({
+        available: true,
+        reason: "available",
+      });
+    },
+  );
+});

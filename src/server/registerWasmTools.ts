@@ -7,7 +7,10 @@ import type { EvidenceMcpServer } from "./EvidenceMcpServer.js";
 import type { WasmArtifactService } from "../application/wasm/WasmArtifactService.js";
 import type { EvidenceWriter } from "../application/investigation/InvestigationRecordPort.js";
 import type { EvidenceLookup } from "../application/EvidenceInputResolver.js";
-import { summarizeRetainedAnalysis } from "../application/analysisView/AnalysisViewService.js";
+import {
+  requireAnalysisViewRetention,
+  summarizeRetainedAnalysis,
+} from "../application/analysisView/AnalysisViewService.js";
 import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
 import { err } from "../domain/result.js";
 import { wasmArtifactModule } from "../composition/wasm.js";
@@ -75,12 +78,14 @@ export const registerWasmTools = (
           ),
         );
       const { detail, ...input } = parsed.data;
+      const retention = { recordEvidence, evidenceById };
+      if (detail === "summary") {
+        const ready = requireAnalysisViewRetention(contract.name, retention);
+        if (!ready.ok) return ready;
+      }
       const inspected = await service.inspect(input, options);
       return detail === "summary" && inspected.ok
-        ? summarizeRetainedAnalysis(inspected.value, {
-            recordEvidence,
-            evidenceById,
-          })
+        ? summarizeRetainedAnalysis(inspected.value, retention)
         : inspected;
     },
     logger,

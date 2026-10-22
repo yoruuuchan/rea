@@ -255,7 +255,6 @@ const setupRunOptions = (
     options.skillClient.length > 0;
   const hasSelectedClients =
     hasExplicitScope &&
-    !options.allDetected &&
     (options.client.length > 0 || options.skillClient.length > 0);
   return {
     approved: options.yes && !options.dryRun,
@@ -272,7 +271,7 @@ const setupRunOptions = (
       ? { installSkill: options.skill ?? agentIntegrationSelected }
       : {}),
     ...(interactive ? { onProgress: renderSetupProgress } : {}),
-    ...(hasSelectedClients
+    ...(hasSelectedClients && !options.allDetected
       ? {
           readinessScope: {
             clients: options.client,

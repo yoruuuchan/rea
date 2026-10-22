@@ -14,10 +14,14 @@ import {
 } from "../../contracts/providerSelection.js";
 import type { AnalysisProfileCommitment } from "../../domain/analysisProfile.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
-import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
+import {
+  AnalysisCancelledError,
+  AnalysisUnsupportedTargetError,
+} from "../../domain/analysisErrorCore.js";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   ProviderSelectionError,
+  type ProviderSelectionErrorOptions,
   type ProviderSelectionFailureReason,
   type ProviderSelectionRejection,
 } from "../../domain/providerSelectionError.js";
@@ -593,9 +597,29 @@ export class AnalysisProviderRegistry {
     );
     if (!evaluation.ok) return evaluation;
     const evaluated = evaluation.value;
-    if (evaluated.profileError !== undefined)
-      return err(evaluated.profileError);
     const statuses = replaceCandidate(baseline, evaluated.status);
+    const refusal = evaluated.profileError;
+    // A selected provider refusing the target is a selection outcome that keeps the
+    // refusal's reason, recovery and evidence; unconfirmed cleanup stays with the refusal.
+    if (
+      refusal instanceof AnalysisUnsupportedTargetError &&
+      !refusal.cleanupIncomplete
+    )
+      return err(
+        selectionError("target_unsupported", providerId, statuses, {
+          refusal: {
+            userMessage: refusal.message,
+            ...(refusal.remediationAction === undefined
+              ? {}
+              : { remediationAction: refusal.remediationAction }),
+            capturedOutput: refusal.capturedOutput,
+            diagnostics: refusal.diagnostics,
+            partialObservation: refusal.partialObservation,
+            cause: refusal,
+          },
+        }),
+      );
+    if (refusal !== undefined) return err(refusal);
     if (evaluated.profile === undefined)
       return err(selectionError("provider_unavailable", providerId, statuses));
     return ok(
@@ -818,9 +842,19 @@ const selectionError = (
   options: {
     readonly operation?: string;
     readonly rejectionCandidates?: readonly AnalysisProviderCandidateStatus[];
+    readonly refusal?: Pick<
+      ProviderSelectionErrorOptions,
+      | "userMessage"
+      | "remediationAction"
+      | "capturedOutput"
+      | "diagnostics"
+      | "partialObservation"
+      | "cause"
+    >;
   } = {},
 ): ProviderSelectionError =>
   new ProviderSelectionError({
+    ...options.refusal,
     operation: options.operation ?? "open_binary",
     reason,
     requestedProviderId,

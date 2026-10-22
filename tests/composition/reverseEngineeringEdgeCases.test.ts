@@ -307,7 +307,13 @@ it("rejects malformed Rizin requests before touching the provider", async () => 
 
   expect(result).toMatchObject({
     ok: false,
-    error: { _tag: "AnalysisInputError", operation: "execute_rizin_command" },
+    error: {
+      _tag: "AnalysisInputError",
+      operation: "execute_rizin_command",
+      issues: [
+        { path: ["command"], reason: "missing_argument", expected: "string" },
+      ],
+    },
   });
   expect(run).not.toHaveBeenCalled();
 });

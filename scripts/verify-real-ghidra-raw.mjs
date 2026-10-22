@@ -140,6 +140,13 @@ try {
       address: entry,
     });
     assert.equal(instruction.normalized_result.address, entry);
+    assert.ok(Array.isArray(instruction.normalized_result.decoder_context));
+    const tmodeContext = instruction.normalized_result.decoder_context.find(
+      (ctx) => ctx.register === "TMode",
+    );
+    assert.ok(tmodeContext !== undefined);
+    assert.equal(tmodeContext.source, "ghidra-program-context");
+    assert.ok([null, "0", "1"].includes(tmodeContext.value));
   }
   assert.equal(profiles[0], profiles[1]);
   assert.notEqual(profiles[1], profiles[2]);

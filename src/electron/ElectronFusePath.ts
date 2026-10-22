@@ -219,9 +219,7 @@ const resolveInside = async (
         : target;
       if (relativeTarget === null) return { kind: "escapes" };
       if (absoluteTarget) resolved.length = 0;
-      pending.unshift(
-        ...relativeTarget.split("/").filter((part) => part !== ""),
-      );
+      pending.unshift(...symlinkTargetSegments(relativeTarget));
       continue;
     }
     if (metadata.isDirectory()) {
@@ -361,3 +359,9 @@ const isMissing = (cause: unknown): boolean =>
   cause instanceof Error &&
   "code" in cause &&
   ["ENOENT", "ENOTDIR"].includes(String(cause.code));
+
+/** Split a relative link target using the local filesystem's separator rules. */
+const symlinkTargetSegments = (target: string): readonly string[] =>
+  target
+    .split(process.platform === "win32" ? /[\\/]/u : "/")
+    .filter((part) => part !== "");

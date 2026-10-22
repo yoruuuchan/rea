@@ -100,6 +100,41 @@ export const actionState = (step: BrowserScenarioStep) => ({
   error: step.error,
 });
 
+type StorageSnapshot = Extract<
+  BrowserStepArtifacts["storage"],
+  { state: "captured" }
+>["value"];
+
+/** Encoding provenance is not itself a target-storage difference. */
+export const storageProjection = ({
+  cookies,
+  local_storage,
+  session_storage,
+}: StorageSnapshot) => ({
+  cookies,
+  local_storage,
+  session_storage,
+});
+
+/** Legacy UTF-8 fingerprints have irreversibly lost unpaired code units. */
+export const storageFingerprintCoverageReason = (
+  ...states: readonly BrowserStepArtifacts["storage"][]
+): string | undefined =>
+  states.some(
+    (state) =>
+      state.state === "captured" &&
+      state.value.fingerprint_version === undefined &&
+      [
+        state.value.cookies,
+        state.value.local_storage,
+        state.value.session_storage,
+      ].some((entries) =>
+        entries.some(({ value_state }) => value_state === "hashed"),
+      ),
+  )
+    ? "Legacy storage fingerprints used lossy UTF-8; recapture both sides with code-unit-preserving storage fingerprints before comparing values."
+    : undefined;
+
 /** One step's ordered events and a single indexed network graph. */
 export interface ScenarioStepEvents {
   readonly events: readonly unknown[];

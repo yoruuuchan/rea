@@ -24,6 +24,5 @@ export const projectAppleApplicationEvidence = (
     predicateType: "rea.apple-application-graph",
     provider: APPLE_APPLICATION_PROVIDER,
     subjectFormat: (first) => first.subject?.format ?? "unknown",
-    protocolError: "Apple application projection produced an invalid result",
   });
 };

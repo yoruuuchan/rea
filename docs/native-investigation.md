@@ -335,6 +335,15 @@ Mach-O fixtures check each case against source-owned return values.
 
 ## Static inspection
 
+`inspect_artifact` and `extract_artifact` retain universal Mach-O slices under
+their exact `lipo` names, including 32-bit ARM implementations such as `armv7`,
+`armv7s`, and `armv7k`. These names are reconciled with the FAT CPU subtype;
+the structural reader's `arm` family label alone does not identify a slice.
+Available CPU type, subtype/capability bits, byte range, and alignment remain
+checked against the source bytes. Inventory records source ranges and hashes, and
+extraction copies those ranges without running the target. This does not
+expand any analysis provider's supported architectures.
+
 `inspect_plist.format` describes the selected source, not plutil's conversion
 format. Sources explicitly identified as XML, binary or JSON retain those
 labels. For generic text, a bounded source-prefix probe recognizes leading XML

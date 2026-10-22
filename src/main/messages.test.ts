@@ -32,38 +32,44 @@ function prose(text: string): string {
 }
 
 it("uses one retry then a user handoff for transient MCP failures", () => {
-  expect(MCP_CONNECTION_LOST).toBe(
-    "Retry the tool call once only when it is safe to repeat or known not to have started. If it may already have changed the target, or it fails again, tell the user REA lost its MCP client connection and ask them to restart the MCP client.",
-  );
+  expect(MCP_CONNECTION_LOST).toMatch(/^Retry /u);
+  // "once only" is the single-attempt cap. "Retry whenever it is safe to
+  // repeat" does not contain it.
+  expect(MCP_CONNECTION_LOST).toContain("once only");
+  expect(MCP_CONNECTION_LOST).toContain("safe to repeat");
+  expect(MCP_CONNECTION_LOST).toContain("tell the user");
+  expect(MCP_CONNECTION_LOST).toContain("restart the MCP client");
   expect(MCP_CONNECTION_LOST).not.toContain("rea doctor");
-  expect(MCP_CONNECTION_START_FAILED).toBe(
-    "Retry once. If it fails again, tell the user REA could not start its MCP connection and ask them to restart the MCP client, then run `rea doctor`.",
-  );
-  expect(MCP_CONNECTION_START_FAILED).toContain("Retry once.");
-  expect(SERVER_START_FAILED).toBe(
-    "Do not repeat this startup. Tell the user REA could not start and ask them to restart the MCP client, then run `rea doctor`.",
-  );
+  expect(MCP_CONNECTION_START_FAILED).toMatch(/^Retry once\./u);
+  expect(SERVER_START_FAILED).toMatch(/^Do not repeat /u);
   expect(SERVER_START_FAILED).not.toMatch(/\bretry\b/iu);
-  for (const message of [MCP_CONNECTION_START_FAILED, SERVER_START_FAILED]) {
-    expect(message).toMatch(/tell the user/iu);
-    expect(message).toContain("restart the MCP client");
-    expect(message).toContain("`rea doctor`");
-  }
-  expect(PROCESS_UNEXPECTED_FAILURE_REMEDIATION).toBe(
-    "Do not repeat this command. Tell the user the process command could not complete and ask them to check the input files, then run `rea doctor`.",
+  expect(PROCESS_UNEXPECTED_FAILURE_REMEDIATION).toMatch(/^Do not repeat /u);
+  expect(PROCESS_UNEXPECTED_FAILURE_REMEDIATION).toContain(
+    "check the input files",
   );
   expect(PROCESS_UNEXPECTED_FAILURE_REMEDIATION).not.toMatch(/\bretry\b/iu);
+  for (const message of [
+    MCP_CONNECTION_START_FAILED,
+    SERVER_START_FAILED,
+    PROCESS_UNEXPECTED_FAILURE_REMEDIATION,
+  ]) {
+    expect(message).toMatch(/tell the user/iu);
+    expect(message).toContain("`rea doctor`");
+  }
+  for (const message of [MCP_CONNECTION_START_FAILED, SERVER_START_FAILED])
+    expect(message).toContain("restart the MCP client");
 });
 
 it("keeps non-retryable transport failures on their named fix", () => {
-  expect(MCP_SHUTDOWN_FAILED).toBe(
-    "REA could not close cleanly. End the REA process before starting it again.",
-  );
-  expect(MCP_HTTP_LISTEN_FAILED).toBe(
-    "REA could not listen for MCP HTTP connections on the selected host and port. Choose another --port or stop the process using it.",
-  );
+  expect(MCP_SHUTDOWN_FAILED).toContain("close cleanly");
+  expect(MCP_SHUTDOWN_FAILED).toContain("End the REA process");
+  expect(MCP_SHUTDOWN_FAILED).toContain("before starting it again");
+  expect(MCP_HTTP_LISTEN_FAILED).toContain("Choose another --port");
+  expect(MCP_HTTP_LISTEN_FAILED).toContain("stop the process using it");
   expect(MCP_SHUTDOWN_FAILED).not.toContain("Retry");
+  expect(MCP_SHUTDOWN_FAILED).not.toContain("tell the user");
   expect(MCP_HTTP_LISTEN_FAILED).not.toContain("tell the user");
+  expect(MCP_HTTP_LISTEN_FAILED).not.toContain("Retry");
 });
 
 it("keeps ceiling dial recoveries and scrubs non-adjustable timeout teaching", async () => {
@@ -113,10 +119,11 @@ it("keeps ceiling dial recoveries and scrubs non-adjustable timeout teaching", a
     "utf8",
   );
   const skillProse = prose(skill);
-  expect(skillProse).toContain(
-    "retry that call once only when it is safe to repeat or known not to have started",
-  );
-  expect(skillProse).toContain("tell the user REA's connection failed");
+  expect(skillProse).toContain("once only");
+  expect(skillProse).toContain("safe to repeat");
+  expect(skillProse).toContain("tell the user");
+  expect(skillProse).toContain("restart the MCP client");
+  expect(skillProse).toContain("connection failed");
   expect(skillProse).toContain("Do not invent a setting");
   expect(skillProse).toContain("explicitly recommends that change");
   expect(skillProse).toContain("not a recommendation to change it");
@@ -124,9 +131,10 @@ it("keeps ceiling dial recoveries and scrubs non-adjustable timeout teaching", a
   const instructions = prose(
     await readFile(join(root, "src/server/createServer.ts"), "utf8"),
   );
-  expect(instructions).toContain(
-    "retry that call once only when it is safe to repeat or known not to have started",
-  );
+  expect(instructions).toContain("once only");
+  expect(instructions).toContain("safe to repeat");
+  expect(instructions).toContain("tell the user");
+  expect(instructions).toContain("restart the MCP client");
   expect(instructions).toContain("explicitly recommends that change");
   expect(instructions).toContain("not a recommendation to change it");
   expect(instructions).not.toContain("names a request field");

@@ -19,8 +19,13 @@ import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { AnalysisCleanupLeaseGroup } from "../artifacts/AnalysisCleanupLease.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { cleanupOwnedProcessGroup } from "../process/ProcessOwnership.js";
+import type {
+  OwnedProcessGroup,
+  ProcessCleanupResult,
+} from "../process/ProcessOwnership.js";
 import { execFileOutput } from "../process/ExecFileOutput.js";
 import {
+  type ProviderProcessHandle,
   type ProviderProcessLaunch,
   spawnOwnedProviderProcess,
 } from "../process/ProviderProcess.js";
@@ -49,6 +54,12 @@ import { retryLinuxHopperPublisherCleanup } from "../application/LinuxHopperPubl
 
 const execFileAsync = promisify(execFile);
 const HOPPER_BACKGROUND_STARTUP_MS = 5_000;
+/**
+ * Bound for the Linux demo helper's orderly shutdown during teardown.
+ * The helper stops Hopper and Xvfb with SIGTERM (up to 2s each in
+ * stop_process); Xvfb removes its /tmp/.X<n>-lock on that clean exit.
+ */
+const LINUX_DEMO_ORDERLY_SHUTDOWN_GRACE_MS = 10_000;
 
 const bindRetainedArtifactCleanup = (
   error: AnalysisError,
@@ -148,6 +159,11 @@ export interface HopperApplicationLauncherDependencies {
     readonly helperPath: string;
     readonly signal?: AbortSignal;
   }) => Promise<LinuxPrivateDisplaySelection>;
+  /**
+   * How long teardown waits for the Linux demo helper's orderly shutdown
+   * (stdin EOF → SIGTERM to Hopper and Xvfb) before the process-group kill.
+   */
+  readonly demoOrderlyShutdownGraceMs?: number;
 }
 
 /**
@@ -386,7 +402,14 @@ export class HopperApplicationLauncher implements BridgeLauncher {
       });
       if (started === null) return err(hopperCancelledBySignal(signal));
       launched = true;
-      const cleanup = () => cleanupOwnedProcessGroup(started.ownership);
+      const cleanup = () =>
+        cleanupHopperLauncherSession({
+          helper: linuxDemo === undefined ? undefined : started.process,
+          ownership: started.ownership,
+          orderlyShutdownGraceMs:
+            this.dependencies.demoOrderlyShutdownGraceMs ??
+            LINUX_DEMO_ORDERLY_SHUTDOWN_GRACE_MS,
+        });
       const ownedLauncher = {
         ...(this.options.preparedImage === undefined
           ? {}
@@ -655,6 +678,60 @@ const hopperLaunchFailure = (
   signal?.aborted === true
     ? new HopperCancelledError(signal.reason)
     : new HopperStartError({ cause });
+
+/**
+ * Shut down a launched Hopper session, asking the Linux demo helper to stop
+ * orderly before the process-group kill.
+ *
+ * The helper treats stdin EOF as its shutdown signal (OwnerLifetime): its
+ * run_launch finally block then stops Hopper and Xvfb with SIGTERM, and Xvfb
+ * removes its /tmp/.X<n>-lock on that clean exit. SIGKILLing the group first
+ * orphans the lock, and later startups count each orphan as an
+ * address_collision. Anything still alive after the grace period is reaped by
+ * the token-verified group cleanup, so a stuck helper cannot hang teardown.
+ */
+const cleanupHopperLauncherSession = async (input: {
+  readonly helper: ProviderProcessHandle | undefined;
+  readonly ownership: OwnedProcessGroup;
+  readonly orderlyShutdownGraceMs: number;
+}): Promise<ProcessCleanupResult> => {
+  const helper = input.helper;
+  if (
+    helper !== undefined &&
+    helper.exitCode === null &&
+    helper.signalCode === null
+  ) {
+    try {
+      helper.stdin?.end();
+    } catch {
+      // Already gone; the group cleanup below covers the remainder.
+    }
+    await waitForHelperExit(helper, input.orderlyShutdownGraceMs);
+  }
+  return cleanupOwnedProcessGroup(input.ownership);
+};
+
+/** Wait for the helper's exit, giving up after the grace period. */
+const waitForHelperExit = (
+  helper: ProviderProcessHandle,
+  timeoutMs: number,
+): Promise<void> =>
+  new Promise((resolve) => {
+    if (helper.exitCode !== null || helper.signalCode !== null)
+      return resolve();
+    const timer = setTimeout(
+      () => {
+        helper.off("exit", onExit);
+        resolve();
+      },
+      Math.max(0, timeoutMs),
+    );
+    const onExit = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    helper.once("exit", onExit);
+  });
 
 /** Select the publisher-verified demo adapter from the caller's explicit launch mode. */
 export const usesLinuxDemo = (

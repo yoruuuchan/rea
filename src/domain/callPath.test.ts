@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { AnalysisInputError } from "./analysisErrorCore.js";
 import { buildCallPath } from "./callPath.js";
 import { combineFunctionRelationshipCoverage } from "./functionCallCoverage.js";
 import { callPathResultSchema, type CallPathInput } from "./callPathSchemas.js";
@@ -669,9 +670,9 @@ describe("call path evidence admission", () => {
       run([observe("0x1000", [])], { start: { address: "1000" } }),
     ).toThrow();
     const one = observe("0x1000", []);
-    expect(() => run([one, one])).toThrow(/Duplicate/u);
+    expect(() => run([one, one])).toThrow(AnalysisInputError);
     expect(() => run([one, observe("0x2000", [], "other")])).toThrow(
-      /providers/u,
+      AnalysisInputError,
     );
   });
 
@@ -696,9 +697,7 @@ describe("call path evidence admission", () => {
   });
 
   it("requires an observed start function", () => {
-    expect(() => run([observe("0x2000", [])])).toThrow(
-      /supplied for start 0x1000/u,
-    );
+    expect(() => run([observe("0x2000", [])])).toThrow(AnalysisInputError);
   });
 });
 

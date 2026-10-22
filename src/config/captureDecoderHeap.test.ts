@@ -52,12 +52,11 @@ it("keeps the 192 MiB decoder heap when the setting is unset", async () => {
   const parsed = parseConfig({});
   if (!parsed.ok) throw new Error("unset heap was rejected");
   const recovery = captureDecoderHeapRecovery(DEFAULT_CAPTURE_DECODER_HEAP);
+  expect(recovery).toContain(CAPTURE_DECODER_OLD_GENERATION_SETTING);
   expect(recovery).toContain(
-    "The effective REA_CAPTURE_DECODER_OLD_GENERATION_MIB value is 192 MiB (source default; default 192 MiB, floor 8 MiB, maximum 16384 MiB).",
+    String(DEFAULT_CAPTURE_DECODER_HEAP.oldGenerationMiB),
   );
-  expect(recovery).toContain(
-    "Set REA_CAPTURE_DECODER_OLD_GENERATION_MIB in the environment that starts REA to a decimal integer from 8 to 16384, then restart REA.",
-  );
+  expect(recovery).toContain(`source ${DEFAULT_CAPTURE_DECODER_HEAP.source}`);
   expect(recovery).not.toContain("no runtime override");
   const command = await new NodeCaptureAdapter("har").command(
     "/owned/request.json",
@@ -98,11 +97,17 @@ it("uses a valid REA_CAPTURE_DECODER_OLD_GENERATION_MIB override", async () => {
       configured(256),
     ),
   );
-  const recovery = captureDecoderHeapRecovery(configured(256));
+  expect(projected).toMatchObject({
+    code: "resource_constraint",
+    details: { resource: "memory" },
+  });
   expect(projected.message).toContain(
-    "exhausted its 256 MiB V8 old-generation heap (source setting)",
+    "256 MiB V8 old-generation heap (source setting)",
   );
-  expect(projected.remediation.action).toContain(recovery);
+  expect(projected.remediation.action).toContain(
+    CAPTURE_DECODER_OLD_GENERATION_SETTING,
+  );
+  expect(projected.remediation.action).toContain("256 MiB (source setting");
   expect(projected.message).not.toContain("no runtime override");
   if (process.versions.bun === undefined)
     expect(projected.details).toMatchObject({
@@ -158,22 +163,23 @@ it("reports the heap the selected adapter launches when decoder environment diff
     if (!reported.ok)
       throw new Error(projectAnalysisError(reported.error).message);
     const limitations = reported.value.limitations.join("\n");
-    expect(limitations).toContain(
-      "The effective REA_CAPTURE_DECODER_OLD_GENERATION_MIB value is 256 MiB (source setting",
-    );
-    expect(limitations).not.toContain("192 MiB (source default)");
+    expect(limitations).toContain(CAPTURE_DECODER_OLD_GENERATION_SETTING);
+    expect(limitations).toContain("256 MiB (source setting");
+    expect(limitations).not.toContain("source default");
     expect(limitations).not.toContain("512 MiB (source setting)");
 
     vi.spyOn(launched, "command").mockRejectedValue(heapExhaustion());
     const exhausted = await decoder.inspect(input);
     if (exhausted.ok) throw new Error("Heap exhaustion must fail inspection");
     const projected = projectAnalysisError(exhausted.error);
+    expect(projected.code).toBe("resource_constraint");
     expect(projected.message).toContain(
-      "exhausted its 256 MiB V8 old-generation heap (source setting)",
+      "256 MiB V8 old-generation heap (source setting)",
     );
     expect(projected.remediation.action).toContain(
-      "The effective REA_CAPTURE_DECODER_OLD_GENERATION_MIB value is 256 MiB (source setting",
+      CAPTURE_DECODER_OLD_GENERATION_SETTING,
     );
+    expect(projected.remediation.action).toContain("256 MiB (source setting");
     expect(projected.message).not.toContain("192 MiB");
     expect(projected.remediation.action).not.toContain(
       "512 MiB (source setting)",
@@ -228,8 +234,8 @@ it.each([
   });
   if (startup.ok) throw new Error(`Startup accepted ${JSON.stringify(value)}`);
   expect(startup.error.settings).toContainEqual({
-    setting: "REA_CAPTURE_DECODER_OLD_GENERATION_MIB",
-    constraint: expect.stringContaining("from 8 to 16384 MiB"),
+    setting: CAPTURE_DECODER_OLD_GENERATION_SETTING,
+    constraint: captureDecoderHeapConstraint,
   });
   const config = parseConfig({
     REA_CAPTURE_DECODER_OLD_GENERATION_MIB: value,

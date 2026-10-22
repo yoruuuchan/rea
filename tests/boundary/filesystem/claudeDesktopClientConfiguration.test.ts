@@ -131,10 +131,10 @@ describe("Windows Claude Desktop configuration location", () => {
     ).toContain("claude_desktop");
   });
 
-  it("uses AppData while the MSIX package has no private copy", async () => {
+  it("uses AppData but refuses to write while the package keeps no private roaming file", async () => {
     const { home, env, appDataConfig, container, privateConfig } =
       await windowsProfile();
-    await mkdir(container, { recursive: true });
+    await mkdir(join(container, "LocalCache", "Roaming"), { recursive: true });
     await writeJson(appDataConfig, { preferences: {} });
 
     const client = claudeDesktop(home, env);
@@ -148,7 +148,7 @@ describe("Windows Claude Desktop configuration location", () => {
     const inspection = await inspectClientConfiguration(client, {}, command);
     expect(inspection.status).toBe("invalid");
     expect(inspection.status === "invalid" && inspection.remediation).toContain(
-      "Open Claude Desktop once if it has never run, quit it fully, then rerun setup",
+      `Add REA's entry to ${appDataConfig} by hand while Claude Desktop is fully quit`,
     );
   });
 
@@ -226,6 +226,47 @@ describe("Windows Claude Desktop configuration location", () => {
       expect(await readdir(dirname(deploymentConfig))).toEqual([CONFIG]);
     },
   );
+});
+
+describe("Claude Desktop MSIX process view without its own private folder (#4278)", () => {
+  it("decides the process view from another private roaming folder when Claude Desktop keeps none", async () => {
+    const { home, env, appDataConfig, container } = await windowsProfile();
+    // The app writes the real %APPDATA%\Claude; the package redirected other roaming writes.
+    await writeJson(
+      join(container, "LocalCache", "Roaming", "turborepo", "telemetry.json"),
+      {},
+    );
+    await writeJson(appDataConfig, { preferences: {} });
+
+    const client = claudeDesktop(home, env);
+
+    expect(client.configPath).toBe(appDataConfig);
+    expect(client.msixPackage).toMatchObject({ processView: "direct" });
+    await expect(
+      configureClientConfiguration(client, {}, command),
+    ).resolves.toMatchObject({ status: "configured" });
+    expect(await readJson(appDataConfig)).toMatchObject({
+      preferences: {},
+      mcpServers: { rea: reaEntry },
+    });
+  });
+
+  it("refuses to write when another private roaming folder shows a redirected view", async () => {
+    const { home, env, appDataConfig, container } = await windowsProfile();
+    const privateFolder = join(container, "LocalCache", "Roaming", "turborepo");
+    await writeJson(join(privateFolder, "telemetry.json"), {});
+    await writeJson(appDataConfig, { preferences: {} });
+    // A process the package started sees that private folder at its AppData path.
+    // A junction needs no symlink privilege on Windows; POSIX ignores the type.
+    await symlink(privateFolder, join(env.APPDATA, "turborepo"), "junction");
+
+    const client = claudeDesktop(home, env);
+
+    expect(client.msixPackage).toMatchObject({ processView: "redirected" });
+    const inspection = await inspectClientConfiguration(client, {}, command);
+    expect(inspection.status).toBe("invalid");
+    expect(await readJson(appDataConfig)).toEqual({ preferences: {} });
+  });
 });
 
 it("preserves explicit AppData root whitespace throughout setup, doctor and uninstall", async () => {
@@ -462,7 +503,8 @@ describe("MSIX Claude Desktop registration lifecycle", () => {
 
 describe("MSIX Claude Desktop uninstall", () => {
   it("refuses uninstall when the package view is unknown", async () => {
-    const { home, env, appDataConfig, container } = await windowsProfile();
+    const { home, env, appDataConfig, container, privateConfig } =
+      await windowsProfile();
     await mkdir(container, { recursive: true });
     await writeJson(appDataConfig, { mcpServers: { rea: reaEntry } });
 
@@ -476,7 +518,9 @@ describe("MSIX Claude Desktop uninstall", () => {
       expect.objectContaining({
         name: "claude_desktop",
         status: "failed",
-        detail: expect.stringContaining("rerun uninstall"),
+        detail: expect.stringContaining(
+          `Remove REA's entry by hand from each of ${privateConfig} and ${appDataConfig} that has one`,
+        ),
       }),
     );
     expect(await readJson(appDataConfig)).toEqual({

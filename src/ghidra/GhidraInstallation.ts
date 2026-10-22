@@ -22,6 +22,7 @@ import { delimiter as pathDelimiter, dirname, posix, win32 } from "node:path";
 import type { ProviderRejectionCode } from "../contracts/providerSelection.js";
 import {
   parseExecutableHeader,
+  readFatArchitectureFamilies,
   type ExecutableMetadata,
 } from "../domain/binaryTarget.js";
 import {
@@ -111,39 +112,37 @@ const assessNativeDecompiler = (
       status: "unknown",
       detail: `${path} is executable, but no native tool format is defined for ${platform}/${architecture}`,
     };
-  let parsed =
+  const parsed =
     probe === undefined
       ? undefined
       : parseExecutableHeader(probe.bytes, architecture, probe.size);
-  if (probe !== undefined && parsed !== undefined && !parsed.ok) {
-    // FAT parsing selects a host slice. A validated foreign slice can still
-    // prove that its complete architecture table excludes this host. If the
-    // host is listed but its slice is malformed, preserve the unknown outcome.
-    for (const { node } of NATIVE_ARCHITECTURES) {
-      if (node === architecture) continue;
-      const alternative = parseExecutableHeader(probe.bytes, node, probe.size);
-      if (
-        alternative.ok &&
-        !alternative.value.availableArchitectures.some(
-          (available) => available === expectedArchitecture,
-        )
-      ) {
-        parsed = alternative;
-        break;
-      }
-    }
-  }
-  if (parsed === undefined || !parsed.ok)
+  // Slice selection can refuse a FAT table that still proves this host is
+  // excluded, such as one declaring only arm64 and arm64e; its validated
+  // families decide. A malformed host slice remains an unknown outcome.
+  const families =
+    probe !== undefined && parsed !== undefined && !parsed.ok
+      ? readFatArchitectureFamilies(probe.bytes, probe.size)
+      : null;
+  const header = parsed?.ok
+    ? parsed.value
+    : families?.ok &&
+        !families.value.some((family) => family === expectedArchitecture)
+      ? {
+          format: "mach-o-universal" as const,
+          architecture: families.value.join("/") || "no supported architecture",
+        }
+      : undefined;
+  if (header === undefined)
     return {
       status: "unknown",
       detail: `${path} is executable, but its executable format for ${platform}/${architecture} could not be established`,
     };
-  const observed = `${parsed.value.format} ${parsed.value.architecture}`;
+  const observed = `${header.format} ${header.architecture}`;
   const expected = `${expectedFormat} ${expectedArchitecture}`;
   const formatMatches = isMachOFormat(expectedFormat)
-    ? isMachOFormat(parsed.value.format)
-    : parsed.value.format === expectedFormat;
-  if (formatMatches && parsed.value.architecture === expectedArchitecture)
+    ? isMachOFormat(header.format)
+    : header.format === expectedFormat;
+  if (formatMatches && header.architecture === expectedArchitecture)
     return {
       status: "compatible",
       detail: `${path} reports ${observed}, which matches ${platform}/${architecture}`,

@@ -32,7 +32,11 @@ cliTest(
     };
     const cliResponse = await cli.run({
       arguments: ["trace-web-module-imports", manifestPath, "0", "--json"],
-      environment,
+      environment: {
+        ...environment,
+        // This single CLI invocation cannot reuse a newly written cache.
+        NODE_DISABLE_COMPILE_CACHE: "1",
+      },
       timeoutMs: 15000,
     });
     expect(cliResponse.exitCode, cliResponse.stdout + cliResponse.stderr).toBe(

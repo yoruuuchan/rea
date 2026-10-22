@@ -131,6 +131,18 @@ const limitations = [
   "The actual launcher executable is hashed. Interpreter, shared libraries and installed Python package dependencies are not independently attested; source revision remains unknown for caller-supplied builds.",
 ] as const;
 
+/** Unblob's safe-link handling rewrites absolute targets inside its output. */
+const UNBLOB_LINK_TARGET_LIMITATION =
+  "Symlink link_target values are read from Unblob's extracted tree, not from the firmware's filesystem metadata. Unblob rewrites absolute targets relative to the extraction root, so a relative link_target may have been stored as an absolute path in the image.";
+
+const publishedSymlinks = (result: unknown): boolean => {
+  const parsed = firmwareResultSchemas.extract_firmware.safeParse(result);
+  return (
+    parsed.success &&
+    parsed.data.unpublished_entries.some((entry) => entry.kind === "symlink")
+  );
+};
+
 /** Queued bring-your-own firmware adapters with private snapshots and owned cleanup. */
 export class FirmwareProvider implements FirmwareAnalysisPort {
   #tail: Promise<void> = Promise.resolve();
@@ -541,6 +553,9 @@ export class FirmwareProvider implements FirmwareAnalysisPort {
             rawResult: raw,
             limitations: [
               ...limitations,
+              ...(engineName === "unblob" && publishedSymlinks(result)
+                ? [UNBLOB_LINK_TARGET_LIMITATION]
+                : []),
               ...(admitted.status === "compatible"
                 ? [admitted.limitation]
                 : []),

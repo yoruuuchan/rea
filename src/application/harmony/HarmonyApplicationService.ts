@@ -24,7 +24,5 @@ export const projectHarmonyApplicationEvidence = (
     predicateType: "rea.harmony-application-graph",
     provider: HARMONY_APPLICATION_PROVIDER,
     subjectFormat: (first) => first.subject?.format ?? "unknown",
-    protocolError:
-      "HarmonyOS application projection produced an invalid result",
   });
 };

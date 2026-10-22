@@ -458,7 +458,7 @@ describe("OpenCode V2 native server table", () => {
       timeout: { catalog: 30000 },
       servers: {
         other: { type: "local", command: ["node", "other.js"] },
-        rea: { type: "local", command: [...command] },
+        rea: { type: "local", command: [...command], disabled: false },
       },
     });
     expect(await readClientRegistrationStatuses(home)).toEqual(
@@ -501,7 +501,9 @@ describe("OpenCode V2 native server table", () => {
     expect(
       parseOpenCode(await readFile(client.configPath, "utf8")).mcp,
     ).toEqual({
-      servers: { rea: { type: "local", command: [...command] } },
+      servers: {
+        rea: { type: "local", command: [...command], disabled: false },
+      },
     });
     expect((await systemUninstallHost(home).removeClient(client)).status).toBe(
       "removed",

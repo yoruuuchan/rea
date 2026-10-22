@@ -4,6 +4,7 @@ import {
 } from "../domain/runtimeVersion.js";
 import { providerStartupTimeoutSchema } from "../config/providerStartupTimeout.js";
 import {
+  LINUX_HOPPER_SETUP_HOSTS,
   linuxHopperLauncherCandidates,
   systemLinuxHopperLauncherCandidates,
   supportsReaHost,
@@ -147,8 +148,7 @@ const hostCheck = async (host: DoctorHost): Promise<DoctorCheck> => {
       ? `${host.platform} ${host.architecture}`
       : `${linuxDistribution.id} ${linuxDistribution.versionId ?? "unknown"}`);
   return check("host", supported, detail, {
-    remediation:
-      "REA supports macOS 12+, Linux distributions with a recognized apt, dnf, or pacman package family, and the experimental Windows x64 Ghidra P0 boundary; automated Hopper setup additionally requires Ubuntu 24.04+, Fedora 41+, Nobara 44+, 64-bit Arch Linux, CachyOS, or Omarchy.",
+    remediation: `REA supports macOS 12+, Linux distributions with a recognized apt, dnf, or pacman package family, and the experimental Windows x64 Ghidra P0 boundary; automated Hopper setup on Linux additionally requires ${LINUX_HOPPER_SETUP_HOSTS}.`,
     classification: "unsupported_host",
   });
 };

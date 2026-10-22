@@ -10,6 +10,8 @@ import {
   createReconstructionCoverageData,
   createReconstructionVerifierContract,
   evaluateReconstructionClosure,
+  readReconstructionCoverageData,
+  type ReconstructionCoverageData,
 } from "./reconstructionCoverage.js";
 
 const digest = (character: string): string => character.repeat(64);
@@ -544,4 +546,57 @@ describe("reconstruction coverage verifier future timestamps", () => {
       ]),
     );
   });
+});
+
+describe("reconstruction coverage reference constraints", () => {
+  it.each([
+    {
+      label: "surface artifact",
+      change: (coverage: ReconstructionCoverageData) => ({
+        ...coverage,
+        surfaces: coverage.surfaces.map((surface) => ({
+          ...surface,
+          artifact_id: "missing.artifact",
+        })),
+      }),
+      path: ["coverage", "surfaces", 0, "artifact_id"],
+    },
+    {
+      label: "artifact Evidence",
+      change: (coverage: ReconstructionCoverageData) => ({
+        ...coverage,
+        artifacts: coverage.artifacts.map((artifact) => ({
+          ...artifact,
+          evidence_ids: [`ev_${"f".repeat(64)}`],
+        })),
+      }),
+      path: ["coverage", "artifacts", 0, "evidence_ids", 0],
+    },
+    {
+      label: "verifier contract digest",
+      change: (coverage: ReconstructionCoverageData) => ({
+        ...coverage,
+        verifier_contracts: coverage.verifier_contracts.map((contract) => ({
+          ...contract,
+          contract_sha256: "f".repeat(64),
+        })),
+      }),
+      path: ["coverage", "verifier_contracts", 0, "contract_sha256"],
+    },
+  ])(
+    "locates the invalid $label independently of source bundle integrity",
+    ({ change, path }) => {
+      const coverage = completeReconstructionCoverageData();
+      const result = readReconstructionCoverageData(change(coverage), [
+        "coverage",
+      ]);
+      expect(result).toMatchObject({
+        ok: false,
+        error: {
+          _tag: "AnalysisInputError",
+          issues: [{ path, reason: "invalid_value" }],
+        },
+      });
+    },
+  );
 });

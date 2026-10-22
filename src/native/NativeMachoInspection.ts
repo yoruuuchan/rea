@@ -379,9 +379,10 @@ const namesEveryExport = (
 ): boolean => {
   const names = new Set(parseNmExports(nmOutput).map(({ name }) => name));
   return sliceOutput(dyldExports)
-    .split(/\r?\n/u)
+    .split("\n")
     .every((rawLine, index) => {
-      const line = rawLine.trim();
+      // Keep a trailing carriage return: it belongs to the exported name.
+      const line = rawLine.trimStart();
       if (
         line.length === 0 ||
         (index === 0 && line.endsWith(":")) ||
@@ -392,14 +393,15 @@ const namesEveryExport = (
       const rows = parseDyldSymbols(line, "exports", null, names);
       // The parser withholds a row only when nm names both of its readings.
       if (rows.length === 0)
-        return names.has(/^0x[\da-f]+\s+(.+)$/iu.exec(line)?.[1] ?? "");
+        return names.has(/^0x[\da-f]+\s+(.+)$/isu.exec(line)?.[1] ?? "");
       return rows.length === 1 && names.has(rows[0]!.name);
     });
 };
 
+// nm -j ends each name with LF; a carriage return before it is part of the name.
 const parseNmExports = (output: string) =>
   output
-    .split(/\r?\n/u)
+    .split("\n")
     .filter((name) => name.length > 0)
     .map((name) => ({
       name,

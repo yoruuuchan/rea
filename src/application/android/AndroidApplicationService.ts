@@ -24,6 +24,5 @@ export const projectAndroidApplicationEvidence = (
     predicateType: "rea.android-application-graph",
     provider: ANDROID_APPLICATION_PROVIDER,
     subjectFormat: () => "apk",
-    protocolError: "Android application projection produced an invalid result",
   });
 };

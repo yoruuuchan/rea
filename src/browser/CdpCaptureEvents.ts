@@ -29,6 +29,7 @@ export class CdpCaptureEvents implements CdpCaptureEventsState {
   readonly network = new Map<string, NetworkState>();
   readonly networkRequestTimestamps = new Map<string, number>();
   readonly malformedRedirectRequestIds = new Set<string>();
+  readonly missingRequestBodyShapeIds = new Set<string>();
   readonly webSocketConnectionsById = new Map<
     string,
     WebPageInspection["network"]["websocket_connections"][number]
@@ -76,6 +77,7 @@ export class CdpCaptureEvents implements CdpCaptureEventsState {
     this.#networkRequestOccurrences.clear();
     this.#responseBodyExaminedOccurrences.clear();
     this.malformedRedirectRequestIds.clear();
+    this.missingRequestBodyShapeIds.clear();
     this.webSocketConnectionsById.clear();
     this.console.length = 0;
     this.responseMetadata.length = 0;

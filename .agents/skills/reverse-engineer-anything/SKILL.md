@@ -38,8 +38,9 @@ target, or it fails again, tell the user and ask them to restart the MCP
 client. If REA could not start its connection, retry once, then tell the user
 and ask them to restart the MCP client. Do not retry a startup failure that
 returns the same unchanged result. Run `rea doctor` when REA could not start
-or tools stay missing after that restart. Read the recovery guide before a
-second repair attempt.
+or tools stay missing after that restart. For `cleanup_incomplete`, a retryable
+capacity limit, or `configuration_invalid`, follow the recovery guide's ladder
+before asking for a restart. Read that guide before a second repair attempt.
 
 1. Diagnose without changing REA or client configuration. `npx` may download
    the package and write to npm's cache. For Codex, run

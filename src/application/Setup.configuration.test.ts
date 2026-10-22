@@ -7,7 +7,10 @@ import { setupRegistrationCommand } from "./SetupHost.js";
 import { CURRENT_ENTRYPOINT_PATH } from "../process/CurrentEntrypointPath.js";
 import { discoverSetupState } from "./SetupPlan.js";
 import type { MsixPackageView } from "./MsixPackageStorage.js";
-import type { SetupClient } from "./SupportedClients.js";
+import {
+  registrationWriteBlocker,
+  type SetupClient,
+} from "./SupportedClients.js";
 
 // Host joins keep containment checks meaningful on POSIX test hosts too.
 const PROFILE = String.raw`C:\Users\a`;
@@ -416,6 +419,17 @@ describe("MSIX Claude Desktop setup", () => {
     );
     expect(action?.detail).toContain(
       "Quit Claude Desktop fully before approving; closing its window is not enough.",
+    );
+  });
+
+  it("names the files to edit by hand when the process view is unknown", () => {
+    // The package reads its private copy, so a manual setup edit belongs there.
+    const client = msixClaudeDesktop("unknown");
+    expect(registrationWriteBlocker(client, "setup")).toContain(
+      `Add REA's entry to ${PRIVATE_CONFIG} by hand`,
+    );
+    expect(registrationWriteBlocker(client, "uninstall")).toContain(
+      `Remove REA's entry by hand from each of ${PRIVATE_CONFIG} and ${APPDATA_CONFIG} that has one`,
     );
   });
 

@@ -566,7 +566,7 @@ export const systemDoctorHost = (
       : { configuredIlspyCmdPath: environment.REA_ILSPY_CMD_PATH }),
     macosVersion: () =>
       readMacosVersion(hostExecFileOutput, commandEnvironment),
-    linuxDistribution: readLinuxDistribution,
+    linuxDistribution: () => readLinuxDistribution(architecture),
     async validTarget(path) {
       return (
         await parseBinaryTarget(path, {

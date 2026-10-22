@@ -79,8 +79,9 @@ export interface BinaryTargetResolverOptions {
 
 /**
  * Resolve and classify a readable local target before a provider is selected.
- * FAT Mach-O inputs select only a host-compatible architecture so setup remains
- * non-interactive; unsupported or ambiguous inputs are returned as typed errors.
+ * FAT Mach-O inputs select the host-compatible architecture, otherwise their
+ * first declared supported slice, so setup remains non-interactive; unsupported
+ * or ambiguous inputs are returned as typed errors.
  */
 export const parseBinaryTarget = async (
   input: string,

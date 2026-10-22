@@ -1,5 +1,5 @@
 import { chmod, mkdir, symlink, writeFile } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -310,6 +310,79 @@ describe("commandcode registration status", () => {
       }),
     ]);
   });
+});
+
+describe("client activation keys", () => {
+  it.each([
+    ["disabled = true", "aligned"],
+    ["enabled = false", "stale"],
+  ] as const)(
+    "reads only the activation key Codex honors (%s)",
+    async (activation, state) => {
+      const home = await createTestTempDirectory("rea-codex-activation-");
+      await mkdir(join(home, ".codex"));
+      const entry = resolve("scripts/rea.mjs");
+      await writeFile(
+        join(home, ".codex/config.toml"),
+        `[mcp_servers.rea]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(entry)}, "mcp"]\nstartup_timeout_sec = 30\ntool_timeout_sec = 450\n${activation}\n`,
+      );
+      expect(
+        await readClientRegistrationStatuses(home, entry, { environment: {} }),
+      ).toEqual([expect.objectContaining({ client: "codex", state })]);
+    },
+  );
+
+  // Each JSON client loads rea under the key it ignores and skips it under the key it honors.
+  it.each([
+    ["kimi", { disabled: true }, "aligned"],
+    ["kimi", { enabled: false }, "stale"],
+    ["devin", { enabled: false }, "aligned"],
+    ["devin", { disabled: true }, "stale"],
+  ] as const)(
+    "reads only the activation key %s honors (%j)",
+    async (client, activation, state) => {
+      const home = await createTestTempDirectory("rea-json-activation-");
+      const entry = resolve("scripts/rea.mjs");
+      const [config, fields] =
+        client === "kimi"
+          ? [
+              join(home, ".kimi-code/mcp.json"),
+              {
+                env: { REA_MCP_INPUT_SCHEMA_PROFILE: "compact" },
+                startupTimeoutMs: 30_000,
+                toolTimeoutMs: 450_000,
+              },
+            ]
+          : [
+              join(
+                process.platform === "win32"
+                  ? join(home, "AppData", "Roaming", "devin")
+                  : join(home, ".config", "devin"),
+                "mcp_config.json",
+              ),
+              {},
+            ];
+      await mkdir(dirname(config), { recursive: true });
+      await writeFile(
+        config,
+        JSON.stringify({
+          mcpServers: {
+            rea: {
+              command: process.execPath,
+              args: [entry, "mcp"],
+              ...fields,
+              ...activation,
+            },
+          },
+        }),
+      );
+      expect(
+        await readClientRegistrationStatuses(home, entry, {
+          environment: { XDG_CONFIG_HOME: join(home, ".config") },
+        }),
+      ).toEqual([expect.objectContaining({ client, state })]);
+    },
+  );
 });
 
 describe("Node-wrapped registration policy", () => {

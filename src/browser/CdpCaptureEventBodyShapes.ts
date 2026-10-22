@@ -35,15 +35,22 @@ export const ingestResponseBodyShape = (
 
 export const requestBodyShape = (
   state: CdpCaptureEventsState,
+  requestId: string,
   request: UnknownRecord,
 ): NetworkState["body_shapes"] => {
+  state.missingRequestBodyShapeIds.delete(requestId);
   if (!state.input.include_json_body_shapes)
     return { status: "not_approved", request: null, response: null };
+  const headers = recordValue(request.headers);
+  const json = isJsonContentType(headers);
   const body = cdpStringValue(request.postData);
-  if (!isJsonContentType(recordValue(request.headers)) || body === undefined)
-    return { status: "unavailable", request: null, response: null };
-  const shape = inferJsonShape(body);
-  if (shape === null) state.completeness.unavailable("json_body_shapes");
+  // CDP may omit a long body from postData while reporting hasPostData.
+  const shape = json && body !== undefined ? inferJsonShape(body) : null;
+  const expected = json && (body !== undefined || request.hasPostData === true);
+  if (expected && shape === null) {
+    state.missingRequestBodyShapeIds.add(requestId);
+    state.completeness.unavailable("json_body_shapes");
+  }
   return {
     status: shape === null ? "unavailable" : "included",
     request: shape,
@@ -61,7 +68,9 @@ export const updateResponseBodyShape = (
   const request = current.body_shapes.request;
   const status =
     response !== null
-      ? "included"
+      ? state.missingRequestBodyShapeIds.has(requestId)
+        ? "partial"
+        : "included"
       : request !== null
         ? "partial"
         : "unavailable";

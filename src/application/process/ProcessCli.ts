@@ -10,7 +10,7 @@ import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import type { AnalysisErrorProjection } from "../../domain/analysisErrorProjection.js";
 import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
 import { createEvidence } from "../../domain/evidence.js";
-import { describeValidationFailure } from "../../domain/evidenceBundle.js";
+import { describeValidationFailure } from "../../domain/validationFailure.js";
 import { jsonValueSchema } from "../../domain/jsonValue.js";
 import {
   analysisInputErrorFromIssues,

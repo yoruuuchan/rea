@@ -274,7 +274,11 @@ it("resolves an artifact cleanup error when its scope owner later closes", async
     ok(await resources.read("fixture", 1)),
   );
 
-  expect(retried.ok).toBe(true);
+  if (!retried.ok) throw retried.error;
+  expect(retried.value).toEqual({
+    bytes: Buffer.alloc(0),
+    sha256: "0".repeat(64),
+  });
   expect(first.error.cleanupIncomplete).toBe(false);
   expect(closes).toBe(2);
   await resources.close();
@@ -350,7 +354,11 @@ it("keeps a runtime root until its descriptor cleanup owner is released", async 
   const retried = await resources.run(async () =>
     ok(await resources.read("fixture", 1)),
   );
-  expect(retried.ok).toBe(true);
+  if (!retried.ok) throw retried.error;
+  expect(retried.value).toEqual({
+    bytes: Buffer.alloc(0),
+    sha256: "0".repeat(64),
+  });
   expect(first.error.cleanupIncomplete).toBe(false);
   await resources.release();
   expect(rootCloses).toBe(1);

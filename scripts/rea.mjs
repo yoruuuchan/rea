@@ -76,6 +76,7 @@ if (!(await compiledRuntimeExists(runtimeFiles))) {
   const result = await runProductionMcpDoctorCli(args.slice(2), {
     dispatcherPath: fileURLToPath(import.meta.url),
     packageRoot,
+    stdoutIsTerminal: process.stdout.isTTY === true,
   });
   writeStdout(result.output);
   process.exitCode = result.exitCode;

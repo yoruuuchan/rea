@@ -90,4 +90,4 @@ export type ObjdumpSelection =
   | z.input<typeof objdumpArtifactInputSchema>
   | z.input<typeof objdumpDisassemblyInputSchema>
   | z.input<typeof objdumpArchitecturesInputSchema>;
-export type RizinInput = z.input<typeof rizinInputSchema>;
+export type RizinInput = z.output<typeof rizinInputSchema>;

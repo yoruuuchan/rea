@@ -1100,6 +1100,17 @@ describe("web bundle configuration and navigation parity", () => {
 });
 
 describe("web bundle artifact metadata", () => {
+  it("retains only a validated HTTP target origin", () => {
+    expect(
+      analyzeCapturedWebBundle(inspection("export {};")).capture.target_origin,
+    ).toBe(origin);
+
+    const nonHttp = inspection("export {};");
+    nonHttp.target.url = "ftp://host/app";
+    nonHttp.target.origin = "ftp://host";
+    expect(analyzeCapturedWebBundle(nonHttp).capture.target_origin).toBeNull();
+  });
+
   it("preserves long provider media types in artifact summaries", () => {
     const result = analyzeCapturedWebBundle(inspection("export {};"));
     const mediaType = `application/${"x".repeat(300)}`;

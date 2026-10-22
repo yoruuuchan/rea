@@ -415,16 +415,18 @@ describe("CdpBrowserProvider: target selection detail", () => {
         "missing",
         "target_not_found",
         "Target missing was not found at the selected endpoint.",
+        "Refresh target discovery for that endpoint and retry with a returned target ID.",
       ],
       [
         "disallowed-page",
         "target_not_allowed",
         "Target disallowed-page must be an HTTP(S) page in the selected origin scope.",
+        "Target disallowed-page must be an HTTP(S) page in the selected origin scope.",
       ],
     ] as const;
     const inspected = new Map<string, unknown>();
     for (const [operation, run] of operations)
-      for (const [targetId, reason, detail] of selections) {
+      for (const [targetId, reason, detail, remediation] of selections) {
         const result = await run({
           cdp_endpoint: browser.endpoint,
           allowed_origins: [browser.allowedOrigin],
@@ -437,6 +439,7 @@ describe("CdpBrowserProvider: target selection detail", () => {
         expect(projected).toMatchObject({
           code: "target_unavailable",
           message: detail,
+          remediation: { action: remediation },
         });
         // Only the attributed operation differs from the inspect projection.
         if (operation === "inspect_web_page")

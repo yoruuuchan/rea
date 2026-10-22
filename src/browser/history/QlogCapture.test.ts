@@ -273,6 +273,25 @@ it.each([
   },
 );
 
+it.each([
+  { depth: 64, innermost: "[]", accepted: true },
+  { depth: 64, innermost: "{}", accepted: true },
+  { depth: 64, innermost: "[0]", accepted: true },
+  { depth: 65, innermost: "[]", accepted: false },
+  { depth: 65, innermost: "{}", accepted: false },
+  { depth: 65, innermost: "[0]", accepted: false },
+  { depth: 66, innermost: "[]", accepted: false },
+])(
+  "bounds a $innermost extension at container level $depth",
+  ({ depth, innermost, accepted }) => {
+    // The root, traces array and trace object are the first three levels.
+    const enclosing = depth - 4;
+    const text = `{"qlog_format":"JSON","qlog_version":"0.3","traces":[{"events":[],"ext":${"[".repeat(enclosing)}${innermost}${"]".repeat(enclosing)}}]}`;
+    if (accepted) expect(facts(text).decoded.total_records).toBe(0);
+    else expect(() => facts(text)).toThrow("nesting budget");
+  },
+);
+
 it("rejects other qlog containers/versions and excessive nesting, accepts empty profiles and UTF-8 BOM", () => {
   for (const extra of [{ qlog_format: "JSON-SEQ" }, { qlog_version: "0.4" }])
     expect(() => facts(capture([], extra))).toThrow("Only the aioquic");

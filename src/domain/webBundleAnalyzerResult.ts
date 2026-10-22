@@ -2,6 +2,7 @@ import { buildJavaScriptRouteInventorySteps } from "./javascript/javascriptRoute
 import { completeSemanticSteps } from "./javascript/javascriptSemanticTraversal.js";
 import { RETURNED_REFERENCE_WIDENING_LIMITATION } from "./javascript/javascriptSemanticCoverage.js";
 import type { WebPageInspection } from "./browserObservationSchemas.js";
+import { browserOriginSchema } from "./browserObservation.js";
 import {
   webBundleAnalysisSchema,
   type WebBundleAnalysis,
@@ -231,15 +232,19 @@ const buildCaptureObservation = (
   inspection: WebPageInspection,
   sourceScripts: IncludedScript[],
   attemptedScripts: number,
-) => ({
-  target_url: inspection.target.url,
-  scripts_observed: inspection.scripts.total,
-  // This preserves the historical meaning: source scripts submitted for
-  // analysis, including worker/deadline failures; explicitly unstarted suffixes
-  // are excluded. Successfully parsed scripts are counted separately below.
-  scripts_analyzed: attemptedScripts,
-  source_artifacts: sourceScripts.map(sourceArtifact),
-});
+) => {
+  const targetOrigin = browserOriginSchema.safeParse(inspection.target.origin);
+  return {
+    target_url: inspection.target.url,
+    target_origin: targetOrigin.success ? targetOrigin.data : null,
+    scripts_observed: inspection.scripts.total,
+    // This preserves the historical meaning: source scripts submitted for
+    // analysis, including worker/deadline failures; explicitly unstarted suffixes
+    // are excluded. Successfully parsed scripts are counted separately below.
+    scripts_analyzed: attemptedScripts,
+    source_artifacts: sourceScripts.map(sourceArtifact),
+  };
+};
 
 const sourceArtifact = (script: IncludedScript) => {
   if (!script.source.included) throw new TypeError("Filtered source changed");

@@ -14,6 +14,7 @@ import {
 import {
   commandMayChangeInferiorOutput,
   gdbErrorMessage,
+  gdbOneShotCommandMayInvalidateDetachProof,
   gdbThreadGroupCount,
   GdbSessionManager,
   miStringField,
@@ -141,8 +142,29 @@ it.each([
   ["python print(1)", true],
   ["define start\nrun", true],
   ["run > /tmp/output", true],
+  ["t 1", false],
+  ["tt /dev/pts/2", true],
 ] as const)("classifies inferior output mutations: %s", (command, expected) => {
   expect(commandMayChangeInferiorOutput(command)).toBe(expected);
+});
+
+// GDB's built-in aliases are full commands, not abbreviations of python,
+// source or define (#5098); ambiguous and true abbreviations stay refused.
+it.each([
+  ["p 1", false],
+  ["print 1", false],
+  ["s", false],
+  ["step", false],
+  ["d 1", false],
+  ["delete 1", false],
+  ["t 1", false],
+  ["py print(1)", true],
+  ["pyt print(1)", true],
+  ["so commands.gdb", true],
+  ["de", true],
+  ["p 1; python print(2)", true],
+] as const)("classifies one-shot GDB commands: %s", (command, expected) => {
+  expect(gdbOneShotCommandMayInvalidateDetachProof(command)).toBe(expected);
 });
 
 it.each([

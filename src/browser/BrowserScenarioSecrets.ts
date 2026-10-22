@@ -396,9 +396,11 @@ export class BrowserScenarioSecrets {
       containsSecretPattern(value, normalizePercentEscapes(value), patterns)
     )
       return { value_state: "redacted-secret", value_sha256: null };
-    return {
-      value_state: "hashed",
-      value_sha256: createHash("sha256").update(value).digest("hex"),
-    };
+    const hash = createHash("sha256");
+    // In Unicode mode this class matches unpaired units, not valid pairs.
+    if (!/[\uD800-\uDFFF]/u.test(value)) hash.update(value);
+    // 0xff cannot occur in UTF-8, keeping the two preimage domains disjoint.
+    else hash.update(Buffer.from([0xff])).update(value, "utf16le");
+    return { value_state: "hashed", value_sha256: hash.digest("hex") };
   }
 }

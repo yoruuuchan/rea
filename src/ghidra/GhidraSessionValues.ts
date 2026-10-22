@@ -1,4 +1,5 @@
 import { ghidraSeedReportSchema } from "./GhidraAnalysisSeeds.js";
+import { ghidraDisabledAnalyzerReportSchema } from "./GhidraDisabledAnalyzers.js";
 import { z } from "zod";
 
 import type { JsonValue } from "../domain/jsonValue.js";
@@ -83,6 +84,7 @@ const sessionInfoSchema = z
       .optional(),
     analysis_extensions: z.array(ghidraExtensionResultSchema).optional(),
     analysis_seeds: ghidraSeedReportSchema.optional(),
+    disabled_analyzers: ghidraDisabledAnalyzerReportSchema.optional(),
     mips_soft_float_storage: z
       .object({
         policy: z.literal(GHIDRA_MIPS_SOFT_FLOAT_STORAGE),

@@ -4,7 +4,8 @@ import type { BinarySessionPort } from "../application/binary/BinarySessionPort.
 import { toolContract } from "../contracts/toolContracts.js";
 import { compareArtifacts } from "../domain/artifactComparison.js";
 import { ARTIFACT_COMPARISON_PROVIDER } from "../domain/comparisonEvidenceIdentity.js";
-import { createEvidence, parseEvidence } from "../domain/evidence.js";
+import { createEvidence } from "../domain/evidence.js";
+import { readEvidence } from "../domain/evidenceValidation.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { resolveArtifactComparisonEvidence } from "../application/artifacts/ArtifactComparisonEvidence.js";
 import type { RecordUnknownInput } from "../domain/residualUnknown.js";
@@ -39,15 +40,17 @@ export const registerArtifactComparisonTool = (
             context,
             contract.name,
             () => {
-              const suppliedLeft = parseEvidence(input.left);
-              const suppliedRight = parseEvidence(input.right);
+              const suppliedLeft = readEvidence(input.left);
+              if (!suppliedLeft.ok) throw suppliedLeft.error;
+              const suppliedRight = readEvidence(input.right);
+              if (!suppliedRight.ok) throw suppliedRight.error;
               const resolvedLeft = resolveArtifactComparisonEvidence(
-                suppliedLeft,
+                suppliedLeft.value,
                 evidenceById,
               );
               if (!resolvedLeft.ok) throw resolvedLeft.error;
               const resolvedRight = resolveArtifactComparisonEvidence(
-                suppliedRight,
+                suppliedRight.value,
                 evidenceById,
               );
               if (!resolvedRight.ok) throw resolvedRight.error;

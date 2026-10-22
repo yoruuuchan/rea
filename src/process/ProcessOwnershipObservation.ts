@@ -348,39 +348,45 @@ const observeNativeOwnedProcessLineage = async (
 ): Promise<ProcessLineageObservation> => {
   const initialIdentities = await readNativeProcessIdentityMap(processes, host);
   const launcher = processes.find(({ pid }) => pid === ownership.leaderPid);
-  if (launcher === undefined)
-    return unavailableLineage(ownership, "owned launcher is not live");
-  const launcherIdentity = initialIdentities.get(launcher.pid);
-  if (launcherIdentity?.state === "absent")
-    return unavailableLineage(ownership, "owned launcher is not live");
-  if (launcherIdentity?.state !== "readable")
-    return unavailableLineage(
-      ownership,
-      `owned launcher identity could not be read: ${launcherIdentity?.reason ?? "identity observation was omitted"}`,
-    );
-  if (processIdentityHasExited(launcherIdentity))
-    return unavailableLineage(ownership, "owned launcher is not live");
-  const nativeLauncher = processWithNativeRelation(launcher, launcherIdentity);
-  if (nativeLauncher === undefined)
-    return unavailableLineage(
-      ownership,
-      "owned launcher native parent/group relation was unavailable",
-    );
-  const identityFailure = launcherIdentityFailure(nativeLauncher, ownership);
-  if (identityFailure !== null)
-    return unavailableLineage(ownership, identityFailure);
-
-  const nativeProcesses = processes.flatMap((process) => {
+  const launcherIdentity =
+    launcher === undefined ? undefined : initialIdentities.get(launcher.pid);
+  const nativeLauncher =
+    launcher !== undefined &&
+    launcherIdentity?.state === "readable" &&
+    !processIdentityHasExited(launcherIdentity)
+      ? processWithNativeRelation(launcher, launcherIdentity)
+      : undefined;
+  const identityFailure =
+    nativeLauncher === undefined
+      ? null
+      : launcherIdentityFailure(nativeLauncher, ownership);
+  // Missing native facts leave table ancestry as candidate scope only. Keep
+  // unresolved and exited intermediates as discovery bridges to descendants;
+  // only validated live native facts may authorize the published lineage.
+  const candidateProcesses = processes.map((process) => {
     const identity = initialIdentities.get(process.pid);
-    if (processIdentityHasExited(identity)) return [];
     const nativeProcess =
       identity?.state === "readable"
         ? processWithNativeRelation(process, identity)
         : undefined;
-    return nativeProcess === undefined ? [] : [nativeProcess];
+    return nativeProcess ?? process;
   });
-  const descendants = descendantsOf([ownership.leaderPid], nativeProcesses);
-  const candidates = [nativeLauncher, ...descendants];
+  const descendants = descendantsOf([ownership.leaderPid], candidateProcesses);
+  const lineageRows = [
+    ...(launcher === undefined ? [] : [launcher]),
+    ...descendants,
+  ];
+  // A retained candidate may have moved outside the current launcher lineage.
+  const nativeExitedPids = new Set(
+    processes
+      .filter(({ pid }) => processIdentityHasExited(initialIdentities.get(pid)))
+      .map(({ pid }) => pid),
+  );
+  // A native terminal fact settles the old candidate. Keep its ancestry link,
+  // but do not enroll a replacement that appears during later token reads.
+  const candidates = lineageRows.filter(
+    ({ pid }) => !nativeExitedPids.has(pid),
+  );
   const facts = await readProcessOwnershipFacts(candidates, host, undefined, {
     identityBefore: initialIdentities,
   });
@@ -396,7 +402,38 @@ const observeNativeOwnedProcessLineage = async (
       ownership.processGroupId,
       ...(ownership.sampledProcessGroupIds ?? []),
     ]),
+    // A readable mismatching launcher disproves the captured anchors. Keep
+    // independent token evidence, existing candidates, and unknown/exit bridges.
+    // Later same-generation movement cannot erase valid initial scope.
+    allowCapturedScope: identityFailure === null,
+    nativeExitedPids,
+    unverifiedLineageRelations: new Map(
+      lineageRows.map(({ pid, parentPid, processGroupId }) => [
+        pid,
+        { parentPid, processGroupId },
+      ]),
+    ),
   });
+  // A launcher failure prevents publication, but must not discard partial
+  // ownership evidence already observed for this run's descendants.
+  if (launcher === undefined)
+    return unavailableLineage(ownership, "owned launcher is not live");
+  if (launcherIdentity?.state === "absent")
+    return unavailableLineage(ownership, "owned launcher is not live");
+  if (launcherIdentity?.state !== "readable")
+    return unavailableLineage(
+      ownership,
+      `owned launcher identity could not be read: ${launcherIdentity?.reason ?? "identity observation was omitted"}`,
+    );
+  if (processIdentityHasExited(launcherIdentity))
+    return unavailableLineage(ownership, "owned launcher is not live");
+  if (nativeLauncher === undefined)
+    return unavailableLineage(
+      ownership,
+      "owned launcher native parent/group relation was unavailable",
+    );
+  if (identityFailure !== null)
+    return unavailableLineage(ownership, identityFailure);
   const factsByPid = new Map(facts.map((fact) => [fact.process.pid, fact]));
   const verifiedDescendants: ProcessTableEntry[] = [];
   let currentLauncher = nativeLauncher;

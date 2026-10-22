@@ -356,13 +356,25 @@ const assertScreenshotPngFailures = async (client: Client): Promise<void> => {
 
 it("delivers the source-map response URL through authenticated MCP Evidence", async () => {
   const terminalPath = "/maps/v1/app.js.map?revision=2&token=source-value";
+  const sources = [
+    ["../src/original.js", "text/javascript"],
+    ["../src/plain.ts", "text/typescript"],
+    ["../src/main.ts?revision=2", "text/typescript"],
+    ["../src/main.tsx?revision=2", "text/typescript"],
+    ["../src/main.mts?revision=2", "text/typescript"],
+    ["../src/main.cts?revision=2", "text/typescript"],
+    ["../src/fragment.ts#original", "text/typescript"],
+    ["../src/control.js?filename=main.ts", "text/javascript"],
+    ["../src/extensionless?revision=2", "text/javascript"],
+  ] as const;
+  const sourceText = "export const value = 1;";
   const browser = await startFakeCdpBrowser({
     sourceMapRedirect: terminalPath,
     sourceMapBody: JSON.stringify({
       version: 3,
       names: [],
-      sources: ["../src/original.js"],
-      sourcesContent: ["export const value = 1;"],
+      sources: sources.map(([source]) => source),
+      sourcesContent: sources.map(() => sourceText),
       mappings: "AAAA",
     }),
   });
@@ -388,9 +400,11 @@ it("delivers the source-map response URL through authenticated MCP Evidence", as
           {
             declared_url: `${browser.allowedOrigin}/app.js.map?token=map-secret`,
             effective_url: `${browser.allowedOrigin}${terminalPath}`,
-            original_sources: [
-              { source: `${browser.allowedOrigin}/maps/src/original.js` },
-            ],
+            original_sources: sources.map(([source, mediaType]) => ({
+              source: new URL(source, `${browser.allowedOrigin}${terminalPath}`)
+                .href,
+              artifact: { media_type: mediaType, text: sourceText },
+            })),
           },
         ],
       },

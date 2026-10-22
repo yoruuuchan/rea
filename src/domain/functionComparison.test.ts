@@ -1,3 +1,4 @@
+import { functionSnapshotFixture } from "./functionDossierEvidence.fixture.js";
 import { describe, expect, it } from "vitest";
 
 import { FUNCTION_COMPARISON_EXAMPLE } from "../contracts/functionComparisonExample.js";
@@ -154,8 +155,8 @@ const keepsGeneratedNamesAmbiguous = (): void => {
       },
     });
   const generated = compareFunctions(
-    observe("1", named("0x1000", "sub_1000")),
-    observe("2", named("0x2000", "sub_2000")),
+    functionSnapshotFixture(observe("1", named("0x1000", "sub_1000"))),
+    functionSnapshotFixture(observe("2", named("0x2000", "sub_2000"))),
   );
   expect(generated.function_match.status).toBe("ambiguous");
   expect(generated.status).toBe("unknown");
@@ -164,8 +165,8 @@ const keepsGeneratedNamesAmbiguous = (): void => {
   ).toMatchObject({ status: "unknown" });
 
   const stable = compareFunctions(
-    observe("3", named("0x1000", "firstFunction")),
-    observe("4", named("0x2000", "secondFunction")),
+    functionSnapshotFixture(observe("3", named("0x1000", "firstFunction"))),
+    functionSnapshotFixture(observe("4", named("0x2000", "secondFunction"))),
   );
   expect(stable.function_match.status).toBe("mismatched");
   expect(stable.status).toBe("changed");
@@ -181,9 +182,10 @@ describe("function comparison normalized identity", () => {
     };
     delete value.facet_availability;
     const legacy = observe("a", functionDossierSchema.parse(value), "ida");
-    const calls = compareFunctions(legacy, legacy).dimensions.find(
-      ({ dimension }) => dimension === "calls",
-    );
+    const calls = compareFunctions(
+      functionSnapshotFixture(legacy),
+      functionSnapshotFixture(legacy),
+    ).dimensions.find(({ dimension }) => dimension === "calls");
     expect(calls).toMatchObject({
       status: "unknown",
       limitations: expect.arrayContaining([
@@ -199,7 +201,10 @@ describe("function comparison normalized identity", () => {
     };
     delete value.facet_availability;
     const legacy = observe("a", functionDossierSchema.parse(value), "ida");
-    const result = compareFunctions(legacy, legacy);
+    const result = compareFunctions(
+      functionSnapshotFixture(legacy),
+      functionSnapshotFixture(legacy),
+    );
     for (const dimension of [
       "comments",
       "references",
@@ -227,9 +232,10 @@ describe("function comparison normalized identity", () => {
     );
     const right = observe("b", dossier("return 0;", "0x2000"));
     expect(
-      compareFunctions(left, right).dimensions.find(
-        ({ dimension }) => dimension === "comments",
-      ),
+      compareFunctions(
+        functionSnapshotFixture(left),
+        functionSnapshotFixture(right),
+      ).dimensions.find(({ dimension }) => dimension === "comments"),
     ).toMatchObject({ status: "unknown", left_count: null, right_count: null });
   });
   it(
@@ -255,8 +261,8 @@ describe("function comparison normalized identity", () => {
           },
         });
       const result = compareFunctions(
-        observe("b", named("0x1000")),
-        observe("c", named("0x2000")),
+        functionSnapshotFixture(observe("b", named("0x1000"))),
+        functionSnapshotFixture(observe("c", named("0x2000"))),
       );
       expect(result.function_match).toMatchObject({
         status: "matched",
@@ -282,8 +288,8 @@ describe("function comparison normalized identity", () => {
           },
         });
       const result = compareFunctions(
-        observe("d", generated("0x1000")),
-        observe("e", generated("0x2000")),
+        functionSnapshotFixture(observe("d", generated("0x1000"))),
+        functionSnapshotFixture(observe("e", generated("0x2000"))),
       );
       expect(result.function_match.status).toBe("ambiguous");
       expect(
@@ -312,14 +318,16 @@ describe("function comparison address-derived call names", () => {
           callees: [procedure(base === "0x1000" ? "0x1010" : "0x2010", name)],
         });
       const result = compareFunctions(
-        observe("6", calling("0x1000")),
-        observe(
-          "7",
-          calling("0x2000"),
-          "rea-workflow",
-          diagnostic === undefined
-            ? { status: "complete" }
-            : { status: "complete", diagnostics: [diagnostic] },
+        functionSnapshotFixture(observe("6", calling("0x1000"))),
+        functionSnapshotFixture(
+          observe(
+            "7",
+            calling("0x2000"),
+            "rea-workflow",
+            diagnostic === undefined
+              ? { status: "complete" }
+              : { status: "complete", diagnostics: [diagnostic] },
+          ),
         ),
       );
       const calls = result.dimensions.find(
@@ -368,7 +376,10 @@ describe("function call relationship coverage", () => {
         "rea-workflow",
         coverage,
       );
-      const result = compareFunctions(left, right);
+      const result = compareFunctions(
+        functionSnapshotFixture(left),
+        functionSnapshotFixture(right),
+      );
       const calls = result.dimensions.find(
         ({ dimension }) => dimension === "calls",
       );
@@ -401,9 +412,10 @@ describe("function call relationship coverage", () => {
       coverage,
     );
     expect(
-      compareFunctions(left, right).dimensions.find(
-        ({ dimension }) => dimension === "calls",
-      ),
+      compareFunctions(
+        functionSnapshotFixture(left),
+        functionSnapshotFixture(right),
+      ).dimensions.find(({ dimension }) => dimension === "calls"),
     ).toMatchObject({ status: "unchanged", left_count: 0, right_count: 0 });
   });
 
@@ -420,9 +432,10 @@ describe("function call relationship coverage", () => {
     });
     const right = observe("f", rightDossier);
     expect(
-      compareFunctions(left, right).dimensions.find(
-        ({ dimension }) => dimension === "calls",
-      ),
+      compareFunctions(
+        functionSnapshotFixture(left),
+        functionSnapshotFixture(right),
+      ).dimensions.find(({ dimension }) => dimension === "calls"),
     ).toMatchObject({
       status: "unknown",
       limitations: [
@@ -443,8 +456,8 @@ describe("function collection collation ties", () => {
 
   it("ignores reordered callees whose distinct names collate equally", () => {
     const result = compareFunctions(
-      observe("b", calling([composed, decomposed])),
-      observe("c", calling([decomposed, composed])),
+      functionSnapshotFixture(observe("b", calling([composed, decomposed]))),
+      functionSnapshotFixture(observe("c", calling([decomposed, composed]))),
     );
     expect(result.status).toBe("unchanged");
     const calls = result.dimensions.find(
@@ -465,8 +478,8 @@ describe("function collection collation ties", () => {
     ["replace decomposed", [composed, composed]],
   ] as const)("preserves an exact name change: %s", (_label, changed) => {
     const result = compareFunctions(
-      observe("b", calling([composed, decomposed])),
-      observe("c", calling(changed)),
+      functionSnapshotFixture(observe("b", calling([composed, decomposed]))),
+      functionSnapshotFixture(observe("c", calling(changed))),
     );
     expect(result.status).toBe("changed");
     const calls = result.dimensions.find(
@@ -486,8 +499,8 @@ describe("function collection collation ties", () => {
         compareUnicodeCodePoints(canonicalJson(left), canonicalJson(right)),
       );
     const result = compareFunctions(
-      observe("b", calling(callees)),
-      observe("c", calling([...callees].reverse())),
+      functionSnapshotFixture(observe("b", calling(callees))),
+      functionSnapshotFixture(observe("c", calling([...callees].reverse()))),
     );
     const calls = result.dimensions.find(
       ({ dimension }) => dimension === "calls",
@@ -595,8 +608,8 @@ describe("function comparison ordering controls", () => {
     const rightWithoutNativeApi = { ...right, native_api: null };
 
     const comparison = compareFunctions(
-      makeEvidence("d", left),
-      makeEvidence("e", rightWithoutNativeApi),
+      functionSnapshotFixture(makeEvidence("d", left)),
+      functionSnapshotFixture(makeEvidence("e", rightWithoutNativeApi)),
     );
 
     for (const dimension of ["calls", "strings_names"] as const)
@@ -636,8 +649,8 @@ describe("function comparison CFG address normalization", () => {
       });
     expect(
       compareFunctions(
-        observe("b", make("0x1000")),
-        observe("c", make("0x2000")),
+        functionSnapshotFixture(observe("b", make("0x1000"))),
+        functionSnapshotFixture(observe("c", make("0x2000"))),
       ).dimensions.find(({ dimension }) => dimension === "cfg"),
     ).toMatchObject({ status: "unchanged" });
   });
@@ -652,8 +665,8 @@ describe("function comparison CFG address normalization", () => {
     });
     expect(
       compareFunctions(
-        observe("d", duplicate),
-        observe("e", duplicate),
+        functionSnapshotFixture(observe("d", duplicate)),
+        functionSnapshotFixture(observe("e", duplicate)),
       ).dimensions.find(({ dimension }) => dimension === "cfg"),
     ).toMatchObject({ status: "unknown" });
   });
@@ -675,7 +688,10 @@ describe("function comparison unresolved text", () => {
         assembly: ["0x2000 call FUN_00002010", "0x2004 ret"],
       }),
     );
-    const comparison = compareFunctions(left, right);
+    const comparison = compareFunctions(
+      functionSnapshotFixture(left),
+      functionSnapshotFixture(right),
+    );
     for (const name of ["pseudocode", "assembly"]) {
       const dimension = comparison.dimensions.find(
         ({ dimension }) => dimension === name,
@@ -697,7 +713,10 @@ describe("function comparison unresolved text", () => {
   it("counts Unicode text consistently for unresolved provider comparisons", () => {
     const left = observe("b", dossier("return '😀';", "0x1000"), "provider-a");
     const right = observe("c", dossier("return '😀';", "0x2000"), "provider-b");
-    const comparison = compareFunctions(left, right);
+    const comparison = compareFunctions(
+      functionSnapshotFixture(left),
+      functionSnapshotFixture(right),
+    );
     expect(
       comparison.dimensions.find(({ dimension }) => dimension === "pseudocode"),
     ).toMatchObject({ status: "unknown", left_count: 11, right_count: 11 });
@@ -726,7 +745,10 @@ describe("function comparison", () => {
       status: "complete",
       diagnostics: [diagnostic],
     });
-    const comparison = compareFunctions(left, right);
+    const comparison = compareFunctions(
+      functionSnapshotFixture(left),
+      functionSnapshotFixture(right),
+    );
     expect(
       comparison.dimensions.find(({ dimension }) => dimension === "calls"),
     ).toMatchObject({
@@ -748,9 +770,10 @@ describe("function comparison", () => {
       diagnostics: [diagnostic],
     });
     expect(
-      compareFunctions(left, right).dimensions.find(
-        ({ dimension }) => dimension === "calls",
-      ),
+      compareFunctions(
+        functionSnapshotFixture(left),
+        functionSnapshotFixture(right),
+      ).dimensions.find(({ dimension }) => dimension === "calls"),
     ).toMatchObject({
       status: "unknown",
       limitations: expect.arrayContaining([
@@ -764,8 +787,8 @@ describe("function comparison", () => {
 
   it("preserves text changes alongside complete inline dossier facets", () => {
     const result = compareFunctions(
-      FUNCTION_COMPARISON_EXAMPLE.left,
-      FUNCTION_COMPARISON_EXAMPLE.right,
+      functionSnapshotFixture(FUNCTION_COMPARISON_EXAMPLE.left),
+      functionSnapshotFixture(FUNCTION_COMPARISON_EXAMPLE.right),
     );
     expect(functionComparisonResultSchema.parse(result)).toMatchObject({
       status: "changed",
@@ -784,11 +807,16 @@ describe("function comparison", () => {
     expectInlineComparisonEvidence(result);
     expectFunctionDimensionAlgebra(result);
   });
+});
 
+describe("function comparison normalization and provenance", () => {
   it("normalizes CFG relocation but preserves changed edges and constants", () => {
     const left = observe("2", dossier("return 0x10;", "0x1000"));
     const relocated = observe("3", dossier("return 0x10;", "0x2000"));
-    const same = compareFunctions(left, relocated);
+    const same = compareFunctions(
+      functionSnapshotFixture(left),
+      functionSnapshotFixture(relocated),
+    );
     expect(
       same.dimensions.find(({ dimension }) => dimension === "cfg"),
     ).toMatchObject({
@@ -799,7 +827,10 @@ describe("function comparison", () => {
     ).toMatchObject({ status: "unchanged" });
 
     const changed = observe("4", dossier("return 0x20;", "0x2000", ["0x2000"]));
-    const comparison = compareFunctions(left, changed);
+    const comparison = compareFunctions(
+      functionSnapshotFixture(left),
+      functionSnapshotFixture(changed),
+    );
     expect(
       comparison.dimensions.find(({ dimension }) => dimension === "cfg"),
     ).toMatchObject({ status: "changed" });
@@ -811,20 +842,29 @@ describe("function comparison", () => {
   it("treats provider-specific text as unknown and validates Evidence", () => {
     const left = observe("5", dossier("return 0;", "0x1000"), "provider-a");
     const right = observe("6", dossier("return 1;", "0x2000"), "provider-b");
-    const comparison = compareFunctions(left, right);
+    const comparison = compareFunctions(
+      functionSnapshotFixture(left),
+      functionSnapshotFixture(right),
+    );
     expect(
       comparison.dimensions.find(({ dimension }) => dimension === "pseudocode"),
     ).toMatchObject({ status: "unknown" });
     expect(comparison.changes).toHaveLength(2);
     expect(() =>
-      compareFunctions({ ...left, operation: "binary_overview" }, right),
+      compareFunctions(
+        functionSnapshotFixture({ ...left, operation: "binary_overview" }),
+        functionSnapshotFixture(right),
+      ),
     ).toThrow(/identifier/u);
   });
 
   it("reports fully observed identical dossiers as unchanged", () => {
     const left = observe("7", dossier("return 0;\n", "0x1000"));
     const right = observe("8", dossier("return 0;\n", "0x2000"));
-    const comparison = compareFunctions(left, right);
+    const comparison = compareFunctions(
+      functionSnapshotFixture(left),
+      functionSnapshotFixture(right),
+    );
     expect(comparison.status).toBe("unchanged");
     expect(
       comparison.dimensions.every(({ status }) => status === "unchanged"),
@@ -835,16 +875,18 @@ describe("function comparison", () => {
     const left = observe("d", dossierWithReference("0x1000", "call"));
     const same = observe("e", dossierWithReference("0x2000", "call"));
     expect(
-      compareFunctions(left, same).dimensions.find(
-        ({ dimension }) => dimension === "references",
-      ),
+      compareFunctions(
+        functionSnapshotFixture(left),
+        functionSnapshotFixture(same),
+      ).dimensions.find(({ dimension }) => dimension === "references"),
     ).toMatchObject({ status: "unchanged" });
 
     const changed = observe("f", dossierWithReference("0x2000", "data"));
     expect(
-      compareFunctions(left, changed).dimensions.find(
-        ({ dimension }) => dimension === "references",
-      ),
+      compareFunctions(
+        functionSnapshotFixture(left),
+        functionSnapshotFixture(changed),
+      ).dimensions.find(({ dimension }) => dimension === "references"),
     ).toMatchObject({ status: "changed" });
 
     const unavailable = observe(
@@ -852,9 +894,10 @@ describe("function comparison", () => {
       dossierWithReference("0x2000", "unavailable"),
     );
     expect(
-      compareFunctions(left, unavailable).dimensions.find(
-        ({ dimension }) => dimension === "references",
-      ),
+      compareFunctions(
+        functionSnapshotFixture(left),
+        functionSnapshotFixture(unavailable),
+      ).dimensions.find(({ dimension }) => dimension === "references"),
     ).toMatchObject({
       status: "unknown",
       limitations: [expect.stringContaining("did not expose reference kinds")],
@@ -875,8 +918,8 @@ describe("function comparison identity and malformed CFG", () => {
         },
       });
     const comparison = compareFunctions(
-      observe("9", autoDossier("0x1000")),
-      observe("a", autoDossier("0x2000")),
+      functionSnapshotFixture(observe("9", autoDossier("0x1000"))),
+      functionSnapshotFixture(observe("a", autoDossier("0x2000"))),
     );
     expect(comparison.function_match.status).toBe("ambiguous");
     expect(
@@ -884,13 +927,15 @@ describe("function comparison identity and malformed CFG", () => {
     ).toMatchObject({ status: "unknown" });
     expect(comparison.status).toBe("unknown");
     const changedText = compareFunctions(
-      observe("b", autoDossier("0x1000")),
-      observe(
-        "c",
-        functionDossierSchema.parse({
-          ...autoDossier("0x2000"),
-          pseudocode: "return 1;",
-        }),
+      functionSnapshotFixture(observe("b", autoDossier("0x1000"))),
+      functionSnapshotFixture(
+        observe(
+          "c",
+          functionDossierSchema.parse({
+            ...autoDossier("0x2000"),
+            pseudocode: "return 1;",
+          }),
+        ),
       ),
     );
     expect(changedText.dimensions).toEqual(
@@ -911,8 +956,8 @@ describe("function comparison identity and malformed CFG", () => {
       ],
     });
     const comparison = compareFunctions(
-      observe("b", leftDossier),
-      observe("c", invalidCfg),
+      functionSnapshotFixture(observe("b", leftDossier)),
+      functionSnapshotFixture(observe("c", invalidCfg)),
     );
     expect(
       comparison.dimensions.find(({ dimension }) => dimension === "cfg"),
@@ -944,8 +989,8 @@ const stringsDimension = (
   right: ReturnType<typeof withLiterals> | ReturnType<typeof dossier>,
 ) =>
   compareFunctions(
-    observe(leftDigit, left),
-    observe(rightDigit, right),
+    functionSnapshotFixture(observe(leftDigit, left)),
+    functionSnapshotFixture(observe(rightDigit, right)),
   ).dimensions.find(({ dimension }) => dimension === "strings_names");
 
 describe("function comparison Swift string literals", () => {
@@ -1244,10 +1289,12 @@ it.each([
   "validates $match match precedence with changed dimensions=$changedDimensions",
   ({ match, changedDimensions, expected }) => {
     const result = compareFunctions(
-      FUNCTION_COMPARISON_EXAMPLE.left,
-      changedDimensions
-        ? FUNCTION_COMPARISON_EXAMPLE.right
-        : FUNCTION_COMPARISON_EXAMPLE.left,
+      functionSnapshotFixture(FUNCTION_COMPARISON_EXAMPLE.left),
+      functionSnapshotFixture(
+        changedDimensions
+          ? FUNCTION_COMPARISON_EXAMPLE.right
+          : FUNCTION_COMPARISON_EXAMPLE.left,
+      ),
     );
     const candidate = {
       ...result,
@@ -1299,8 +1346,10 @@ describe("function comparison unnamed reference endpoints", () => {
       });
     const reference = (left: string, right: string, digits = ["a", "a"]) =>
       compareFunctions(
-        observe(digits[0] ?? "a", unnamedTarget(left)),
-        observe(digits[1] ?? "a", unnamedTarget(right)),
+        functionSnapshotFixture(observe(digits[0] ?? "a", unnamedTarget(left))),
+        functionSnapshotFixture(
+          observe(digits[1] ?? "a", unnamedTarget(right)),
+        ),
       ).dimensions.find(({ dimension }) => dimension === "references");
     expect(reference("0x1010", "0x1020")).toMatchObject({ status: "changed" });
     expect(reference("0x1010", "0x1010")).toMatchObject({
@@ -1322,8 +1371,8 @@ describe("function comparison unnamed reference endpoints", () => {
     };
     expect(
       compareFunctions(
-        observe("a", unnamed("call")),
-        observe("b", unnamed("data")),
+        functionSnapshotFixture(observe("a", unnamed("call"))),
+        functionSnapshotFixture(observe("b", unnamed("data"))),
       ).dimensions.find(({ dimension }) => dimension === "references"),
     ).toMatchObject({ status: "changed" });
   });

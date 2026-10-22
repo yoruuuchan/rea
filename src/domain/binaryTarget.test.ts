@@ -20,6 +20,7 @@ describe("executable header parsing", () => {
     [elf(1, 1, 164), "elf", "hexagon"],
     [thinMach(0xfeedfacf, 0x0100000c), "mach-o", "arm64"],
     [thinMach(0xcefaedfe, 0x01000007), "mach-o", "x86_64"],
+    [thinMach(0xcefaedfe, 0x0200000c), "mach-o", "arm64_32"],
     [pe(0x8664), "pe", "x86_64"],
     [pe(0xaa64), "pe", "arm64"],
   ] as const)("parses metadata for %s", (bytes, format, architecture) => {
@@ -93,6 +94,30 @@ describe("executable header parsing", () => {
     });
   });
 
+  it.each([
+    Buffer.alloc(0),
+    Buffer.from([0x7f, 0x45, 0x4c, 0x46]),
+    fat([], 2),
+    // A FAT table declaring only unsupported CPU types has nothing to select.
+    fat([0x00000012]),
+    pe(0xffff),
+  ])("rejects malformed, truncated, or unsupported metadata", (bytes) => {
+    expect(parseExecutableHeader(bytes, "arm64").ok).toBe(false);
+  });
+
+  it("rejects malformed PE optional-header commitments", () => {
+    const wrongMagic = pe(0x8664);
+    wrongMagic.writeUInt16LE(0x10b, 64 + 24);
+    const truncatedDirectories = pe(0x8664);
+    truncatedDirectories.writeUInt16LE(112, 64 + 20);
+    truncatedDirectories.writeUInt32LE(16, 64 + 24 + 108);
+
+    expect(parseExecutableHeader(wrongMagic, "x64").ok).toBe(false);
+    expect(parseExecutableHeader(truncatedDirectories, "x64").ok).toBe(false);
+  });
+});
+
+describe("FAT Mach-O slice selection", () => {
   it("selects the host architecture from a FAT table", () => {
     const bytes = fat([0x01000007, 0x0100000c]);
     const arm = parseExecutableHeader(bytes, "arm64");
@@ -122,30 +147,36 @@ describe("executable header parsing", () => {
     });
   });
 
-  it("rejects FAT files without a host-compatible slice", () => {
+  it("selects the first valid declared slice when none matches the host", () => {
+    const bytes = fat([0x01000007, 0x0100000c]);
     expect(parseExecutableHeader(fat([0x01000007]), "arm64")).toMatchObject({
-      ok: false,
+      ok: true,
+      value: {
+        format: "mach-o-universal",
+        architecture: "x86_64",
+        availableArchitectures: ["x86_64"],
+      },
     });
-  });
-
-  it.each([
-    Buffer.alloc(0),
-    Buffer.from([0x7f, 0x45, 0x4c, 0x46]),
-    fat([], 2),
-    pe(0xffff),
-  ])("rejects malformed, truncated, or unsupported metadata", (bytes) => {
-    expect(parseExecutableHeader(bytes, "arm64").ok).toBe(false);
-  });
-
-  it("rejects malformed PE optional-header commitments", () => {
-    const wrongMagic = pe(0x8664);
-    wrongMagic.writeUInt16LE(0x10b, 64 + 24);
-    const truncatedDirectories = pe(0x8664);
-    truncatedDirectories.writeUInt16LE(112, 64 + 20);
-    truncatedDirectories.writeUInt32LE(16, 64 + 24 + 108);
-
-    expect(parseExecutableHeader(wrongMagic, "x64").ok).toBe(false);
-    expect(parseExecutableHeader(truncatedDirectories, "x64").ok).toBe(false);
+    expect(parseExecutableHeader(bytes, "riscv64")).toMatchObject({
+      value: {
+        architecture: "x86_64",
+        availableArchitectures: ["x86_64", "arm64"],
+      },
+    });
+    // A foreign family declared twice, such as arm64 and arm64e, has no
+    // provider-neutral slice, whether or not one declaration is undersized.
+    const subtypes = fat([0x0100000c, 0x0100000c]);
+    expect(parseExecutableHeader(subtypes, "x64")).toMatchObject({
+      ok: false,
+      error:
+        "FAT binary has no x64 slice and no foreign architecture declared exactly once",
+    });
+    subtypes.writeUInt32BE(31, 8 + 12);
+    expect(parseExecutableHeader(subtypes, "x64").ok).toBe(false);
+    // A unique foreign family is still selected beside an ambiguous one.
+    expect(
+      parseExecutableHeader(fat([0x0100000c, 0x0100000c, 0x01000007]), "arm"),
+    ).toMatchObject({ value: { architecture: "x86_64" } });
   });
 });
 

@@ -33,24 +33,23 @@ const REQUIRED_LLM_TOPICS = [
  *
  * Host readiness and installer applicability are different facts: a
  * distribution REA supports can still be absent from the Hopper package's
- * tested list, so the doctor host check cannot answer the second question.
- * Applicability stays undefined when its owning fact is unavailable, which is
- * distinct from a host known to lack an automated installer.
+ * tested list, or run on an architecture the package lacks, so the doctor host
+ * check cannot answer the second question. On Linux, Hopper readiness is
+ * required only where the automated installer applies; elsewhere setup never
+ * provides Hopper. Applicability stays undefined when its owning fact is
+ * unavailable, which is distinct from a host known to lack an automated
+ * installer.
  */
 export function packageSetupSupport(checks, host) {
   const supportedSetupHost =
     checks?.find(({ name }) => name === "node")?.ok === true;
+  const hostCheckOk = checks?.find(({ name }) => name === "host")?.ok;
+  const hopperSetupSupported = hopperInstallerSupported(host, hostCheckOk);
   const hopperReadinessRequired =
     host.platform !== "win32" &&
-    checks?.find(({ name }) => name === "host")?.ok === true;
-  return {
-    supportedSetupHost,
-    hopperReadinessRequired,
-    hopperSetupSupported: hopperInstallerSupported(
-      host,
-      checks?.find(({ name }) => name === "host")?.ok,
-    ),
-  };
+    hostCheckOk === true &&
+    (host.platform !== "linux" || hopperSetupSupported === true);
+  return { supportedSetupHost, hopperReadinessRequired, hopperSetupSupported };
 }
 
 /**
@@ -76,7 +75,7 @@ async function readHostLinuxDistribution() {
   if (process.platform !== "linux") return undefined;
   const { readLinuxDistribution } =
     await import("../dist/application/LinuxHopper.js");
-  return readLinuxDistribution();
+  return readLinuxDistribution(process.arch);
 }
 
 /** Validate --help, --llms, and doctor output and determine host setup support. */

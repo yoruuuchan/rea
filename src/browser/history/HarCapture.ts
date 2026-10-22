@@ -32,7 +32,7 @@ export const decodeHarCapture = (
   sensitiveValues: readonly string[],
 ): DecodedCapture => {
   const raw = parseCaptureJson(text, "HAR");
-  const validation = projectHar(raw, [], false);
+  const validation = projectHar(raw, [], "validation");
   const adaptedPlaywrightEntries = new Set(
     createHarValidator()(validation.reported),
   );
@@ -55,11 +55,11 @@ export const decodeHarCapture = (
   const container = projectHar(
     { ...raw, log: { ...raw.log, entries: null } },
     sensitiveValues,
-    true,
+    "container",
   );
   const records = entries.map((entry, ordinal): WebNetworkCaptureRecord => {
     // Validate each original record even when a structural ancestor excludes it.
-    const projected = projectHar(entry, sensitiveValues, true);
+    const projected = projectHar(entry, sensitiveValues, "entry");
     const projection: Projection = recordsExcluded
       ? {
           reported: null,
@@ -102,12 +102,13 @@ export const decodeHarCapture = (
   };
 };
 
-/** Evidence projection when `redact` is true; the upstream schema validation copy otherwise. */
+/** Relative HTTP paths belong only to entries, never similarly named container extensions. */
 const projectHar = (
   value: unknown,
   sensitiveValues: readonly string[],
-  redact: boolean,
+  scope: "validation" | "container" | "entry",
 ): Projection => {
+  const redact = scope !== "validation";
   const redactor = new CaptureRedaction(sensitiveValues);
   const numeric_literals: Projection["numeric_literals"] = [];
   const binary_fields: Projection["binary_fields"] = [];
@@ -136,7 +137,7 @@ const projectHar = (
         pointer,
       );
     if (
-      redact &&
+      scope === "entry" &&
       parent !== undefined &&
       redactor.harCredential(pointer, parent)
     )
@@ -144,7 +145,7 @@ const projectHar = (
     if (item instanceof LosslessNumber) return projectNumber(item, pointer);
     if (typeof item === "string") {
       if (
-        redact &&
+        scope === "entry" &&
         pointer === "/response/content/text" &&
         parent?.encoding === "base64"
       ) {
@@ -191,7 +192,7 @@ const projectHar = (
         ? redactor.text(
             item,
             pointer,
-            redactor.harTransportUrl(pointer, parent),
+            scope === "entry" && redactor.harTransportUrl(pointer, parent),
           )
         : item;
     }

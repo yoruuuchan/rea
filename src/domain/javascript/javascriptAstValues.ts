@@ -2,6 +2,12 @@ import * as t from "@babel/types";
 import type { JavaScriptSemanticPrimitive } from "./javascriptSemanticValueTypes.js";
 import { SEMANTIC_EXPRESSION_DEPTH_LIMIT } from "./javascriptSemanticResourceLimits.js";
 
+/** Type-only class fields neither initialize own slots nor shadow inherited members. */
+export const isRuntimeJavaScriptClassProperty = (
+  node: t.Node,
+): node is t.ClassProperty =>
+  t.isClassProperty(node) && node.declare !== true && node.abstract !== true;
+
 /** TypeScript receiver annotations occupy no positional runtime parameter slot. */
 export const runtimeFunctionParameters = (
   node: t.Function,

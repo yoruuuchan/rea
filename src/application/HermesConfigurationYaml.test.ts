@@ -7,6 +7,57 @@ import {
   stringifyHermesConfigurationYaml,
 } from "./HermesConfigurationYaml.js";
 
+describe("Hermes YAML deletion", () => {
+  for (const version of ["1.1", "1.2"] as const) {
+    for (const [name, body, path] of [
+      [
+        "an aliased table",
+        "server_defaults: &servers\n  other:\n    command: other-server\n\nmcp_servers: *servers # Selected table\n",
+        ["mcp_servers", "rea"],
+      ],
+      [
+        "nested aliases",
+        "defaults: &defaults\n  other: {command: other-server}\nservers: &servers\n  mcp_servers: *defaults\nclient: *servers\nobserver: *servers\n",
+        ["client", "mcp_servers", "rea"],
+      ],
+      [
+        "shadowed anchors",
+        "first: &server {command: original}\ndefaults: &servers\n  other: *server\nsecond: &server {command: replacement}\nmcp_servers: *servers\nobserver: *server\n",
+        ["mcp_servers", "rea"],
+      ],
+      [
+        "shared consumers",
+        "defaults: &servers\n  other: &other {command: other-server}\nmcp_servers: *servers\nobserver: *servers\nother_observer: *other\n",
+        ["mcp_servers", "rea"],
+      ],
+      [
+        "an explicit flow table with CRLF",
+        "# Keep formatting\r\nmcp_servers: {other: {command: other-server}}\r\n",
+        ["mcp_servers", "rea"],
+      ],
+    ] as const) {
+      it(`preserves YAML ${version} bytes when deleting an absent key from ${name}`, () => {
+        const source = (version === "1.2" ? "%YAML 1.2\n---\n" : "") + body;
+        expect(editHermesConfigurationYaml(source, path, undefined)).toBe(
+          source,
+        );
+      });
+    }
+  }
+
+  for (const [name, reference] of [
+    ["cyclic", "servers"],
+    ["unresolved", "missing"],
+  ]) {
+    it(`still refuses deletion through a table containing a ${name} alias`, () => {
+      const source = `defaults: &servers\n  rea: {command: rea}\n  other: *${reference}\nmcp_servers: *servers\n`;
+      expect(() =>
+        editHermesConfigurationYaml(source, ["mcp_servers", "rea"], undefined),
+      ).toThrow(TypeError);
+    });
+  }
+});
+
 describe("Hermes configuration YAML", () => {
   it("retains a quoted sequence element when replacing its registration", () => {
     const source =

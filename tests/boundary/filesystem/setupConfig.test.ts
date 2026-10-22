@@ -50,6 +50,38 @@ describe("JSON client configuration transaction: writing configuration through s
     },
   );
 
+  it.skipIf(process.platform === "win32")(
+    "resolves a directory symlink and its real directory to one transaction path",
+    async () => {
+      const root = await createTestTempDirectory("rea-config-dir-alias-");
+      const realDirectory = join(root, "real");
+      const alias = join(root, "alias");
+      await mkdir(realDirectory);
+      await symlink(realDirectory, alias, "dir");
+      const realPath = join(realDirectory, "config.json");
+      const aliasPath = join(alias, "config.json");
+      const nestedRealPath = join(realDirectory, "nested", "config.json");
+      const nestedAliasPath = join(alias, "nested", "config.json");
+
+      expect(await resolveClientConfigTransactionPath(aliasPath)).toBe(
+        realPath,
+      );
+      expect(await resolveClientConfigTransactionPath(realPath)).toBe(realPath);
+      expect(await resolveClientConfigTransactionPath(nestedAliasPath)).toBe(
+        nestedRealPath,
+      );
+      expect(await resolveClientConfigTransactionPath(nestedRealPath)).toBe(
+        nestedRealPath,
+      );
+
+      await writeFile(realPath, "{}\n");
+      expect(await resolveClientConfigTransactionPath(aliasPath)).toBe(
+        realPath,
+      );
+      expect(await resolveClientConfigTransactionPath(realPath)).toBe(realPath);
+    },
+  );
+
   it("preserves existing keys, creates a backup, and reads back the MCP entry", async () => {
     const directory = await createTestTempDirectory("rea-setup-");
     const configPath = join(directory, "mcp.json");

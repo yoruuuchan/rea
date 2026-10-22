@@ -592,6 +592,27 @@ class ProtocolProducerTest(unittest.TestCase):
             receiver.close()
 
 
+class RequestFrameLimitTest(unittest.TestCase):
+    def test_payload_limit_excludes_the_line_terminator(self):
+        class BufferedSocket:
+            def __init__(self, data):
+                self.data = data
+
+            def settimeout(self, _timeout):
+                pass
+
+            def recv(self, count):
+                part, self.data = self.data[:count], self.data[count:]
+                return part
+
+        payload = b"{}" + b" " * (bridge.MAX_FRAME_BYTES - 2)
+        self.assertEqual(
+            bridge._BridgeServer._receive_frame(BufferedSocket(payload + b"\n")), {}
+        )
+        with self.assertRaisesRegex(ValueError, "frame-limit-exceeded"):
+            bridge._BridgeServer._receive_frame(BufferedSocket(payload + b" " + b"\n"))
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["--serve"]:
         run_serve_mode()

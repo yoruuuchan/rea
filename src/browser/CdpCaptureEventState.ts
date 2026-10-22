@@ -16,6 +16,8 @@ export interface CdpCaptureEventsState {
   readonly network: Map<string, NetworkState>;
   readonly networkRequestTimestamps: Map<string, number>;
   readonly malformedRedirectRequestIds: Set<string>;
+  /** Requests whose selected JSON request-body shape was expected but not obtained. */
+  readonly missingRequestBodyShapeIds: Set<string>;
   readonly webSocketConnectionsById: Map<
     string,
     WebPageInspection["network"]["websocket_connections"][number]

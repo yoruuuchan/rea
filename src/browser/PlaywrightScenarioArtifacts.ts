@@ -5,6 +5,7 @@ import type { BrowserContext, Page } from "playwright-core";
 
 import type { BrowserScenario } from "../domain/browserScenario.js";
 import {
+  BROWSER_STORAGE_FINGERPRINT_VERSION,
   browserStepArtifactsSchema,
   type BrowserStepArtifacts,
 } from "../domain/browserScenarioCaptureValues.js";
@@ -154,6 +155,7 @@ const captureStorage = async (input: {
       }))()`),
     );
     const value = {
+      fingerprint_version: BROWSER_STORAGE_FINGERPRINT_VERSION,
       cookies: cookies.map((cookie) => ({
         name: secrets.redact(cookie.name),
         domain: secrets.redact(cookie.domain),

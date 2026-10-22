@@ -191,3 +191,25 @@ it("preserves malformed-output failure when cancellation arrives with it", async
     error: { _tag: "AnalysisOutputError" },
   });
 });
+
+it("gives cancellation precedence over malformed raw input", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let calls = 0;
+  const service = new WasmArtifactService({
+    close: () => Promise.resolve(),
+    inspect: () => {
+      calls++;
+      return Promise.resolve(ok(wasmArtifactExecution()));
+    },
+  });
+  const malformed = { path: "relative.wasm" };
+  expect(
+    await service.inspect(malformed, { signal: controller.signal }),
+  ).toMatchObject({ ok: false, error: { _tag: "AnalysisCancelledError" } });
+  expect(await service.inspect(malformed)).toMatchObject({
+    ok: false,
+    error: { _tag: "AnalysisInputError" },
+  });
+  expect(calls).toBe(0);
+});

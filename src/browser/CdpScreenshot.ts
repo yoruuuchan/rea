@@ -12,6 +12,7 @@ import {
   allowedSanitizedUrl,
   recordValue,
   cdpStringValue,
+  numberValue,
 } from "./CdpCaptureValues.js";
 import { mainFrameUrl } from "./CdpCaptureDocuments.js";
 import { captureFrames } from "./CdpCaptureDocuments.js";
@@ -73,17 +74,45 @@ export const captureCdpScreenshot = async (
     if (event.sessionId !== context.sessionId) return;
     observeScreenshotNavigation(event, origins, navigation);
   });
-  let result: ReturnType<typeof recordValue>;
+  const assertCurrentDocument = () => {
+    if (navigation.invalidIdentity)
+      throw new BrowserObservationError("inspect_web_page", "protocol_error");
+    if (navigation.leftScope)
+      throw new BrowserObservationError(
+        "inspect_web_page",
+        "target_not_allowed",
+      );
+    if (navigation.changed)
+      throw new BrowserObservationError("inspect_web_page", "target_changed");
+  };
+  let screenshot: Awaited<ReturnType<typeof captureScreenshotImage>>;
   let after: unknown;
   try {
-    result = recordValue(
-      await context.connection.send(
-        "Page.captureScreenshot",
-        { format: "png", fromSurface: true, captureBeyondViewport: false },
-        context.sessionId,
-        context.signal,
-      ),
-    );
+    const viewport = await readScreenshotViewport(context);
+    assertCurrentDocument();
+    screenshot = await captureScreenshotImage(context);
+    assertCurrentDocument();
+    const currentViewport = await readScreenshotViewport(context);
+    assertCurrentDocument();
+    assertSameViewport(viewport, currentViewport);
+    if (!coversViewport(screenshot, currentViewport)) {
+      // Refresh geometry before clipping, and reject a moving viewport rather
+      // than capture a region that is no longer visible.
+      screenshot = await captureScreenshotImage(context, currentViewport.clip);
+      assertCurrentDocument();
+      const recoveredViewport = await readScreenshotViewport(context);
+      assertCurrentDocument();
+      assertSameViewport(currentViewport, recoveredViewport);
+      if (!coversViewport(screenshot, recoveredViewport))
+        throw new BrowserObservationError(
+          "inspect_web_page",
+          "protocol_error",
+          {
+            detail:
+              "The screenshot does not cover the reported visual viewport.",
+          },
+        );
+    }
     after = await context.connection.send(
       "Page.getFrameTree",
       {},
@@ -93,16 +122,9 @@ export const captureCdpScreenshot = async (
   } finally {
     removeListener();
   }
-  const screenshot = decodeScreenshot(result);
-  if (screenshot === undefined)
-    throw new BrowserObservationError("inspect_web_page", "protocol_error");
-  if (navigation.invalidIdentity)
-    throw new BrowserObservationError("inspect_web_page", "protocol_error");
-  if (navigation.leftScope)
-    throw new BrowserObservationError("inspect_web_page", "target_not_allowed");
+  assertCurrentDocument();
   const afterUrl = mainFrameUrl(after);
   if (
-    navigation.changed ||
     afterUrl !== beforeUrl ||
     allowedSanitizedUrl(afterUrl, origins) === undefined
   )
@@ -130,6 +152,120 @@ export const captureCdpScreenshot = async (
       "REA does not scroll, evaluate JavaScript, or capture beyond the current viewport.",
     ],
   };
+};
+
+/** Parse CSS clip geometry and device-pixel coverage at their owning boundary. */
+const readScreenshotViewport = async (context: ScreenshotContext) => {
+  const metrics = recordValue(
+    await context.connection.send(
+      "Page.getLayoutMetrics",
+      {},
+      context.sessionId,
+      context.signal,
+    ),
+  );
+  const visualViewport = recordValue(metrics?.visualViewport);
+  const cssViewport = recordValue(metrics?.cssVisualViewport);
+  const pageX = numberValue(cssViewport?.pageX);
+  const pageY = numberValue(cssViewport?.pageY);
+  const width = numberValue(cssViewport?.clientWidth);
+  const height = numberValue(cssViewport?.clientHeight);
+  const scale = numberValue(cssViewport?.scale);
+  const pixelWidth = numberValue(visualViewport?.clientWidth);
+  const pixelHeight = numberValue(visualViewport?.clientHeight);
+  const pixelScale = numberValue(visualViewport?.scale);
+  if (
+    pageX === undefined ||
+    pageY === undefined ||
+    width === undefined ||
+    height === undefined ||
+    scale === undefined ||
+    pixelWidth === undefined ||
+    pixelHeight === undefined ||
+    pixelScale !== scale ||
+    width <= 0 ||
+    height <= 0 ||
+    scale <= 0 ||
+    pixelWidth <= 0 ||
+    pixelHeight <= 0
+  )
+    throw new BrowserObservationError("inspect_web_page", "protocol_error");
+  // Keep ordinary surface captures, including their scrollbars and pixel
+  // density. The visual viewport excludes scrollbars and supplies only a
+  // lower bound on the expected image size, allowing subpixel rounding.
+  const minimumWidth = Math.max(1, Math.floor(pixelWidth * scale));
+  const minimumHeight = Math.max(1, Math.floor(pixelHeight * scale));
+  if (
+    !Number.isSafeInteger(minimumWidth) ||
+    !Number.isSafeInteger(minimumHeight)
+  )
+    throw new BrowserObservationError("inspect_web_page", "protocol_error");
+  return {
+    clip: { x: pageX, y: pageY, width, height, scale },
+    pixelWidth,
+    pixelHeight,
+    minimumWidth,
+    minimumHeight,
+  };
+};
+
+type ScreenshotViewport = Awaited<ReturnType<typeof readScreenshotViewport>>;
+
+const coversViewport = (
+  image: Awaited<ReturnType<typeof captureScreenshotImage>>,
+  viewport: ScreenshotViewport,
+) =>
+  image.dimensions.width >= viewport.minimumWidth &&
+  image.dimensions.height >= viewport.minimumHeight;
+
+const assertSameViewport = (
+  before: ScreenshotViewport,
+  after: ScreenshotViewport,
+): void => {
+  if (
+    before.clip.x !== after.clip.x ||
+    before.clip.y !== after.clip.y ||
+    before.clip.width !== after.clip.width ||
+    before.clip.height !== after.clip.height ||
+    before.clip.scale !== after.clip.scale ||
+    before.pixelWidth !== after.pixelWidth ||
+    before.pixelHeight !== after.pixelHeight
+  )
+    throw new BrowserObservationError("inspect_web_page", "target_changed", {
+      detail: "The visual viewport changed during screenshot capture.",
+    });
+};
+
+interface ScreenshotClip {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+  readonly scale: number;
+}
+
+/** Decode every capture at the same boundary, including a clipped recovery. */
+const captureScreenshotImage = async (
+  context: ScreenshotContext,
+  clip?: ScreenshotClip,
+) => {
+  const result = recordValue(
+    await context.connection.send(
+      "Page.captureScreenshot",
+      {
+        format: "png",
+        fromSurface: true,
+        captureBeyondViewport: clip !== undefined,
+        ...(clip === undefined ? {} : { clip }),
+      },
+      context.sessionId,
+      context.signal,
+    ),
+  );
+  const screenshot = decodeScreenshot(result);
+  if (screenshot === undefined)
+    throw new BrowserObservationError("inspect_web_page", "protocol_error");
+  return screenshot;
 };
 
 const decodeScreenshot = (

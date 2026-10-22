@@ -3,6 +3,7 @@ import {
   projectCartesianCandidates,
 } from "../bridgeCandidateProjection.js";
 import { z } from "zod";
+import { AnalysisInputError } from "../analysisErrorCore.js";
 
 import {
   hasCompleteInventoryCoverage,
@@ -94,9 +95,19 @@ export const projectAndroidApplication = (
     parsed.inventory_evidence,
   );
   if (inventory.manifest.root_format !== "apk")
-    throw new TypeError(
-      `Android application projection requires APK inventory Evidence; the inventory root format is ${inventory.manifest.root_format}. APK is chosen for a ZIP archive whose name ends in .apk.`,
-    );
+    throw new AnalysisInputError("project_android_application_graph", {}, [
+      {
+        path: [
+          "inventory_evidence",
+          0,
+          "normalized_result",
+          "manifest",
+          "root_format",
+        ],
+        reason: "invalid_value",
+        message: `Android application projection requires APK inventory Evidence; the inventory root format is ${inventory.manifest.root_format}. APK is chosen for a ZIP archive whose name ends in .apk.`,
+      },
+    ]);
   const entries = projectedInventoryEntries(inventory);
   const all = projectedFileComponents(entries);
   const unavailable = entries.flatMap(({ unavailable }) =>

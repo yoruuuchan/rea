@@ -1779,6 +1779,17 @@ describe("source-map original artifact language metadata", () => {
     ["main.js", "text/javascript"],
     ["main.mjs", "text/javascript"],
     ["main.cjs", "text/javascript"],
+    ["main.ts?revision=2", "text/typescript"],
+    ["main.tsx?revision=2", "text/typescript"],
+    ["main.mts?revision=2", "text/typescript"],
+    ["main.cts?revision=2", "text/typescript"],
+    ["main.ts#original", "text/typescript"],
+    ["main.tsx#original", "text/typescript"],
+    ["main.mts#original", "text/typescript"],
+    ["main.cts#original", "text/typescript"],
+    ["main.js?filename=main.ts", "text/javascript"],
+    ["main.js#main.ts", "text/javascript"],
+    ["extensionless?revision=2", "text/javascript"],
   ])("retains the source language for %s", async (filename, mediaType) => {
     const text =
       mediaType === "text/typescript"
@@ -1818,7 +1829,12 @@ describe("source-map original artifact language metadata", () => {
             original_sources: [
               {
                 source: `${localOrigin}/${filename}`,
-                artifact: { media_type: mediaType, text },
+                artifact: {
+                  media_type: mediaType,
+                  text,
+                  bytes: Buffer.byteLength(text),
+                  sha256: createHash("sha256").update(text).digest("hex"),
+                },
               },
             ],
             mappings: [{ source: `${localOrigin}/${filename}` }],
