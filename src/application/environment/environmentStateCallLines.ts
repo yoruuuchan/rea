@@ -1,12 +1,12 @@
 import {
   allLines,
   collectionPathOf,
-  segmentsOf,
+  collectionMatch,
+  type SuppliedSegment,
   type StateListView,
 } from "../../domain/analysisView/environmentStateRules.js";
 import { pagesOnly } from "../../domain/analysisView/environmentStatePaging.js";
 import {
-  pathValueMatches,
   selectReplayExchange,
   selectsRecordedLine,
   type ReplayArguments,
@@ -18,20 +18,14 @@ import type {
 } from "./environmentSource.js";
 import { environmentToolArguments } from "./environmentTools.js";
 
-/** One collection segment an item call names: a template literal, or a supplied path value. */
-export interface CallSegment {
-  readonly text: string;
-  readonly supplied: boolean;
-}
-
 /** A call's path segments: template literals and supplied values, or undefined when a path argument is missing. */
 export const callSegments = (
   tool: EnvironmentManifestTool,
   args: ReplayArguments,
-): CallSegment[] | undefined => {
+): SuppliedSegment[] | undefined => {
   const names = environmentToolArguments(tool).path;
   const params = new Map(tool.params.map((param) => [param.index, param]));
-  const segments: CallSegment[] = [];
+  const segments: SuppliedSegment[] = [];
   const template = tool.path_template
     .slice(tool.path_template.indexOf("/") + 1)
     .split("/");
@@ -46,23 +40,6 @@ export const callSegments = (
     segments.push({ text: value, supplied: true });
   }
   return segments;
-};
-
-/** How many supplied segments a held collection matches verbatim, when it matches the call under replay's path rule. */
-export const collectionMatch = (
-  collection: string,
-  segments: readonly CallSegment[],
-): number | undefined => {
-  const held = segmentsOf(collection);
-  if (held.length !== segments.length) return undefined;
-  let verbatim = 0;
-  for (const [index, { text, supplied }] of segments.entries()) {
-    const segment = held[index]!;
-    if (supplied ? !pathValueMatches(segment, text) : segment !== text)
-      return undefined;
-    if (supplied && segment === text) verbatim += 1;
-  }
-  return verbatim;
 };
 
 /** The checked recorded line a list or document call names exactly, chosen among them as replay chooses; later or filtered recordings never qualify. */

@@ -4,6 +4,7 @@ import { AnalysisProtocolError } from "../domain/analysisErrorCore.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
   DuplicateEvidenceRecordError,
+  InvalidResidualUnknownGraphError,
   NonCanonicalEvidenceBundleError,
 } from "../domain/evidenceBundle.js";
 import { createEvidence, type Evidence } from "../domain/evidence.js";
@@ -55,6 +56,7 @@ export const buildReconstructionObligationLedgerEvidenceValidated = (
     if (
       cause instanceof NonCanonicalEvidenceBundleError ||
       cause instanceof DuplicateEvidenceRecordError ||
+      cause instanceof InvalidResidualUnknownGraphError ||
       cause instanceof MissingReviewEvidenceError
     )
       return err(workflowInputError(OPERATION, cause));

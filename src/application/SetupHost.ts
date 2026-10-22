@@ -47,7 +47,7 @@ import {
 } from "./SetupClientConfiguration.js";
 import { failedConfigurationMessage } from "./SetupClients.js";
 import { setupInstallFailure } from "./SetupInstallFailure.js";
-import { RegularFileCleanupFailure } from "./RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import {
   explicitSetupRegistrationEnvironment,
   providerRegistrationEnvironment,

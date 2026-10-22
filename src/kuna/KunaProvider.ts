@@ -20,6 +20,10 @@ import {
   resolveRegexMatchingDeadline,
   type RegexMatchingDeadline,
 } from "../config/regexMatchingDeadline.js";
+import {
+  resolveRegexWorkerHeapRequest,
+  type RegexWorkerHeapRequest,
+} from "../config/regexWorkerHeapRequest.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import {
   kunaFileCleanupError,
@@ -58,6 +62,7 @@ const VERIFIED_ARCHITECTURES: ReadonlySet<string> = new Set([
 export class KunaProvider implements AnalysisProviderCandidate {
   readonly #environment: Readonly<NodeJS.ProcessEnv>;
   readonly #deadline: RegexMatchingDeadline;
+  readonly #heapRequest: RegexWorkerHeapRequest;
   readonly #platform: NodeJS.Platform;
   readonly #launcher: KunaProcessLauncher | undefined;
   readonly #probeTimeoutMs: number | undefined;
@@ -79,6 +84,11 @@ export class KunaProvider implements AnalysisProviderCandidate {
        * selected environment; an invalid setting is refused.
        */
       readonly regexMatchingDeadline?: RegexMatchingDeadline;
+      /**
+       * Heap request already resolved at startup. Omitted means resolve the
+       * selected environment; an invalid setting is refused.
+       */
+      readonly regexWorkerHeapRequest?: RegexWorkerHeapRequest;
     } = {},
   ) {
     this.#platform = options.platform ?? process.platform;
@@ -86,6 +96,9 @@ export class KunaProvider implements AnalysisProviderCandidate {
     this.#deadline =
       options.regexMatchingDeadline ??
       resolveRegexMatchingDeadline(this.#environment);
+    this.#heapRequest =
+      options.regexWorkerHeapRequest ??
+      resolveRegexWorkerHeapRequest(this.#environment);
     this.#launcher = options.launcher;
     this.#probeTimeoutMs = options.probeTimeoutMs;
     this.#singleFunctionRuns = options.singleFunctionRuns;
@@ -106,6 +119,7 @@ export class KunaProvider implements AnalysisProviderCandidate {
             code: availability.code,
           },
       this.#deadline,
+      this.#heapRequest,
     );
   }
 
@@ -305,6 +319,7 @@ export class KunaProvider implements AnalysisProviderCandidate {
       runSlots: this.#foregroundSlots(configuration.value),
       environment: this.#environment,
       deadline: this.#deadline,
+      heapRequest: this.#heapRequest,
       ...(this.#launcher === undefined ? {} : { launcher: this.#launcher }),
     });
   }

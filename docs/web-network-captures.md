@@ -410,7 +410,8 @@ agent environment later serves from retained Evidence. The view reuses the
 api-surface grouping, then keeps the groups on the primary origin, the origin
 with the most JSON-like records (`application/json`, `application/*+json`,
 `text/plain`, `text/markdown`), whose path starts with `/api/` or `/apis/` or
-whose content types are JSON-like. Every other group is listed under
+whose content types are JSON-like, and the write groups answered with no body
+(a bodiless `204 DELETE`). Every other group is listed under
 `excluded` with reason `other-origin`, `ui-page-or-asset` or `non-json`, and
 retained records without a usable request line are counted in a limitation.
 
@@ -715,8 +716,17 @@ budget. Those budgets have no runtime override. `capture_timeout_ms` does not
 raise them. Exceeding a budget returns no partial success.
 Oversized selected captures return an input error identifying `capture_path`
 and the byte budget; owned reply/output failures remain output or provider errors.
-HAR, SAZ and qlog run in an owned
-192 MiB Node old-generation heap with one V8 worker. Mitmproxy decoding applies
+HAR, SAZ and qlog run in an owned Node old-generation heap with one V8 worker.
+`REA_CAPTURE_DECODER_OLD_GENERATION_MIB` is a decimal integer of mebibytes from
+8 to 16384. Unset uses 192, the previous constant. Invalid values fail
+configuration and name the setting; they do not fall back to 192. The setting
+is read from the environment that starts REA, so a change needs a restart.
+A memory failure names the effective mebibytes, whether they came from the
+default or the setting, the default, the floor, and the maximum. The decoder
+passes that value as `--max-old-space-size` and removes inherited
+`NODE_OPTIONS`, so additional host memory and `NODE_OPTIONS` do not raise the
+heap. The 8 MiB semi-space stays fixed; a smaller old generation aborts Node
+during startup instead of enforcing a limit. Mitmproxy decoding applies
 Linux limits of 768 MiB address space, 30 seconds CPU and 96 MiB file output;
 both commands use `capture_timeout_ms` (default 30000) and independently supervised
 process cleanup. Owned decoder diagnostics retain at most 1 MiB across stdout
@@ -724,15 +734,18 @@ and stderr; the collector drops overflow as it arrives, reports the limit
 failure and verifies cleanup. Heap limits alone do not establish aggregate RSS limits.
 SAZ and qlog refuse decoding when neither a Node heap limit nor a Windows Job Object bound can be enforced. Existing HAR availability is preserved.
 When REA runs on Bun, the HAR/SAZ/qlog decoder runs on Bun, which ignores these V8 heap
-flags; its limitations and resource failures then omit the heap sizes. On
+flags; its limitations and resource failures then omit the V8 heap sizes. On
 Windows, the decoder's owned Job Object instead limits its committed memory to
-704 MiB, the 192 MiB budget plus a 512 MiB reserve for Bun itself. The
-limitations state that limit, and reaching it returns `resource_constraint`
-with `process_memory_limit_bytes`, whatever exit status Bun reports.
+the effective `REA_CAPTURE_DECODER_OLD_GENERATION_MIB` value plus a 512 MiB
+reserve for Bun itself. The default 192 MiB setting therefore yields 704 MiB.
+The limitations state that limit, and reaching it returns `resource_constraint`
+with `process_memory_limit_bytes`, whatever exit status Bun reports. Other Bun
+hosts enforce no decoder heap limit, so raising the setting does not bound them.
 
 Observed decoder memory exhaustion returns `resource_constraint`, with the
-selected capture, applicable limits and retained process diagnostics. HAR/SAZ/qlog's
-old-generation heap is fixed; inherited `NODE_OPTIONS` cannot raise it.
+selected capture, applicable limits and retained process diagnostics. Raising
+host memory or `NODE_OPTIONS` does not raise the old-generation heap. Set
+`REA_CAPTURE_DECODER_OLD_GENERATION_MIB` and restart REA.
 Record selection happens after complete decoding and does not reduce that
 workload. Use a smaller capture exported by its producer or another decoder
 with sufficient capacity, retaining the original for provenance. Subsets do

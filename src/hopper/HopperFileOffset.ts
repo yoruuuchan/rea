@@ -4,6 +4,7 @@ import { open, type FileHandle } from "node:fs/promises";
 import { z } from "zod";
 
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import {
   AnalysisAccessDeniedError,
   AnalysisArtifactChangedError,
@@ -12,6 +13,14 @@ import {
   AnalysisOutputError,
 } from "../domain/analysisErrorCore.js";
 import { BinaryTargetError } from "../domain/configurationErrors.js";
+import { ProviderCleanupError } from "../domain/providerCleanupError.js";
+import { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
+import { RegularFileOperationCancelled } from "../filesystem/RegularFile.js";
+import {
+  RegularFileCancelled,
+  RegularFileCleanupFailure,
+  withOwnedFileHandle,
+} from "../filesystem/OwnedRegularFile.js";
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import type { FileOffsetPartialObservation } from "../domain/native/fileOffsetPartialObservation.js";
@@ -36,11 +45,20 @@ const observationSchema = z.strictObject({
 });
 type Observation = z.infer<typeof observationSchema>;
 
+/** Exact descriptor owner the caller retries after a rejected source close. */
+export interface HopperFileOffsetOwnership {
+  readonly signal?: AbortSignal;
+  /** Adopt the handle whose close rejected; the caller owns later retries. */
+  readonly retainFailedClose?: (owner: OwnedFileHandle) => void;
+  /** Bind the typed cleanup marker to that same owner before it is returned. */
+  readonly onCleanupMarker?: (marker: ProviderCleanupError) => void;
+}
+
 /** Bind native image-relative offsets to coordinates in the admitted source bytes. */
 export async function mapHopperFileOffset(
   target: BinaryTarget,
   value: JsonValue,
-  signal?: AbortSignal,
+  ownership?: HopperFileOffsetOwnership,
 ): Promise<Result<JsonValue, AnalysisError>> {
   const parsed = observationSchema.safeParse(value);
   if (!parsed.success)
@@ -66,90 +84,252 @@ export async function mapHopperFileOffset(
     return unavailable(
       "The selected database digest does not identify its original executable bytes. Open that executable to verify original-file coordinates; read_bytes still exposes the database's native bytes.",
     );
-  if (signal?.aborted)
-    return err(
-      new AnalysisCancelledError(OPERATION, {
-        partialObservation: partial("Source verification was cancelled"),
-      }),
-    );
+  const signal = ownership?.signal;
+  if (signal?.aborted) return err(cancelled(partial, signal.reason));
+  const publish = (marker: ProviderCleanupError): ProviderCleanupError => {
+    ownership?.onCleanupMarker?.(marker);
+    return marker;
+  };
+  const verification: OffsetVerification = {
+    target,
+    observation,
+    partial,
+    unavailable,
+    signal,
+    publish,
+    withCleanup: (primary, marker) =>
+      analysisErrorWithCleanupFailure(
+        primary,
+        publish(marker),
+        OPERATION,
+      ).bindCleanupDependencies([marker]),
+  };
   try {
-    const captured = await snapshotFromPath(target.path, signal);
-    if (!captured.ok)
-      return err(
-        new AnalysisArtifactChangedError(
-          OPERATION,
-          target.path,
-          captured.error,
-          {
-            partialObservation: partial(captured.error),
-          },
-        ),
-      );
-    const snapshot = captured.value;
-    if (signal?.aborted)
-      return err(
-        new AnalysisCancelledError(OPERATION, {
-          partialObservation: partial("Source verification was cancelled"),
-        }),
-      );
-    if (snapshot.sha256 !== target.sha256) {
-      const reason = `Source ${target.path} differs from the admitted artifact: expected SHA-256 ${target.sha256}, observed ${snapshot.sha256}. Reopen the changed source for a new analysis identity.`;
-      return err(
-        new AnalysisArtifactChangedError(OPERATION, target.path, reason, {
-          partialObservation: partial(reason),
-        }),
-      );
-    }
-    const mapped = originalOffset(snapshot, observation);
-    if (!mapped.ok) return unavailable(mapped.error);
-    return ok({
-      address: observation.address,
-      file_offset: mapped.value + observation.provider_file_offset,
-      provider_file_offset: observation.provider_file_offset,
-      image_base_file_offset: mapped.value,
-      source_path: target.path,
-    });
-  } catch (cause: unknown) {
-    if (signal?.aborted)
-      return err(
-        new AnalysisCancelledError(OPERATION, {
-          cause,
-          partialObservation: partial("Source verification was cancelled"),
-        }),
-      );
-    const reason = `Cannot verify original source bytes: ${cause instanceof Error ? cause.message : String(cause)}`;
-    const code =
-      typeof cause === "object" && cause !== null && "code" in cause
-        ? cause.code
-        : undefined;
-    if (code === "EACCES" || code === "EPERM")
-      return err(
-        new AnalysisAccessDeniedError(OPERATION, target.path, code, {
-          cause,
-          partialObservation: partial(reason),
-        }),
-      );
-    return err(
-      new BinaryTargetError(target.path, reason, {
-        cause,
-        partialObservation: partial(reason),
-      }),
+    const captured = await snapshotFromPath(
+      target.path,
+      signal,
+      ownership?.retainFailedClose,
     );
+    return coordinatesForSnapshot(verification, captured).result;
+  } catch (cause: unknown) {
+    if (cause instanceof RegularFileCleanupFailure)
+      return cleanupAfterSnapshot(verification, cause);
+    if (cause instanceof RegularFileCancelled) {
+      const captured = cause.outcome.value;
+      if (!isSourceRead(captured)) throw cause;
+      if (!captured.ok)
+        return err(
+          artifactChanged(target.path, captured.error, partial(captured.error)),
+        );
+      return err(cancelled(partial, cause.reason));
+    }
+    return err(sourceAccessFailure(target.path, cause, partial, signal));
   }
 }
 
-async function snapshotFromPath(path: string, signal?: AbortSignal) {
-  const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
-  try {
-    if (!(await file.stat()).isFile())
-      return err(
-        `Source ${path} is no longer a regular file. Restore the admitted executable or reopen a regular source.`,
-      );
-    return ok(await readSourceSnapshot(file, signal));
-  } finally {
-    await file.close();
-  }
+async function snapshotFromPath(
+  path: string,
+  signal: AbortSignal | undefined,
+  retainFailedClose: HopperFileOffsetOwnership["retainFailedClose"],
+): Promise<Result<SourceSnapshot, string>> {
+  const handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  return withOwnedFileHandle(
+    path,
+    new OwnedFileHandle(handle),
+    {
+      ...(signal === undefined ? {} : { signal }),
+      ...(retainFailedClose === undefined ? {} : { retainFailedClose }),
+    },
+    async (file) => {
+      if (!(await file.stat()).isFile())
+        return err(
+          `Source ${path} is no longer a regular file. Restore the admitted executable or reopen a regular source.`,
+        );
+      return ok(await readSourceSnapshot(file, signal));
+    },
+  );
 }
+
+const isSourceRead = (
+  value: unknown,
+): value is Result<SourceSnapshot, string> =>
+  typeof value === "object" &&
+  value !== null &&
+  "ok" in value &&
+  (value.ok === true || value.ok === false);
+
+const cancelled = (
+  partial: (reason: string) => FileOffsetPartialObservation,
+  cause?: unknown,
+): AnalysisCancelledError =>
+  new AnalysisCancelledError(OPERATION, {
+    ...(cause === undefined ? {} : { cause }),
+    partialObservation: partial("Source verification was cancelled"),
+  });
+
+const artifactChanged = (
+  path: string,
+  reason: string,
+  partialObservation: FileOffsetPartialObservation,
+): AnalysisArtifactChangedError =>
+  new AnalysisArtifactChangedError(OPERATION, path, reason, {
+    partialObservation,
+  });
+
+/** Classify a failed read. A rejected close never reaches this helper. */
+const sourceAccessFailure = (
+  path: string,
+  cause: unknown,
+  partial: (reason: string) => FileOffsetPartialObservation,
+  signal: AbortSignal | undefined,
+): AnalysisError => {
+  if (
+    signal?.aborted === true ||
+    cause instanceof RegularFileOperationCancelled
+  )
+    return cancelled(
+      partial,
+      cause instanceof RegularFileOperationCancelled
+        ? cause.reason
+        : signal?.reason,
+    );
+  const reason = `Cannot verify original source bytes: ${cause instanceof Error ? cause.message : String(cause)}`;
+  const code =
+    typeof cause === "object" && cause !== null && "code" in cause
+      ? cause.code
+      : undefined;
+  if (code === "EACCES" || code === "EPERM")
+    return new AnalysisAccessDeniedError(OPERATION, path, code, {
+      cause,
+      partialObservation: partial(reason),
+    });
+  return new BinaryTargetError(path, reason, {
+    cause,
+    partialObservation: partial(reason),
+  });
+};
+
+const descriptorCleanup = (
+  failure: RegularFileCleanupFailure<unknown>,
+): ProviderCleanupError => {
+  const reason =
+    failure.cleanupCause instanceof Error
+      ? failure.cleanupCause.message
+      : String(failure.cleanupCause);
+  return new ProviderCleanupError(
+    "hopper",
+    [failure.path],
+    { reason },
+    { operation: OPERATION, cause: failure },
+  );
+};
+
+interface OffsetVerification {
+  readonly target: BinaryTarget;
+  readonly observation: Observation;
+  readonly partial: (reason: string) => FileOffsetPartialObservation;
+  readonly unavailable: (reason: string) => Result<JsonValue, AnalysisError>;
+  readonly signal: AbortSignal | undefined;
+  readonly withCleanup: (
+    primary: AnalysisError,
+    marker: ProviderCleanupError,
+  ) => AnalysisError;
+  readonly publish: (marker: ProviderCleanupError) => ProviderCleanupError;
+}
+
+const cleanupAfterSnapshot = (
+  verification: OffsetVerification,
+  failure: RegularFileCleanupFailure<unknown>,
+): Result<JsonValue, AnalysisError> => {
+  const { target, partial, signal, withCleanup, publish } = verification;
+  const marker = descriptorCleanup(failure);
+  if (failure.outcome.kind === "failed")
+    return err(
+      withCleanup(
+        sourceAccessFailure(
+          target.path,
+          failure.outcome.cause,
+          partial,
+          signal,
+        ),
+        marker,
+      ),
+    );
+  if (!isSourceRead(failure.outcome.value)) throw failure;
+  const captured = failure.outcome.value;
+  if (!captured.ok)
+    return err(
+      withCleanup(
+        artifactChanged(target.path, captured.error, partial(captured.error)),
+        marker,
+      ),
+    );
+  if (signal?.aborted === true || failure.completionCancellation !== undefined)
+    return err(
+      withCleanup(
+        cancelled(
+          partial,
+          failure.completionCancellation?.reason ?? signal?.reason,
+        ),
+        marker,
+      ),
+    );
+  const verified = coordinatesForSnapshot(verification, captured);
+  if (!verified.result.ok)
+    return err(withCleanup(verified.result.error, marker));
+  const published = publish(marker);
+  published.retainPartialObservation(
+    partial(
+      "Source descriptor close failed after the admitted bytes were read",
+    ),
+  );
+  published.retainDiagnostics({
+    source_sha256: captured.value.sha256,
+    ...(verified.fileOffset === undefined
+      ? {}
+      : { file_offset: verified.fileOffset }),
+    source_identity: "verified",
+  });
+  return err(published);
+};
+
+const coordinatesForSnapshot = (
+  verification: OffsetVerification,
+  captured: Result<SourceSnapshot, string>,
+): {
+  readonly result: Result<JsonValue, AnalysisError>;
+  readonly fileOffset?: number;
+} => {
+  const { target, observation, partial, unavailable, signal } = verification;
+  if (!captured.ok)
+    return {
+      result: err(
+        artifactChanged(target.path, captured.error, partial(captured.error)),
+      ),
+    };
+  const snapshot = captured.value;
+  if (signal?.aborted === true)
+    return { result: err(cancelled(partial, signal.reason)) };
+  if (snapshot.sha256 !== target.sha256) {
+    const reason = `Source ${target.path} differs from the admitted artifact: expected SHA-256 ${target.sha256}, observed ${snapshot.sha256}. Reopen the changed source for a new analysis identity.`;
+    return {
+      result: err(artifactChanged(target.path, reason, partial(reason))),
+    };
+  }
+  const mapped = originalOffset(snapshot, observation);
+  if (!mapped.ok) return { result: unavailable(mapped.error) };
+  const fileOffset = mapped.value + observation.provider_file_offset;
+  return {
+    fileOffset,
+    result: ok({
+      address: observation.address,
+      file_offset: fileOffset,
+      provider_file_offset: observation.provider_file_offset,
+      image_base_file_offset: mapped.value,
+      source_path: target.path,
+    }),
+  };
+};
 
 interface FatLayout {
   readonly slices: readonly FatSliceDeclaration[];

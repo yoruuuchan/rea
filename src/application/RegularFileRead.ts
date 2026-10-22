@@ -52,21 +52,17 @@ export class InvalidUtf8FileError extends TypeError {
   }
 }
 
-export { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
-
-export type RegularFileReadOutcome<Value> = RegularFileOperationOutcome<Value>;
-
 /** Retry a failed close through its retained owner and report any remaining cleanup. */
 export const retryRegularFileCleanup = async <Value>(
   failure: RegularFileCleanupFailure<Value>,
   resources: ArtifactResourceScope,
   signal?: AbortSignal,
 ): Promise<{
-  readonly outcome: RegularFileReadOutcome<Value>;
+  readonly outcome: RegularFileOperationOutcome<Value>;
   readonly cleanupLease?: AnalysisCleanupLease;
   readonly cleanup?: AnalysisCleanupObservation;
 }> => {
-  const outcome: RegularFileReadOutcome<Value> =
+  const outcome: RegularFileOperationOutcome<Value> =
     failure.outcome.kind === "failed" &&
     failure.operationFailure === undefined &&
     failure.outcome.cause instanceof RegularFileOperationCancelled &&

@@ -23,7 +23,6 @@ export const registerWebNetworkCaptureCommands = (
   logger: Logger,
   environment: Readonly<NodeJS.ProcessEnv>,
 ): void => {
-  const service = createWebNetworkCaptureService(environment);
   cli.command(CLI_COMMANDS.inspectWebNetworkCapture, {
     description:
       "Inspect retained HAR, native mitmproxy, Fiddler SAZ or aioquic qlog records without fetching recorded URLs",
@@ -65,6 +64,7 @@ export const registerWebNetworkCaptureCommands = (
           logger,
           CLI_COMMANDS.inspectWebNetworkCapture,
           async () => {
+            const service = createWebNetworkCaptureService(environment);
             return deliverCliAnalysisEvidence({
               run: () =>
                 service.inspect(

@@ -5,7 +5,7 @@ import { NodeCaptureAdapter } from "./NodeCaptureAdapter.js";
 vi.mock("./CaptureRelease.js", async (original) => ({
   ...(await original<typeof import("./CaptureRelease.js")>()),
   NODE_CAPTURE_HEAP_ENFORCED: false,
-  NODE_CAPTURE_PROCESS_MEMORY_LIMIT_BYTES: null,
+  captureDecoderProcessMemoryLimitBytes: () => null,
 }));
 
 it.each(["saz", "qlog"] as const)(

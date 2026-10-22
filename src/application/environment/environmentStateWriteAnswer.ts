@@ -1,6 +1,7 @@
 import {
   createdFields,
   documentBodyProblem,
+  renewUuids,
   updatedEntity,
   updatedFields,
   valueAt,
@@ -12,6 +13,7 @@ import {
   insertIndex,
   nextInteger,
 } from "../../domain/analysisView/environmentStateWriteExplain.js";
+import { callRenewal } from "../../domain/analysisView/environmentStateWriteGenerated.js";
 import {
   pathValuesOf,
   type GeneratedRule,
@@ -26,6 +28,7 @@ import {
   spelledLike,
 } from "../../domain/analysisView/environmentStateWriteValues.js";
 import {
+  collectionMatch,
   isObject,
   scalarText,
   type JsonObject,
@@ -40,7 +43,7 @@ import {
   type ReplayArguments,
 } from "./environmentReplay.js";
 import type { EnvironmentManifestTool } from "./environmentSource.js";
-import { callSegments, collectionMatch } from "./environmentStateCallLines.js";
+import { callSegments } from "./environmentStateCallLines.js";
 import {
   itemCall,
   missingAnswer,
@@ -127,11 +130,16 @@ const observedEntity = (
   return isObject(object) ? object : undefined;
 };
 
-/** One past the largest integer these entities hold in the field, or undefined when none holds one. */
-const nextHeld = (entities: readonly StateEntity[], field: string) =>
+/** One past the largest integer these entities hold in the field, read as the exemplar spells it, or undefined when none holds one. */
+const nextHeld = (
+  entities: readonly StateEntity[],
+  field: string,
+  exemplar: JsonValue,
+) =>
   nextInteger(
     entities.map((entity) => entity.fields),
     field,
+    exemplar,
   );
 
 /**
@@ -146,6 +154,8 @@ const generator = (
     readonly name: string;
     readonly collection: readonly StateEntity[];
     readonly observed: JsonObject;
+    /** The entity an update writes, whose values a renewed field keeps. */
+    readonly current?: JsonObject;
   },
 ): {
   readonly generate: GenerateValue;
@@ -163,6 +173,9 @@ const generator = (
   // A sequence never reuses a value the state started with, even after its entity was deleted.
   const started = store.startedWith(request.plan.target ?? "");
   const startedIn = started.filter((held) => held.collection === target.name);
+  const renewed = callRenewal(
+    `${store.state.evidenceId}:${request.tool.name}:renewed:${String(write.count)}`,
+  );
   const unused = (
     field: string,
     make: (attempt: number) => string,
@@ -196,6 +209,7 @@ const generator = (
                   ? [...target.collection, ...startedIn]
                   : [...ofType, ...started],
                 rule.field,
+                exemplar,
               ),
             ),
           ),
@@ -204,6 +218,14 @@ const generator = (
         return unused(rule.field, (attempt) =>
           seededUuid(seed(attempt), String(exemplar)),
         );
+      case "renewed":
+        return ok(
+          renewUuids(
+            target.current?.[rule.field] ?? null,
+            rule.pointers,
+            renewed,
+          ),
+        );
       case "identity":
         if (rule.generator === "sequence")
           return ok(
@@ -211,7 +233,11 @@ const generator = (
               exemplar,
               sequence(
                 `${request.plan.target ?? ""} ${rule.field} ${target.name}`,
-                nextHeld([...target.collection, ...startedIn], rule.field),
+                nextHeld(
+                  [...target.collection, ...startedIn],
+                  rule.field,
+                  exemplar,
+                ),
               ),
             ),
           );
@@ -375,6 +401,7 @@ const answerUpdate = (
     name: entity.collection,
     collection: serving.store.inCollection(entity.type, entity.collection),
     observed,
+    current: entity.fields,
   });
   const written = updatedFields(
     plan,

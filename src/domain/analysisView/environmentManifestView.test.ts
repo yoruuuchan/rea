@@ -1062,6 +1062,46 @@ it("treats a +json suffix as JSON only on application media types", () => {
   expect(projected.tools[1]?.body_shape).toBeNull();
 });
 
+it("keeps a write answered with no body as a tool whatever its content type, but not one only redirected", () => {
+  const capture = syntheticCapture([
+    ["GET", "https://s.test/items/1", "application/json"],
+    ["GET", "https://s.test/items/2", "application/json"],
+    ["DELETE", "https://s.test/items/1", "text/html"],
+    ["DELETE", "https://s.test/items/2", "text/html"],
+    ["POST", "https://s.test/forms/1", "text/html"],
+    ["PUT", "https://s.test/pages/1", "text/html"],
+  ]);
+  const answer = (index: number, status: number, text?: string): void => {
+    const record = capture.records[index]!;
+    record.reported = {
+      ...(record.reported as Record<string, unknown>),
+      response: {
+        status,
+        content: {
+          mimeType: "text/html",
+          ...(text === undefined ? {} : { text }),
+        },
+      },
+    };
+  };
+  answer(2, 204);
+  answer(3, 200, "");
+  // A redirect is no answer, and a missing text may be a body the capture did not keep.
+  answer(4, 302, "");
+  answer(5, 200);
+  const projected = manifest([], capture);
+  expect(projected.tools.map(line)).toEqual([
+    "DELETE /items/{numeric}",
+    "GET /items/{numeric}",
+  ]);
+  expect(
+    projected.excluded.map((entry) => [entry.path_template, entry.reason]),
+  ).toEqual([
+    ["/forms/{numeric}", "ui-page-or-asset"],
+    ["/pages/{numeric}", "ui-page-or-asset"],
+  ]);
+});
+
 it("refuses a parent whose subject is absent or names another path or digest", () => {
   const parent = parentOf();
   const refusal = {

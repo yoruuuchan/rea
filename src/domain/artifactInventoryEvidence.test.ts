@@ -1,5 +1,6 @@
 import { freezeJsonSnapshot } from "./immutableJson.js";
 import { expect, it } from "vitest";
+import { z } from "zod";
 
 import { ARTIFACT_COMPARISON_EXAMPLE } from "../contracts/artifactComparisonExample.js";
 import { createArtifactInspection } from "./artifactInspection.js";
@@ -86,3 +87,28 @@ it("retains the authenticated parent's nested facts without a second inventory c
     owned.substeps[0]!.evidence.normalized_result.nodes[0],
   );
 });
+
+it.each([0, 1])(
+  "locates a stale nested Evidence ID at substep %i and retains its cause",
+  (index) => {
+    const input = structuredClone(inspection);
+    input.substeps.push(structuredClone(input.substeps[0]!));
+    input.coverage.substeps_completed = input.substeps.length;
+    expect(
+      parseArtifactInspectionInventoryResult(input, target).inventory.complete,
+    ).toBe(true);
+    input.substeps[index]!.evidence.evidence_id = `ev_${"f".repeat(64)}`;
+    expect(() =>
+      parseArtifactInspectionInventoryResult(input, target),
+    ).toThrowError(
+      expect.objectContaining({
+        issues: [
+          expect.objectContaining({
+            path: ["substeps", index, "evidence", "evidence_id"],
+          }),
+        ],
+        cause: expect.any(z.ZodError),
+      }),
+    );
+  },
+);

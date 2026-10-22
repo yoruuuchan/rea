@@ -15,6 +15,7 @@ import { AnalysisError } from "./domain/analysisErrorBase.js";
 import { AnalysisCancelledError } from "./domain/analysisErrorCore.js";
 import { createDoctorHostFixture } from "./application/Doctor.fixture.js";
 import { runDoctorOwned } from "./application/Doctor.js";
+import { waitForAbortable } from "./process/AbortablePromise.js";
 
 const readyDisplay = {
   ok: true,
@@ -157,6 +158,174 @@ test.each(["unavailable", "unknown"] as const)(
     }
   },
 );
+
+test.each([true, false])(
+  "interrupts the Hopper display readiness check when doctor is cancelled: cancel=%s",
+  async (cancel) => {
+    const controller = new AbortController();
+    const reason = { request: "cancel doctor display check" };
+    let enter!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const selected = vi
+      .spyOn(privateDisplay, "selectLinuxPrivateDisplayStrategy")
+      .mockImplementation(async (options) => {
+        enter();
+        await waitForAbortable(gate, options.signal);
+        return readyDisplay;
+      });
+    const inspected = vi
+      .spyOn(pythonRuntime, "inspectLinuxHopperPythonRuntime")
+      .mockImplementation(async (_environment, signal) =>
+        signal?.aborted === true
+          ? err(
+              new pythonRuntime.LinuxHopperPythonError(
+                "cancelled",
+                "Fixture cancellation",
+                signal.reason,
+              ),
+            )
+          : ok({
+              interpreter: "/usr/bin/python3",
+              version: [3, 14],
+              library: {
+                status: "loadable",
+                path: "/fixture/libpython.so",
+              },
+            }),
+      );
+    const system = createSystemDoctorHost({}, controller.signal);
+    let settled = false;
+    const pending = runDoctorOwned(
+      undefined,
+      createDoctorHostFixture({
+        platform: "linux",
+        configuredHopperPath: "/fixture/Hopper",
+        signal: controller.signal,
+        linuxDemoRuntimeCheck: system.linuxDemoRuntimeCheck,
+        close: async () => {
+          await system.close?.();
+          return undefined;
+        },
+      }),
+      { providers: ["hopper"] },
+    )
+      .then(
+        (report) => ({ report, error: undefined }),
+        (error: unknown) => ({ report: undefined, error }),
+      )
+      .finally(() => {
+        settled = true;
+      });
+    try {
+      await entered;
+      expect(selected.mock.calls).toHaveLength(1);
+      if (cancel) {
+        controller.abort(reason);
+        const result = await pending;
+        expect(selected.mock.calls[0]?.[0]).toHaveProperty(
+          "signal",
+          controller.signal,
+        );
+        expect(inspected).not.toHaveBeenCalled();
+        expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+        expect((result.error as Error).cause).toBe(reason);
+      } else {
+        expect(settled).toBe(false);
+        expect(inspected).not.toHaveBeenCalled();
+        release();
+        const result = await pending;
+        expect(result.error).toBeUndefined();
+        expect(result.report?.checks).toContainEqual(
+          expect.objectContaining({ name: "hopper-demo-runtime", ok: true }),
+        );
+      }
+    } finally {
+      release();
+      await pending;
+      await system.close?.();
+      inspected.mockRestore();
+      selected.mockRestore();
+    }
+  },
+  5_000,
+);
+
+test("joins display finalization before preserving a late cancellation", async () => {
+  const controller = new AbortController();
+  const reason = { phase: "display finalization" };
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  let release!: () => void;
+  const finalized = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const selected = vi
+    .spyOn(privateDisplay, "selectLinuxPrivateDisplayStrategy")
+    .mockImplementation(async () => {
+      // Controlled selector finalization: cancellation must not detach this wait.
+      enter();
+      await finalized;
+      return readyDisplay;
+    });
+  const inspected = vi
+    .spyOn(pythonRuntime, "inspectLinuxHopperPythonRuntime")
+    .mockRejectedValue(
+      new Error("Python inspection must not start after cancellation"),
+    );
+  const system = createSystemDoctorHost({}, controller.signal);
+  let settled = false;
+  const pending = system.linuxDemoRuntimeCheck!()
+    .then(
+      () => undefined,
+      (error: unknown) => error,
+    )
+    .finally(() => {
+      settled = true;
+    });
+  try {
+    await entered;
+    controller.abort(reason);
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(inspected).not.toHaveBeenCalled();
+    release();
+    const failure = await pending;
+    expect(failure).toBeInstanceOf(AnalysisCancelledError);
+    expect((failure as Error).cause).toBe(reason);
+    expect(inspected).not.toHaveBeenCalled();
+  } finally {
+    release();
+    await pending;
+    await system.close?.();
+    inspected.mockRestore();
+    selected.mockRestore();
+  }
+});
+
+test("rejects a pre-aborted caller before the Hopper display check", async () => {
+  const controller = new AbortController();
+  controller.abort("pre-aborted");
+  const runtime = vi.fn();
+  await expect(
+    runDoctorOwned(
+      undefined,
+      createDoctorHostFixture({
+        platform: "linux",
+        signal: controller.signal,
+        linuxDemoRuntimeCheck: runtime,
+      }),
+    ),
+  ).rejects.toBeInstanceOf(AnalysisCancelledError);
+  expect(runtime).not.toHaveBeenCalled();
+});
 
 test("preserves both X11 and Python failures and their independent remediation", async () => {
   const display = vi

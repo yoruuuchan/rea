@@ -16,12 +16,12 @@ import {
   type LinuxHopperDownload,
   type LinuxHopperInstallHost,
   type LinuxHopperLauncherStatus,
-  type LinuxPackageFamily,
   type LinuxPackageInstallFailure,
   type LinuxPackageInstallOutcome,
 } from "./LinuxHopper.js";
 import { err, ok } from "../domain/result.js";
 import {
+  type LinuxPackageFamily,
   HopperReleaseError,
   type LinuxHopperRelease,
 } from "./HopperReleaseFeed.js";

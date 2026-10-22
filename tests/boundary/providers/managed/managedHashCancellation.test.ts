@@ -7,7 +7,7 @@ import { parseBinaryTarget } from "../../../../src/application/BinaryTargetResol
 import { projectAnalysisError } from "../../../../src/domain/analysisErrorProjection.js";
 import { buildManagedPeFixture } from "../../../../src/dotnet/ManagedPe.fixture.js";
 import { ManagedStaticProvider } from "../../../../src/dotnet/ManagedStaticProvider.js";
-import { RegularFileCleanupFailure } from "../../../../src/application/RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../../../../src/filesystem/OwnedRegularFile.js";
 import { OwnedFileHandle } from "../../../../src/filesystem/OwnedFileHandle.js";
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 

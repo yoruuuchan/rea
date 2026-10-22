@@ -29,7 +29,7 @@ import {
   parseProcessCaptureEvidence,
 } from "./ProcessEvidence.js";
 import { readJsonFile } from "../JsonFiles.js";
-import { RegularFileCleanupFailure } from "../RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../../filesystem/OwnedRegularFile.js";
 
 /** Safe process-command failure returned to the CLI adapter. */
 export interface ProcessCliErrorOutput extends AnalysisErrorProjection {
@@ -265,6 +265,13 @@ const cliAnalysisError = (error: AnalysisError): ProcessCliErrorOutput => ({
   ...projectAnalysisError(error),
 });
 
+/**
+ * This catch includes target execution, and the projection stays non-retryable.
+ * Tell the user what happened; do not ask them to run the command again.
+ */
+export const PROCESS_UNEXPECTED_FAILURE_REMEDIATION =
+  "Do not repeat this command. Tell the user the process command could not complete and ask them to check the input files, then run `rea doctor`.";
+
 /** Preserve typed failures and local diagnostics at the process CLI boundary. */
 export const projectProcessCliError = (
   cause: unknown,
@@ -276,6 +283,7 @@ export const projectProcessCliError = (
       cause,
       diagnostics: { phase: "process_cli" },
       userMessage: `Process command could not complete: ${describeValidationFailure(cause)}`,
+      remediationAction: PROCESS_UNEXPECTED_FAILURE_REMEDIATION,
     }),
   );
 };

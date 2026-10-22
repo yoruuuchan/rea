@@ -1,8 +1,6 @@
 import { classifyClientRegistrationCommand } from "./ClientRegistrationIdentity.js";
-import {
-  linuxHopperInstallDisclosure,
-  type LinuxPackageFamily,
-} from "./LinuxHopper.js";
+import type { LinuxPackageFamily } from "./HopperReleaseFeed.js";
+import { linuxHopperInstallDisclosure } from "./LinuxHopper.js";
 import type { SkillDestination } from "./SetupSkill.js";
 import { macHopperInstallDisclosure } from "./MacHopper.js";
 import { macHopperUserApplicationPath } from "./MacHopperPaths.js";

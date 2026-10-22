@@ -9,7 +9,7 @@ import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import { mkdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, posix, win32 } from "node:path";
 
-import writeFileAtomic from "write-file-atomic";
+import { writeGhidraRuntimeFile } from "./GhidraRuntimeFile.js";
 
 import { windowsPrivateRuntime } from "../windows/WindowsPrivateRuntime.js";
 import {
@@ -423,6 +423,10 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
           : { javaVmName: this.options.javaVmName }),
         homeRoot: paths.homeRoot,
         tempRoot: paths.tempRoot,
+        argumentFileRoot: session.runtimeRoot,
+        ...(options.resourceScope === undefined
+          ? {}
+          : { resourceScope: options.resourceScope }),
         arguments: headlessArguments,
         environment,
         onStderr: (mode, stderr) => {
@@ -453,7 +457,18 @@ export class GhidraHeadlessLauncher implements GhidraLauncher {
           : inspectedJavaLaunch.configuredMaxHeap;
       const command =
         platform === "win32"
-          ? { ...scriptCommand, environment }
+          ? {
+              ...scriptCommand,
+              environment: {
+                ...environment,
+                ...(inspectedJavaLaunch.preparedJdkJavaOptions === undefined
+                  ? {}
+                  : {
+                      JDK_JAVA_OPTIONS:
+                        inspectedJavaLaunch.preparedJdkJavaOptions,
+                    }),
+              },
+            }
           : inspectedJavaLaunch;
       started = await (this.options.spawnProcess ?? spawnOwnedProviderProcess)({
         command: command.command,
@@ -920,18 +935,6 @@ const createGhidraRuntimeDirectories = async (
       join(paths.configRoot, "ghidra", configReleaseDirectory),
     ].map((path) => mkdir(path, { recursive: true, mode: 0o700 })),
   );
-};
-
-const writeGhidraRuntimeFile = async (
-  path: string,
-  content: string,
-  platform: NodeJS.Platform,
-): Promise<void> => {
-  if (platform === "win32") {
-    windowsPrivateRuntime(dirname(path)).writeFile(basename(path), content);
-    return;
-  }
-  await writeFileAtomic(path, content, { encoding: "utf8", mode: 0o600 });
 };
 
 const ghidraLaunchEnvironment = (

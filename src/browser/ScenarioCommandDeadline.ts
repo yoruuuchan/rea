@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { BrowserObservationError } from "../domain/browserObservationError.js";
 import {
   browserDeadlineRetry,
@@ -23,9 +24,14 @@ export const scenarioCommandTimeoutMs = (
   scenario: Pick<BrowserScenario, "command_timeout_ms">,
 ): number => selectedCdpCommandTimeoutMs(scenario.command_timeout_ms);
 
-const playwrightTimedOut = (cause: unknown): cause is Error =>
-  cause instanceof Error &&
-  (cause.name === "TimeoutError" || cause.message.startsWith("Timeout "));
+const playwrightTimedOut = (cause: unknown): cause is Error => {
+  if (!(cause instanceof Error) || cause.name !== "TimeoutError") return false;
+  // Check the public producer type without loading Playwright at MCP startup.
+  const { errors } = createRequire(import.meta.url)(
+    "playwright-core",
+  ) as typeof import("playwright-core");
+  return cause instanceof errors.TimeoutError;
+};
 
 /**
  * `capture-browser-scenario` accepts only scenario JSON, so recovery names

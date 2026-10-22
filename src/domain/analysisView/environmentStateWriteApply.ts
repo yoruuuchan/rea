@@ -3,6 +3,7 @@ import { err, ok, type Result } from "../result.js";
 import {
   at,
   isObject,
+  pointerTo,
   pointerTokens,
   replaceAt,
   same,
@@ -21,10 +22,34 @@ import type {
 } from "./environmentStateWriteRules.js";
 import {
   integerOf,
+  isUuid,
   replaceDelimited,
   slugOf,
   spelledLike,
 } from "./environmentStateWriteValues.js";
+
+/** The value with each UUID at the pointers (`*` for any array index) replaced by `fresh(uuid)`, others kept. */
+export const renewUuids = (
+  value: JsonValue,
+  pointers: readonly string[],
+  fresh: (uuid: string) => string,
+): JsonValue => {
+  const renewed = new Set(pointers);
+  const renew = (item: JsonValue, pointer: string): JsonValue => {
+    if (isUuid(item)) return renewed.has(pointer) ? fresh(item) : item;
+    if (Array.isArray(item))
+      return item.map((child) => renew(child, `${pointer}/*`));
+    return isObject(item)
+      ? Object.fromEntries(
+          Object.entries(item).map(([key, child]) => [
+            key,
+            renew(child, `${pointer}${pointerTo(key)}`),
+          ]),
+        )
+      : item;
+  };
+  return renew(value, "");
+};
 
 /** A refusal message naming what the call did wrong; the state is left unchanged. */
 type Applied<T> = Result<T, string>;
@@ -37,6 +62,13 @@ export type GenerateValue = (
 const kindOf = (value: JsonValue | undefined): string =>
   value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
 
+/** JSON objects contain only their own members, even when a name also exists on Object.prototype. */
+const ownMember = (
+  object: JsonObject,
+  member: string,
+): JsonValue | undefined =>
+  Object.hasOwn(object, member) ? object[member] : undefined;
+
 /** The JSON types `stored` holds members in, for those `observed` shows no value of. */
 export const storedKinds = (
   members: readonly string[],
@@ -44,8 +76,8 @@ export const storedKinds = (
   stored: JsonObject,
 ): WriteBody["kinds"] =>
   members.flatMap((member) => {
-    const value = stored[member];
-    return (observed[member] ?? null) === null &&
+    const value = ownMember(stored, member);
+    return (ownMember(observed, member) ?? null) === null &&
       value !== undefined &&
       value !== null
       ? [{ member, kind: kindOf(value) as JsonKind }]
@@ -100,7 +132,7 @@ export const bodyProblem = (
     }
     if (!body.accepted.includes(member))
       return `Member ${member} is not one the capture showed stored (${bodyContract(body)}).`;
-    const recorded = shapes.entity[member];
+    const recorded = ownMember(shapes.entity, member);
     const kind =
       recorded === undefined || recorded === null
         ? kinds.get(member)
@@ -149,6 +181,7 @@ const ruledValue = (
     case "identity":
     case "sequence":
     case "unique":
+    case "renewed":
     case "clock":
       return generate(rule);
     case "echo":
@@ -208,6 +241,20 @@ const derive = (
   }
 };
 
+/** Members stored only under another name, with the value of the field each is copied whole into, for type checks. */
+const copiedShapes = (
+  rules: readonly FieldRule[],
+  observed: JsonObject,
+): JsonObject =>
+  Object.fromEntries(
+    rules.flatMap((rule): [string, JsonValue][] => {
+      if (rule.rule !== "copy" || !Object.hasOwn(observed, rule.field))
+        return [];
+      const tokens = pointerTokens(rule.from);
+      return tokens.length === 1 ? [[tokens[0]!, observed[rule.field]!]] : [];
+    }),
+  );
+
 /** The fields of a created entity: the observed entity with every ruled field taken from the call or generated. */
 export const createdFields = (
   plan: Pick<StateWritePlan, "rules" | "body">,
@@ -216,7 +263,9 @@ export const createdFields = (
   generate: GenerateValue,
 ): Applied<JsonObject> => {
   if (plan.body === null) return err("The tool has no modelled body.");
-  const problem = bodyProblem(plan.body, call, { entity: observed });
+  const problem = bodyProblem(plan.body, call, {
+    entity: { ...copiedShapes(plan.rules, observed), ...observed },
+  });
   if (problem !== undefined) return err(problem);
   const written: JsonObject = { ...observed };
   for (const rule of plan.rules) {
@@ -261,7 +310,12 @@ export const updatedFields = (
       const was = integerOf(before[rule.field]);
       if (was !== undefined)
         written[rule.field] = spelledLike(before[rule.field]!, was + 1);
-    } else if (rule.rule === "clock") {
+    } else if (
+      rule.rule === "clock" ||
+      rule.rule === "unique" ||
+      // Child rows are renewed only on an entity that holds them.
+      (rule.rule === "renewed" && Object.hasOwn(before, rule.field))
+    ) {
       const value = generate(rule);
       if (!value.ok) return value;
       if (value.value !== undefined) written[rule.field] = value.value;
@@ -361,7 +415,7 @@ export const updatedEntity = (
 ): StateEntity => {
   const changed = new Set(
     Object.keys(fields).filter(
-      (field) => !same(entity.fields[field], fields[field]),
+      (field) => !same(ownMember(entity.fields, field), fields[field]),
     ),
   );
   // Written values are no longer the ones the cited records show.

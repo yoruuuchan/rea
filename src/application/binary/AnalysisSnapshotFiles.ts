@@ -15,7 +15,7 @@ import { err, ok, type Result } from "../../domain/result.js";
 import type { AnalysisResourceConstraintError } from "../../domain/analysisErrorCore.js";
 import { AnalysisCancelledError } from "../../domain/analysisErrorCore.js";
 import { readJsonObjectMembersFile, writeTextFile } from "../JsonFiles.js";
-import { RegularFileCleanupFailure } from "../RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../../filesystem/OwnedRegularFile.js";
 import type { JsonObjectMemberReader } from "../JsonInputFile.js";
 import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 

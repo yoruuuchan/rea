@@ -15,6 +15,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   assertRizinProcessStartTimeStable,
   RizinDebugSessionManager,
+  truncateUtf8,
 } from "../../../src/rizin/RizinDebugSessionManager.js";
 import { evidenceSchema } from "../../../src/domain/evidence.js";
 import { TOOL_EFFECTS } from "../../../src/contracts/toolEffects.js";
@@ -314,6 +315,25 @@ it("rejects changed or missing Rizin inferior identity during detach", () => {
   expect(() => assertRizinProcessStartTimeStable("11", null)).toThrow(
     "disappeared or was reused",
   );
+});
+
+it("truncates UTF-8 strings by byte limit preserving multi-byte code point boundaries", () => {
+  expect(truncateUtf8("", 10)).toBe("");
+  expect(truncateUtf8("hello", 0)).toBe("");
+  expect(truncateUtf8("hello", -1)).toBe("");
+  expect(truncateUtf8("hello", 3)).toBe("hel");
+  expect(truncateUtf8("hello", 10)).toBe("hello");
+
+  // Multibyte 3-byte CJK character (0xe6 0x96 0x87)
+  // 5 bytes allows only 1 character (3 bytes); the second character would need 6 bytes
+  expect(truncateUtf8("中文", 5)).toBe("中");
+  expect(truncateUtf8("中文", 6)).toBe("中文");
+
+  // 4-byte emoji (🚀 = 0xf0 0x9f 0x9a 0x80)
+  expect(truncateUtf8("🚀🚀", 3)).toBe("");
+  expect(truncateUtf8("🚀🚀", 4)).toBe("🚀");
+  expect(truncateUtf8("🚀🚀", 7)).toBe("🚀");
+  expect(truncateUtf8("🚀🚀", 8)).toBe("🚀🚀");
 });
 
 it.skipIf(process.platform !== "linux")(

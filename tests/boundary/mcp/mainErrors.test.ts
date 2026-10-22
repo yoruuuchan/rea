@@ -4,7 +4,13 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { run, runEntrypoint } from "../../../src/main.js";
-import { MCP_HTTP_LISTEN_FAILED } from "../../../src/main/messages.js";
+import {
+  MCP_CONNECTION_LOST,
+  MCP_CONNECTION_START_FAILED,
+  MCP_HTTP_LISTEN_FAILED,
+  MCP_SHUTDOWN_FAILED,
+  SERVER_START_FAILED,
+} from "../../../src/main/messages.js";
 import type { McpServeOptions } from "../../../src/main/types.js";
 import { StreamableHttpListenError } from "../../../src/server/http/streamableHttpListenError.js";
 
@@ -85,9 +91,7 @@ describe("MCP runtime errors", () => {
       ),
     ).toBe(0);
     options?.onerror?.(new Error("SECRET transport stack"));
-    expect(output).toEqual([
-      "REA lost its MCP client connection. Restart REA from your MCP client.\n",
-    ]);
+    expect(output).toEqual([`${MCP_CONNECTION_LOST}\n`]);
     shutdown[0]?.();
     await nextTurn();
     expect(closeCalls).toBe(1);
@@ -137,9 +141,7 @@ describe("MCP runtime errors", () => {
         }),
       ),
     ).toBe(1);
-    expect(output).toEqual([
-      "REA could not start its MCP connection. Restart REA from your MCP client; run `rea doctor` if it fails again.\n",
-    ]);
+    expect(output).toEqual([`${MCP_CONNECTION_START_FAILED}\n`]);
   });
 
   it("reports shutdown failure and sets a failing exit code", async () => {
@@ -159,9 +161,7 @@ describe("MCP runtime errors", () => {
     shutdown[0]?.();
     await nextTurn();
     expect(exitCodes).toEqual([1]);
-    expect(output).toEqual([
-      "REA could not close cleanly. End the REA process before starting it again.\n",
-    ]);
+    expect(output).toEqual([`${MCP_SHUTDOWN_FAILED}\n`]);
   });
 
   it("reports an unexpected entrypoint failure without its cause", async () => {
@@ -172,9 +172,7 @@ describe("MCP runtime errors", () => {
       (text) => output.push(text),
       (code) => exitCodes.push(code),
     );
-    expect(output).toEqual([
-      "REA could not start. Run `rea doctor`, then restart REA from your MCP client.\n",
-    ]);
+    expect(output).toEqual([`${SERVER_START_FAILED}\n`]);
     expect(exitCodes).toEqual([1]);
   });
 });

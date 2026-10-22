@@ -16,10 +16,15 @@ import {
   regexMatchingDeadlineRecovery,
   type RegexMatchingDeadline,
 } from "../config/regexMatchingDeadline.js";
-
-const WORKER_HEAP_MIB = 128;
+import {
+  DEFAULT_REGEX_WORKER_HEAP_REQUEST,
+  REGEX_WORKER_HEAP_REQUEST_SETTING,
+  regexWorkerHeapRequestRecovery,
+  type RegexWorkerHeapRequest,
+} from "../config/regexWorkerHeapRequest.js";
 /**
- * Node's Worker `resourceLimits.maxOldGenerationSizeMb` request. A positive
+ * Node's Worker `resourceLimits.maxOldGenerationSizeMb` request.
+ * `REA_REGEX_WORKER_HEAP_REQUEST_MIB` is that request (default 128 MiB). A positive
  * `--max-old-space-size` on the process that starts REA, including
  * `NODE_OPTIONS`, overrides it. A zero or empty value leaves this request
  * in effect. `NODE_OPTIONS` is applied before `process.execArgv`, and the
@@ -31,7 +36,7 @@ const WORKER_HEAP_MIB = 128;
  * before user code reads it, and some Node versions also cap total memory at
  * 4 GiB when pointer compression is on. A later read is not the value Node
  * applied, so a percentage flag leaves the effective heap unestablished
- * instead of the 128 MiB request or an absolute flag.
+ * instead of the worker heap request or an absolute flag.
  *
  * `process.env.NODE_OPTIONS` is not that launch value. A preload can clear or
  * rewrite it after V8 has already applied the original flags, and those flags
@@ -50,7 +55,7 @@ const WORKER_HEAP_MIB = 128;
  * is not a fallback.
  *
  * `--max-heap-size` is the total heap, not the old generation. A positive
- * value can be lower than the 128 MiB request and still changes the result
+ * value can be lower than the worker heap request and still changes the result
  * when an old-space flag is also present. The old generation stays
  * unestablished while that value is in effect. Zero or empty clears it.
  * Node 24 and later also accept the flag in `NODE_OPTIONS`.
@@ -80,16 +85,10 @@ export type RegexWorkerHeapLimit =
   | {
       readonly kind: "effective";
       readonly mib: number;
-      /** True when a positive `--max-old-space-size` overrides the 128 MiB request. */
+      /** True when a positive `--max-old-space-size` overrides the worker heap request. */
       readonly overridden: boolean;
     }
   | { readonly kind: "unknown" };
-
-const requestedHeap = {
-  kind: "effective",
-  mib: WORKER_HEAP_MIB,
-  overridden: false,
-} as const satisfies RegexWorkerHeapLimit;
 
 /** Node's `ParseNodeOptionsEnvVar`: quotes group tokens and are not part of them. */
 const nodeOptionsArgv = (
@@ -144,7 +143,13 @@ const parsedFlagMiB = (
 export const resolveRegexWorkerHeap = (
   execArgv: readonly string[],
   nodeOptions: string | undefined,
+  request: RegexWorkerHeapRequest = DEFAULT_REGEX_WORKER_HEAP_REQUEST,
 ): RegexWorkerHeapLimit => {
+  const requestedHeap = {
+    kind: "effective" as const,
+    mib: request.heapMiB,
+    overridden: false as const,
+  };
   const fromEnvironment =
     nodeOptions === undefined ? [] : nodeOptionsArgv(nodeOptions);
   const tokens = [...(fromEnvironment ?? []), ...execArgv];
@@ -375,44 +380,62 @@ export const readLaunchExecArgv = (): LaunchExecArgv => {
 export const resolveLaunchRegexWorkerHeap = (
   launchExecArgv: LaunchExecArgv,
   launchNodeOptions: LaunchNodeOptions,
+  request: RegexWorkerHeapRequest = DEFAULT_REGEX_WORKER_HEAP_REQUEST,
 ): RegexWorkerHeapLimit =>
   launchExecArgv.kind === "unrecoverable" ||
   launchNodeOptions.kind === "unrecoverable"
     ? { kind: "unknown" }
-    : resolveRegexWorkerHeap(launchExecArgv.value, launchNodeOptions.value);
+    : resolveRegexWorkerHeap(
+        launchExecArgv.value,
+        launchNodeOptions.value,
+        request,
+      );
+
+const launchExecArgv = readLaunchExecArgv();
+const launchNodeOptions = readLaunchNodeOptions();
 
 const launchRegexWorkerHeap = resolveLaunchRegexWorkerHeap(
-  readLaunchExecArgv(),
-  readLaunchNodeOptions(),
+  launchExecArgv,
+  launchNodeOptions,
 );
 
-const heapBound = (heap: RegexWorkerHeapLimit): string => {
+const heapBound = (
+  heap: RegexWorkerHeapLimit,
+  request: RegexWorkerHeapRequest,
+): string => {
+  const recovery = regexWorkerHeapRequestRecovery(request);
   if (heap.kind === "unknown")
-    return "The worker requests 128 MiB. The effective old-generation heap was not established from the launch flags. --max-old-space-size, --max-old-space-size-percentage, --max-heap-size, --env-file, --env-file-if-exists, --experimental-config-file, and --experimental-default-config-file can change that request.";
-  const override =
-    "A positive Node --max-old-space-size, including NODE_OPTIONS, overrides the 128 MiB worker request";
+    return `The worker requests ${String(request.heapMiB)} MiB. The effective old-generation heap was not established from the launch flags. --max-old-space-size, --max-old-space-size-percentage, --max-heap-size, --env-file, --env-file-if-exists, --experimental-config-file, and --experimental-default-config-file can change that request. ${recovery}`;
+  const override = `A positive Node --max-old-space-size, including NODE_OPTIONS, overrides the ${String(request.heapMiB)} MiB worker request`;
   return heap.overridden
-    ? `${override} and sets this process's effective heap to ${String(heap.mib)} MiB.`
-    : `${override}. This process has no positive override, so the effective heap is ${String(heap.mib)} MiB.`;
+    ? `${override} and sets this process's effective heap to ${String(heap.mib)} MiB. ${recovery}`
+    : `${override}. This process has no positive override, so the effective heap is ${String(heap.mib)} MiB. ${recovery}`;
 };
 
 /** Capability text for the supervised ECMAScript matching boundary. */
 export const regexMatchingLimitation = (
   heap: RegexWorkerHeapLimit,
   deadline: RegexMatchingDeadline = DEFAULT_REGEX_MATCHING_DEADLINE,
+  request: RegexWorkerHeapRequest = DEFAULT_REGEX_WORKER_HEAP_REQUEST,
 ): string => {
   const deadlineText = `${String(deadline.deadlineMs)} ms matching deadline (source ${deadline.source})`;
   const preface =
     heap.kind === "effective"
       ? `Regex mode uses ECMAScript Unicode semantics in a cancellable worker with a ${deadlineText} and an effective ${String(heap.mib)} MiB old-generation heap.`
       : `Regex mode uses ECMAScript Unicode semantics in a cancellable worker with a ${deadlineText}.`;
-  return `${preface} ${regexMatchingDeadlineRecovery(deadline)} ${heapBound(heap)} Matching failure leaves the service available.`;
+  return `${preface} ${regexMatchingDeadlineRecovery(deadline)} ${heapBound(heap, request)} Matching failure leaves the service available.`;
 };
 
-/** Capability text for this process's launch heap and one resolved deadline. */
+/** Capability text for this process's launch heap, deadline, and heap request. */
 export const launchRegexMatchingLimitation = (
   deadline: RegexMatchingDeadline = DEFAULT_REGEX_MATCHING_DEADLINE,
-): string => regexMatchingLimitation(launchRegexWorkerHeap, deadline);
+  request: RegexWorkerHeapRequest = DEFAULT_REGEX_WORKER_HEAP_REQUEST,
+): string =>
+  regexMatchingLimitation(
+    resolveLaunchRegexWorkerHeap(launchExecArgv, launchNodeOptions, request),
+    deadline,
+    request,
+  );
 
 /**
  * Capability text for the default deadline on this process's launch heap.
@@ -444,6 +467,7 @@ export const regexWorkerHeapError = (
   operation: string,
   cause: Error,
   heap: RegexWorkerHeapLimit = launchRegexWorkerHeap,
+  request: RegexWorkerHeapRequest = DEFAULT_REGEX_WORKER_HEAP_REQUEST,
 ): AnalysisResourceConstraintError =>
   new AnalysisResourceConstraintError(
     operation,
@@ -454,12 +478,16 @@ export const regexWorkerHeapError = (
     heap.kind === "effective"
       ? {
           worker_heap_mib: heap.mib,
-          requested_worker_heap_mib: WORKER_HEAP_MIB,
+          requested_worker_heap_mib: request.heapMiB,
+          requested_worker_heap_source: request.source,
         }
-      : { requested_worker_heap_mib: WORKER_HEAP_MIB },
+      : {
+          requested_worker_heap_mib: request.heapMiB,
+          requested_worker_heap_source: request.source,
+        },
     {
       cause,
-      remediationAction: `${heapBound(heap)} Restart REA after changing --max-old-space-size. A launch --max-old-space-size-percentage takes precedence over that flag in either order. Simplify the pattern or use literal mode.`,
+      remediationAction: `${heapBound(heap, request)} Restart REA after changing --max-old-space-size or ${REGEX_WORKER_HEAP_REQUEST_SETTING}. A launch --max-old-space-size-percentage takes precedence over that flag in either order. Simplify the pattern or use literal mode.`,
     },
   );
 const replySchema = z.discriminatedUnion("status", [
@@ -499,8 +527,11 @@ export const matchRegexValues = async (input: {
   readonly invalidPattern?: (reason: string) => AnalysisError;
   /** Resolved deadline. Omitted means the 5000 ms default, not ambient `process.env`. */
   readonly deadline?: RegexMatchingDeadline | undefined;
+  /** Resolved heap request. Omitted means the 128 MiB default, not ambient `process.env`. */
+  readonly heapRequest?: RegexWorkerHeapRequest | undefined;
 }): Promise<Result<readonly number[], AnalysisError>> => {
   const deadline = input.deadline ?? DEFAULT_REGEX_MATCHING_DEADLINE;
+  const heapRequest = input.heapRequest ?? DEFAULT_REGEX_WORKER_HEAP_REQUEST;
   if (input.signal?.aborted)
     return err(new AnalysisCancelledError(input.operation));
   let worker: Worker;
@@ -512,7 +543,7 @@ export const matchRegexValues = async (input: {
         caseSensitive: input.caseSensitive,
         values: input.values,
       },
-      resourceLimits: { maxOldGenerationSizeMb: WORKER_HEAP_MIB },
+      resourceLimits: { maxOldGenerationSizeMb: heapRequest.heapMiB },
     });
   } catch (cause: unknown) {
     return err(
@@ -591,7 +622,16 @@ export const matchRegexValues = async (input: {
         finish(
           err(
             cause.code === "ERR_WORKER_OUT_OF_MEMORY"
-              ? regexWorkerHeapError(input.operation, cause)
+              ? regexWorkerHeapError(
+                  input.operation,
+                  cause,
+                  resolveLaunchRegexWorkerHeap(
+                    launchExecArgv,
+                    launchNodeOptions,
+                    heapRequest,
+                  ),
+                  heapRequest,
+                )
               : new AnalysisOutputError(
                   input.operation,
                   `Regex worker failed: ${cause.message}`,

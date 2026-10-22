@@ -1,3 +1,4 @@
+import { ServedOrder } from "./environmentStateWriteOrder.js";
 import type { JsonValue } from "../jsonValue.js";
 import { compositeKey } from "../unicodeCodePointOrder.js";
 import {
@@ -7,6 +8,7 @@ import {
   listItems,
   listsAll,
   missingRequiredFields,
+  pathSegmentMatches,
   renderStateEntity,
   renderStateList,
   replaceAt,
@@ -47,12 +49,18 @@ export class SimulatedState {
   readonly #collections = new Map<string, string[]>();
   readonly #documents = new Map<string, JsonValue>();
   readonly #removed: RemovedTarget[] = [];
+  readonly #served = new ServedOrder();
 
   constructor(
     entities: readonly StateEntity[],
     documents: readonly StateDocument[],
   ) {
     for (const entity of entities) this.put(entity);
+    this.#served.reset(
+      entities.map(({ type, collection, id }) =>
+        entityTarget(type, collection, id),
+      ),
+    );
     for (const document of documents)
       this.#documents.set(document.tool, document.value);
   }
@@ -72,9 +80,13 @@ export class SimulatedState {
   }
 
   ofType(type: string): StateEntity[] {
-    return [...this.#entities.values()].filter(
-      (entity) => entity.type === type,
-    );
+    return this.#served.keys
+      .map((key) => this.#entities.get(key)!)
+      .filter((entity) => entity.type === type);
+  }
+
+  knownCollections(type: string): readonly string[] {
+    return this.#served.known(type);
   }
 
   /** Replace an entity in place, or add it at `index` of its collection (the end when omitted). */
@@ -85,13 +97,17 @@ export class SimulatedState {
     if (known) return;
     const collection = collectionTarget(entity.type, entity.collection);
     const order = this.#collections.get(collection) ?? [];
-    order.splice(index ?? order.length, 0, key);
+    const at = index ?? order.length;
+    this.#served.place(key, order, at);
+    order.splice(at, 0, key);
     this.#collections.set(collection, order);
+    this.#served.remember(entity.type, entity.collection);
   }
 
   remove(entity: StateEntity): void {
     const key = entityTarget(entity.type, entity.collection, entity.id);
     this.#entities.delete(key);
+    this.#served.remove(key);
     const collection = collectionTarget(entity.type, entity.collection);
     const order = this.#collections.get(collection) ?? [];
     this.#collections.set(
@@ -176,6 +192,8 @@ export interface CheckOutcome {
   readonly unheld: readonly string[];
   /** For a failed list read that differs only in some members' fields, those members' targets. */
   readonly differing?: readonly string[];
+  /** Required fields the read shows the application leaves out of entities the state holds. */
+  readonly omitted?: readonly string[];
 }
 
 /** Whether a passing check shows where a create placed its entity: a list's does unless a sort orders that entity, leaving it tied with none, or it matched alone. */
@@ -192,7 +210,7 @@ export const showsPlacement = (
     ));
 
 /** What a check compares: the read's recorded body and the served base recording it would answer on. */
-interface ReadBodies {
+export interface ReadBodies {
   readonly body: JsonValue | undefined;
   /** The recording whose envelope the served answer keeps: an item view's envelope, a list line's latest init recording. */
   readonly base: JsonValue | undefined;
@@ -200,16 +218,18 @@ interface ReadBodies {
 }
 
 /** An item read: the answer the held entity renders into the served envelope must equal the recording; a recorded 404 or 410 agrees with none held. */
-/** How many of a held collection's segments match a path's verbatim, or undefined when one matches neither verbatim nor once percent-decoded. */
+/** How many of a held collection's segments match a path's verbatim, or undefined when one matches neither verbatim nor either spelling once percent-decoded. */
 const segmentMatch = (
   held: readonly string[],
   read: readonly string[],
 ): number | undefined => {
   if (held.length !== read.length) return undefined;
   let verbatim = 0;
-  for (const [index, segment] of held.entries())
-    if (segment === read[index]) verbatim += 1;
-    else if (decodedSegment(segment) !== read[index]) return undefined;
+  for (const [index, segment] of held.entries()) {
+    const value = read[index]!;
+    if (segment === value) verbatim += 1;
+    else if (!pathSegmentMatches(segment, value)) return undefined;
+  }
   return verbatim;
 };
 

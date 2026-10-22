@@ -18,12 +18,14 @@ const PAGING_PARAMETERS = new Set([
   "_end",
 ]);
 
+/** Whether a query parameter pages or bounds a list rather than filtering it. */
+export const isPagingParameter = (name: string): boolean =>
+  PAGING_PARAMETERS.has(name.toLowerCase());
+
 /** Whether a query only pages its list: no parameters, or paging parameters alone. */
 export const pagesOnly = (query: string | undefined): boolean =>
   query === undefined ||
-  [...parseUrlQueryParameterNames(query)].every((name) =>
-    PAGING_PARAMETERS.has(name.toLowerCase()),
-  );
+  [...parseUrlQueryParameterNames(query)].every(isPagingParameter);
 
 const PAGE_POSITION_PARAMETERS = new Set(["offset", "start", "_start", "page"]);
 

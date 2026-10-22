@@ -22,15 +22,20 @@ import {
 } from "../domain/binaryTargetTypes.js";
 import type { JsonValue } from "../domain/jsonValue.js";
 import type { Logger } from "pino";
+import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
+import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.js";
 import { err, ok } from "../domain/result.js";
 import type { RetainedResourceScope } from "../application/AnalysisProvider.js";
 import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import { AnalysisCleanupLeaseGroup } from "../artifacts/AnalysisCleanupLease.js";
+import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import {
   ArtifactResourceRetryFailure,
   ArtifactResourceScope,
 } from "../artifacts/ArtifactResourceScope.js";
+import type { OwnedFileHandle } from "../filesystem/OwnedFileHandle.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { HopperApplicationLauncher } from "./BridgeLauncher.js";
 import {
@@ -77,7 +82,10 @@ export class HopperProvider implements AnalysisProviderCandidate {
     private readonly platform: NodeJS.Platform = process.platform,
   ) {
     this.environment = snapshotEnvironment(environment, platform);
-    this.#capabilities = hopperCapabilities(config.regexMatchingDeadline);
+    this.#capabilities = hopperCapabilities(
+      config.regexMatchingDeadline,
+      config.regexWorkerHeapRequest,
+    );
   }
 
   identity(): ProviderIdentity {
@@ -314,7 +322,19 @@ export class HopperProvider implements AnalysisProviderCandidate {
     const regexSearch = new HopperRegexSearch(
       client,
       this.config.regexMatchingDeadline,
+      this.config.regexWorkerHeapRequest,
     );
+    const sourceReads = new ArtifactResourceScope();
+    const sourceLeases = new WeakMap<OwnedFileHandle, AnalysisCleanupLease>();
+    const retainSourceDescriptor = (owner: OwnedFileHandle): void => {
+      const lease = AnalysisCleanupLease.forCloseOwner(owner, target.path);
+      sourceLeases.set(owner, lease);
+      sourceReads.retain({
+        kind: "lease",
+        resource: target.path,
+        lease,
+      });
+    };
     const projectExecution = (
       operation: AnalysisOperation,
       normalized: JsonValue,
@@ -352,29 +372,48 @@ export class HopperProvider implements AnalysisProviderCandidate {
       });
     return {
       execute: async (operation, parameters, options) => {
-        const result =
-          (operation === "search_strings" ||
-            operation === "search_procedures") &&
-          parameters.mode === "regex"
-            ? await regexSearch.execute(operation, parameters, options)
-            : await client.callTool(operation, parameters, options);
-        if (!result.ok) return result;
-        const mapped =
-          operation === "address_to_file_offset"
-            ? await mapHopperFileOffset(target, result.value, options?.signal)
-            : result;
-        if (!mapped.ok) return mapped;
-        const inventory =
-          operation === "list_names"
-            ? projectHopperNameInventory(mapped.value)
-            : { result: mapped.value, changed: false };
-        return ok(
-          projectExecution(
-            operation,
-            inventory.result,
-            inventory.changed || mapped !== result ? result.value : null,
-          ),
-        );
+        try {
+          return await sourceReads.run(async () => {
+            const result =
+              (operation === "search_strings" ||
+                operation === "search_procedures") &&
+              parameters.mode === "regex"
+                ? await regexSearch.execute(operation, parameters, options)
+                : await client.callTool(operation, parameters, options);
+            if (!result.ok) return result;
+            const mapped =
+              operation === "address_to_file_offset"
+                ? await mapHopperFileOffset(target, result.value, {
+                    ...(options?.signal === undefined
+                      ? {}
+                      : { signal: options.signal }),
+                    retainFailedClose: retainSourceDescriptor,
+                    onCleanupMarker: (marker) => {
+                      if (!(marker.cause instanceof RegularFileCleanupFailure))
+                        return;
+                      sourceLeases
+                        .get(marker.cause.owner)
+                        ?.bindCleanupError(marker);
+                    },
+                  })
+                : result;
+            if (!mapped.ok) return mapped;
+            const inventory =
+              operation === "list_names"
+                ? projectHopperNameInventory(mapped.value)
+                : { result: mapped.value, changed: false };
+            return ok(
+              projectExecution(
+                operation,
+                inventory.result,
+                inventory.changed || mapped !== result ? result.value : null,
+              ),
+            );
+          });
+        } catch (cause: unknown) {
+          if (!(cause instanceof ArtifactReaderFailure)) throw cause;
+          return err(hopperSourceCleanupError(cause, operation));
+        }
       },
       executeIfReady: async (operation, parameters, options) => {
         if (operation !== "list_documents" && operation !== "list_procedures")
@@ -414,8 +453,49 @@ export class HopperProvider implements AnalysisProviderCandidate {
       operationHealthSnapshot: () => client.operationHealth(),
       close: async (options) => {
         await regexSearch.close();
-        return client.close(options);
+        let descriptors: AnalysisError | undefined;
+        try {
+          await sourceReads.retryCleanup();
+        } catch (cause: unknown) {
+          if (!(cause instanceof ArtifactReaderFailure)) throw cause;
+          descriptors = hopperSourceCleanupError(cause, "close_binary");
+        }
+        const closed = await client.close(options);
+        if (descriptors === undefined) return closed;
+        return closed.ok
+          ? err(descriptors)
+          : err(
+              analysisErrorWithCleanupFailure(
+                closed.error,
+                descriptors,
+                "close_binary",
+              ).bindCleanupDependencies([closed.error, descriptors]),
+            );
       },
     };
   }
 }
+
+/** Report descriptor cleanup that is still owned by this Hopper client. */
+const hopperSourceCleanupError = (
+  cause: ArtifactReaderFailure,
+  operation: string,
+): AnalysisError => {
+  const leases = [
+    ...new Set(
+      cause instanceof ArtifactResourceRetryFailure
+        ? cause.cleanupLeases
+        : (cause.cleanupLeases ?? []),
+    ),
+  ];
+  const failure = new ProviderCleanupError(
+    HOPPER_PROVIDER_IDENTITY.id,
+    cause.cleanup?.resources ?? [
+      ...new Set(leases.flatMap((lease) => lease.cleanupResources ?? [])),
+    ],
+    { reason: cause.cleanup?.reason ?? cause.message },
+    { operation, cause },
+  );
+  if (leases.length > 0) new AnalysisCleanupLeaseGroup(failure, leases);
+  return failure;
+};

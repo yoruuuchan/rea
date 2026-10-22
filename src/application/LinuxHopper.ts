@@ -29,8 +29,6 @@ import {
   type VerifiedLinuxHopperLauncher,
 } from "./LinuxHopperPublisher.js";
 
-export type { LinuxPackageFamily } from "./HopperReleaseFeed.js";
-
 /** Package-manager output retained per stream without stopping the command. */
 const PACKAGE_MANAGER_OUTPUT_BYTES = 64 * 1024;
 

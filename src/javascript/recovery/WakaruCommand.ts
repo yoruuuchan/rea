@@ -9,6 +9,7 @@ import {
 } from "../../domain/analysisErrorCore.js";
 import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
+import { prlimitArgumentVector } from "../../process/LinuxResourceLimits.js";
 import { cleanupOwnedProcessGroup } from "../../process/ProcessOwnership.js";
 import {
   ProviderProcessSupervisor,
@@ -118,12 +119,14 @@ export const runWakaruCommand = async (context: WakaruCommandContext) => {
   const spawned = await (context.launcher ?? spawnOwnedProviderProcess)({
     command: context.limiter,
     arguments: [
-      `--as=${String(RECOVERY_LIMITS.addressSpaceBytes)}`,
-      `--fsize=${String(RECOVERY_LIMITS.outputBytes)}`,
-      "--core=0",
-      "--cpu=120",
-      "--",
-      context.command,
+      ...prlimitArgumentVector(
+        {
+          address_space_bytes: RECOVERY_LIMITS.addressSpaceBytes,
+          file_bytes: RECOVERY_LIMITS.outputBytes,
+          cpu_seconds: RECOVERY_LIMITS.cpuSeconds,
+        },
+        context.command,
+      ),
       ...context.arguments,
     ],
     expectedCommand: null,

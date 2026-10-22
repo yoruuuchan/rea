@@ -1,4 +1,8 @@
-import { bindArtifactFileCleanup } from "../artifacts/ArtifactFileOperation.js";
+import {
+  artifactFileCancellationCause,
+  artifactFilePrimaryFailure,
+  bindArtifactFileCleanup,
+} from "../artifacts/ArtifactFileOperation.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import { readStableArtifact } from "../artifacts/readStableArtifact.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
@@ -33,11 +37,7 @@ export const PYTHON_PYC_PROVIDER_IDENTITY = {
 
 const OPERATION = "inspect_python_pyc";
 
-const failureForPrimary = (
-  cause: unknown,
-  input: InspectPythonPycInput,
-  signal: AbortSignal | undefined,
-) => {
+const failureForPrimary = (cause: unknown, input: InspectPythonPycInput) => {
   if (cause instanceof AnalysisError) return cause;
   if (cause instanceof ArtifactReaderFailure && cause.reason === "integrity")
     return new AnalysisArtifactChangedError(
@@ -47,8 +47,9 @@ const failureForPrimary = (
       { cause },
     );
   if (cause instanceof ArtifactReaderFailure && cause.reason === "cancelled")
-    return new AnalysisCancelledError(OPERATION, { cause });
-  if (signal?.aborted) return new AnalysisCancelledError(OPERATION, { cause });
+    return new AnalysisCancelledError(OPERATION, {
+      cause: artifactFileCancellationCause(cause),
+    });
   if (cause instanceof PythonPycResourceFailure)
     return new AnalysisResourceConstraintError(
       OPERATION,
@@ -117,12 +118,8 @@ const failureForPrimary = (
   });
 };
 
-const failureFor = (
-  cause: unknown,
-  input: InspectPythonPycInput,
-  signal: AbortSignal | undefined,
-) => {
-  const primary = failureForPrimary(cause, input, signal);
+const failureFor = (cause: unknown, input: InspectPythonPycInput) => {
+  const primary = failureForPrimary(artifactFilePrimaryFailure(cause), input);
   if (!(cause instanceof ArtifactReaderFailure) || cause.cleanup === undefined)
     return primary;
   const cleanup = new ProviderCleanupError(
@@ -168,7 +165,7 @@ export class PythonPycProvider implements PythonPycPort {
         ),
       );
     } catch (cause) {
-      return err(failureFor(cause, input, options?.signal));
+      return err(failureFor(cause, input));
     }
   }
 }

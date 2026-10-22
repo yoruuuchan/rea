@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RegularFileCleanupFailure } from "./RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 
 import { classifyClientRegistrationCommand } from "./ClientRegistrationIdentity.js";
 import { readClientRegistrationInspections } from "./ClientRegistrationStatus.js";

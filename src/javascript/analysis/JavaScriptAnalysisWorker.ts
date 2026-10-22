@@ -23,13 +23,15 @@ import {
   AnalysisTimeoutError,
   AnalysisOutputError,
   AnalysisResourceConstraintError,
-  AnalysisCapabilityUnavailableError,
 } from "../../domain/analysisErrorCore.js";
 import { ProviderAdapterError } from "../../domain/providerAdapterError.js";
 import { ProviderCleanupError } from "../../domain/providerCleanupError.js";
 import { ok, err, type Result } from "../../domain/result.js";
 import { javaScriptRuntime } from "../../domain/runtimeVersion.js";
-import { PrivateRuntimeRootUnavailableError } from "../../process/PrivateRuntimeRootUnavailableError.js";
+import {
+  RuntimeControlUnavailableError,
+  runtimeControlCapabilityError,
+} from "../../process/RuntimeControlUnavailableError.js";
 import { javaScriptWorkerMemoryLimitBytes } from "../../process/JavaScriptWorkerMemoryLimit.js";
 import {
   spawnOwnedProviderProcess,
@@ -1130,13 +1132,8 @@ export class JavaScriptAnalysisWorker {
         `${path} during ${this.#phase}: ${message(cause)}`,
         { cause, capturedOutput: this.#captured() },
       );
-    return cause instanceof PrivateRuntimeRootUnavailableError
-      ? new AnalysisCapabilityUnavailableError(
-          PROVIDER,
-          OPERATION,
-          cause.message,
-          { cause, retryable: cause.retryable },
-        )
+    return cause instanceof RuntimeControlUnavailableError
+      ? runtimeControlCapabilityError(PROVIDER, OPERATION, cause)
       : new ProviderAdapterError(PROVIDER, OPERATION, {
           cause,
           capturedOutput: this.#captured(),

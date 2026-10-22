@@ -4,7 +4,6 @@ import { join, resolve } from "node:path";
 import ignore from "ignore";
 import {
   readRegularFileText,
-  RegularFileCleanupFailure,
   RegularFileReadFailure,
   retryRegularFileCleanup,
 } from "./RegularFileRead.js";
@@ -18,7 +17,10 @@ import {
   type ReferenceSourceImportOptions,
 } from "./ReferenceSourceImportTypes.js";
 import { rootFilesystemFailure } from "../reference/ReferenceSourceReaderErrors.js";
-import { regularFileCancellation } from "../filesystem/OwnedRegularFile.js";
+import {
+  RegularFileCleanupFailure,
+  regularFileCancellation,
+} from "../filesystem/OwnedRegularFile.js";
 
 /** Validated inputs ready for filesystem traversal. */
 export interface PreparedReferenceSourceImport {

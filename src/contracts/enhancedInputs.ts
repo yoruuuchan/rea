@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { MAXIMUM_DISPATCH_METADATA_INPUT_BYTES } from "../domain/native/objcSwiftMetadata.js";
+import { nativeDispatchMetadataInputSchema } from "../domain/native/objcSwiftMetadata.js";
+import { nativeProcedureInputSchema } from "../domain/native/nativeProcedureInput.js";
 import { nativeValueTraceInputSchema } from "../domain/native/nativeValueTrace.js";
 const traceLiteralInputSchema = z.strictObject({
   query: z.string().min(1),
@@ -7,7 +8,6 @@ const traceLiteralInputSchema = z.strictObject({
 });
 
 export const DEFAULT_CALL_RELATIONSHIP_DIRECTION = "forward";
-export const MAX_ENHANCED_RECORDS = 20_000;
 const callRelationshipDirectionSchema = z
   .enum(["forward", "backward"])
   .default(DEFAULT_CALL_RELATIONSHIP_DIRECTION);
@@ -18,31 +18,7 @@ export type CallRelationshipDirection = z.output<
 /** Input schemas shared by MCP registration and enhanced application dispatch. */
 export const enhancedInputSchemas = {
   trace_native_values: nativeValueTraceInputSchema,
-  inspect_native_dispatch_metadata: z.strictObject({
-    max_records: z.int().min(1).max(MAX_ENHANCED_RECORDS).default(5_000),
-    objc_class_import_addresses: z
-      .array(z.string())
-      .max(MAX_ENHANCED_RECORDS)
-      .describe(
-        "Optional exact pointer-slot addresses from the selected name inventory; used to report decoded Objective-C class import bindings.",
-      )
-      .optional(),
-    objc_class_import_addresses_complete: z
-      .boolean()
-      .describe(
-        "Whether the candidate addresses include every selected class-label row; false keeps binding coverage partial when the existing record budget truncates the scan.",
-      )
-      .optional(),
-    max_input_bytes: z
-      .number()
-      .int()
-      .min(1)
-      .max(MAXIMUM_DISPATCH_METADATA_INPUT_BYTES)
-      .optional()
-      .describe(
-        "Largest target file REA reads into memory for binary metadata, in bytes. Omitted: 67108864 (64 MiB). The whole file counts, including every slice of a universal Mach-O. At most 1073741824 (1 GiB).",
-      ),
-  }),
+  inspect_native_dispatch_metadata: nativeDispatchMetadataInputSchema,
   get_objc_classes: z.strictObject({ pattern: z.string().default("") }),
   get_objc_protocols: z.strictObject({}),
   batch_decompile: z.strictObject({
@@ -74,12 +50,8 @@ export const enhancedInputSchemas = {
   }),
   find_xrefs_to_name: z.strictObject({ name: z.string() }),
   binary_overview: z.strictObject({}),
-  analyze_function: z.strictObject({
-    procedure: z.string().describe("A procedure name or address"),
-  }),
-  inspect_native_api: z.strictObject({
-    procedure: z.string().describe("A procedure name or address"),
-  }),
+  analyze_function: nativeProcedureInputSchema,
+  inspect_native_api: nativeProcedureInputSchema,
   trace_feature: traceLiteralInputSchema,
   trace_call_path: z.strictObject({
     start: z.string().describe("A starting procedure symbol or address"),

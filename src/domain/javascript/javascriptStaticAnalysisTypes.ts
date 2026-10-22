@@ -46,7 +46,10 @@ export interface JavaScriptStaticEndpoint {
   readonly kind: "route" | "network";
   readonly value: string;
   readonly mechanism: string;
-  /** An overloaded callee name suggests this value; its network receiver is unproven. */
+  /**
+   * Only a name suggests this value: an overloaded callee whose network receiver
+   * is unproven, or a `path`/`route` property outside a router record.
+   */
   readonly interpretation?: "candidate";
   /** The request target is unresolved source text rather than an exact value. */
   readonly resolution?: "partial";

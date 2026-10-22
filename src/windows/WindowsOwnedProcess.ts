@@ -4,6 +4,7 @@ import { PassThrough, Writable } from "node:stream";
 import { z } from "zod";
 
 import type { ProcessCleanupResult } from "../process/ProcessOwnership.js";
+import { RuntimeControlUnavailableError } from "../process/RuntimeControlUnavailableError.js";
 import {
   requireWindowsNativeAuthority,
   windowsHandleSchema,
@@ -39,6 +40,30 @@ export interface WindowsOwnedProcessOptions {
   readonly memoryLimitBytes?: number;
   /** Verified native authority; defaults to the package-owned artifact. */
   readonly authority?: WindowsNativeAuthority;
+}
+
+/** Native job control that an admitted artifact may predate. */
+export type WindowsNativeControl = "protocol-stdin" | "job-memory-limit";
+
+const NATIVE_CONTROL_NAMES: Readonly<Record<WindowsNativeControl, string>> = {
+  "protocol-stdin": "owned protocol stdin",
+  "job-memory-limit": "Job Object memory limits",
+};
+
+/** A requested launch control is absent from the admitted native artifact. */
+export class WindowsNativeControlUnavailableError extends RuntimeControlUnavailableError {
+  readonly code = "windows-native-control-unavailable";
+
+  constructor(readonly control: WindowsNativeControl) {
+    super(
+      `The bundled Windows native artifact does not support ${NATIVE_CONTROL_NAMES[control]}; use a matching current Windows x64 REA package.`,
+      {
+        remediationAction:
+          "Install the matching current Windows x64 REA package; its native inspection must prove this control. REA does not launch without it, so retrying the unchanged installation will not succeed.",
+      },
+    );
+    this.name = "WindowsNativeControlUnavailableError";
+  }
 }
 
 /** Encode one ordinary Windows argv token using the CRT backslash rules. */
@@ -89,18 +114,14 @@ export class WindowsOwnedProcess extends EventEmitter {
     this.#memoryLimitBytes = options.memoryLimitBytes;
     this.#authority = options.authority ?? requireWindowsNativeAuthority();
     if (protocolStdin && this.#authority.inspection.protocolStdin !== true)
-      throw new Error(
-        "The bundled Windows native artifact does not support owned protocol stdin; use a matching current Windows x64 REA package.",
-      );
+      throw new WindowsNativeControlUnavailableError("protocol-stdin");
     // A requested limit is never dropped: an artifact without the control
     // refuses the launch instead of starting an unlimited process.
     if (
       this.#memoryLimitBytes !== undefined &&
       this.#authority.inspection.jobMemoryLimit !== true
     )
-      throw new Error(
-        "The bundled Windows native artifact does not support Job Object memory limits; use a matching current Windows x64 REA package.",
-      );
+      throw new WindowsNativeControlUnavailableError("job-memory-limit");
     const entries = Object.entries(environment)
       .filter((entry): entry is [string, string] => entry[1] !== undefined)
       .map(([key, value]) => `${key}=${value}`);

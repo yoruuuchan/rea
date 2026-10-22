@@ -792,7 +792,5 @@ it("rejects a corrupted build-owned catalog before starting the connection", asy
   expect(child.error).toBeUndefined();
   expect(child.status).toBe(1);
   expect(child.stdout).toBe("");
-  expect(child.stderr).toBe(
-    "REA could not start. Run `rea doctor`, then restart REA from your MCP client.\n",
-  );
+  expect(child.stderr).toBe(`${SERVER_START_FAILED}\n`);
 });

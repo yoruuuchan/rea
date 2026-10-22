@@ -338,7 +338,9 @@ const addEndpoint = (
   const candidate = input.value.interpretation === "candidate";
   const partial = input.value.resolution === "partial";
   const candidateLimitation =
-    "The unbound method-like argument is only a candidate; its receiver does not establish a network call.";
+    input.value.kind === "route"
+      ? "Only the property name suggests a route; the enclosing object has no router fields."
+      : "The unbound method-like argument is only a candidate; its receiver does not establish a network call.";
   const partialLimitation =
     "The request target is not an exact literal; the endpoint value retains the unresolved source expression.";
   const label = `${input.value.kind} ${candidate ? "endpoint candidate" : "endpoint"}`;

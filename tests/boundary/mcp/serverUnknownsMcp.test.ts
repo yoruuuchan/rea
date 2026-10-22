@@ -404,3 +404,98 @@ it("pages filtered unknown heads through the public MCP contract", async () => {
     ).toBe(true);
   }
 });
+
+it("reports contradictory unknown input as a correctable request", async () => {
+  const session = createTestBinarySession(providerWithCapabilities([]));
+  const server = createServer({ kind: "session", session });
+  const client = new Client({ name: "unknown-input", version: "1" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  resources.push(client, server);
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const fields = {
+    severity: "medium",
+    required_authority: "analyst-inference",
+    required_confidence: "observed",
+    required_environment: null,
+    recommended_probes: [],
+    relationships: [],
+    supporting_evidence_ids: [],
+    contradicting_evidence_ids: [],
+  };
+  const created = structured(
+    await client.callTool({
+      name: "record_unknown",
+      arguments: {
+        ...fields,
+        question: "Does the result apply?",
+        domain: "input",
+      },
+    }),
+  ).result as {
+    unknown_id: string;
+    revision: number;
+    mutation_evidence_ids: string[];
+  };
+  const evidenceId = created.mutation_evidence_ids[0];
+
+  const overlap = parseMcpToolError(
+    await client.callTool({
+      name: "record_unknown",
+      arguments: {
+        ...fields,
+        question: "Can one observation both support and contradict?",
+        domain: "input",
+        supporting_evidence_ids: [evidenceId],
+        contradicting_evidence_ids: [evidenceId],
+      },
+    }),
+  ).error;
+  expect(overlap).toMatchObject({
+    code: "invalid_request",
+    category: "invalid_input",
+    retryable: false,
+    details: {
+      issues: [
+        expect.objectContaining({
+          message: "Evidence cannot simultaneously support and contradict",
+        }),
+      ],
+    },
+  });
+
+  const update = {
+    ...fields,
+    unknown_id: created.unknown_id,
+    expected_revision: created.revision,
+  };
+  const unresolved = parseMcpToolError(
+    await client.callTool({
+      name: "update_unknown",
+      arguments: { ...update, status: "resolved", resolution: null },
+    }),
+  ).error;
+  expect(unresolved).toMatchObject({
+    code: "invalid_request",
+    category: "invalid_input",
+    retryable: false,
+    details: {
+      issues: [expect.objectContaining({ path: ["resolution"] })],
+    },
+  });
+  expect(session.listUnknowns()).toMatchObject([{ revision: 1 }]);
+
+  const stale = parseMcpToolError(
+    await client.callTool({
+      name: "update_unknown",
+      arguments: {
+        ...update,
+        expected_revision: 2,
+        status: "open",
+        resolution: null,
+      },
+    }),
+  ).error;
+  expect(stale).toMatchObject({ code: "revision_conflict" });
+});

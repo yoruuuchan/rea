@@ -18,8 +18,6 @@ import {
 import { functionComparisonResultSchema } from "./functionComparisonSchemas.js";
 import {
   comparisonStatusSchema,
-  deriveProcessComparisonStatus,
-  PROCESS_COMPARISON_DIMENSIONS,
   processCaptureComparisonSchema,
 } from "./process/processComparison.js";
 import { prefixedDigestSchema } from "./../domain/digests.js";
@@ -209,13 +207,6 @@ const parseResult = (
     const result = processCaptureComparisonSchema.parse(
       evidence.normalized_result,
     );
-    const expected = deriveProcessComparisonStatus(
-      PROCESS_COMPARISON_DIMENSIONS.map((dimension) => result[dimension]),
-    );
-    if (result.status !== expected)
-      throw new TypeError(
-        "Process comparison status contradicts its dimensions",
-      );
     return { operation, evidence, result };
   }
   if (operation === "compare_functions") {

@@ -8,6 +8,8 @@ import { join } from "node:path";
 
 import { createPackageWithOptions } from "@electron/asar";
 import { expect, it } from "vitest";
+import { AnalysisError } from "../../../../src/domain/analysisErrorBase.js";
+import { projectAnalysisError } from "../../../../src/domain/analysisErrorProjection.js";
 
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 
@@ -522,19 +524,33 @@ it("keeps excluded non-JavaScript files out of both semantic construction paths"
 it("reports file progress and honors cancellation before the next source", async () => {
   const root = await fixtureDirectory();
   const controller = new AbortController();
+  const reason = { request: "cancel before the next source" };
   const progress: string[] = [];
-  await expect(
-    reconstructJavaScriptArtifact({ input_path: root }, controller.signal, {
+  const failure = await reconstructJavaScriptArtifact(
+    { input_path: root },
+    controller.signal,
+    {
       report: async (event) => {
         if (event.phase === "parse_javascript_source") {
           progress.push(event.message);
-          if (progress.length === 2) controller.abort();
+          if (progress.length === 2) controller.abort(reason);
         }
       },
-    }),
-  ).rejects.toMatchObject({
-    _tag: "AnalysisCancelledError",
-    partialObservation: { operation: "analyze_javascript_application" },
+    },
+  ).then(
+    () => {
+      throw new Error("Expected cancellation before the next source");
+    },
+    (cause: unknown) => cause,
+  );
+  if (!(failure instanceof AnalysisError)) throw failure;
+  expect(failure.cause).toBe(reason);
+  expect(projectAnalysisError(failure)).toMatchObject({
+    code: "cancelled",
+    category: "cancelled",
+    details: {
+      partial_observation: { operation: "analyze_javascript_application" },
+    },
   });
   expect(progress).toHaveLength(2);
   expect(progress[0]).not.toBe(progress[1]);

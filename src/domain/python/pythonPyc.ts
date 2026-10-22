@@ -107,9 +107,9 @@ export const inspectPythonPycInputSchema = z.strictObject({
     ),
 });
 
-const constPreviewLimit = 80;
+export const PYTHON_PYC_CONST_PREVIEW_LIMIT = 80;
 /** Integers up to 256 bits fit the 80-character preview in decimal. */
-const intPreviewBits = 256;
+export const PYTHON_PYC_INT_PREVIEW_BITS = 256;
 
 /** CPython float repr for values JSON numbers cannot carry. */
 const pythonFloatSchema = z.union([z.number(), z.enum(["inf", "-inf", "nan"])]);
@@ -120,14 +120,14 @@ const pythonConstSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("int"),
     bits: uint,
-    value: z.string().min(1).max(constPreviewLimit).nullable(),
+    value: z.string().min(1).max(PYTHON_PYC_CONST_PREVIEW_LIMIT).nullable(),
   }),
   z.strictObject({ kind: z.literal("float"), value: pythonFloatSchema }),
   z.strictObject({
     kind: z.literal("str"),
     bytes: uint,
     truncated: z.boolean(),
-    value: z.string().max(constPreviewLimit),
+    value: z.string().max(PYTHON_PYC_CONST_PREVIEW_LIMIT),
   }),
   z.strictObject({
     kind: z.literal("bytes"),
@@ -293,6 +293,3 @@ export const pythonPycSchema = z
 
 export type PythonPyc = z.infer<typeof pythonPycSchema>;
 export type InspectPythonPycInput = z.infer<typeof inspectPythonPycInputSchema>;
-
-export const PYTHON_PYC_CONST_PREVIEW_LIMIT = constPreviewLimit;
-export const PYTHON_PYC_INT_PREVIEW_BITS = intPreviewBits;

@@ -25,6 +25,7 @@ import {
   replaceAt,
   type JsonObject,
 } from "./environmentStateRules.js";
+import { environmentStateFields } from "./environmentStateView.js";
 
 type State = Extract<AnalysisViewResult, { kind: "environment-state" }>;
 const ALL_RULES = [
@@ -1009,6 +1010,78 @@ it("accepts stable membership across another root's write and changes confined b
   expect(state.entities.map((entity) => entity.id)).toEqual(["1"]);
 });
 
+it.each(["offset", "start", "_start"])(
+  "does not let an empty ?%s=1 page prove membership all",
+  (name) => {
+    const state = stateOf(
+      captureOf([
+        ["GET", "/api/orgs/1/books/1", { id: 1, name: "Alpha" }],
+        ["GET", `/api/orgs/2/books?${name}=1`, []],
+      ]),
+    );
+    expect(viewOf(state, "get_orgs_books_by_id")).toMatchObject({
+      shape: "list",
+      membership: "recorded",
+    });
+  },
+);
+
+it("does not let an empty ?page=2 page prove membership all", () => {
+  const state = stateOf(
+    captureOf([
+      ["GET", "/api/orgs/1/books/1", { id: 1, name: "Alpha" }],
+      ["GET", "/api/orgs/2/books?page=2", []],
+    ]),
+  );
+  expect(viewOf(state, "get_orgs_books_by_id")).toMatchObject({
+    shape: "list",
+    membership: "recorded",
+  });
+});
+
+it("does not let ?page=2&per_page=1 prove membership all when it lists the collection", () => {
+  const state = stateOf(
+    captureOf([
+      [
+        "GET",
+        "/api/orgs/1/books?page=2&per_page=1",
+        [{ id: 1, name: "Alpha" }],
+      ],
+      ["GET", "/api/orgs/1/books/1", { id: 1, name: "Alpha" }],
+    ]),
+  );
+  expect(viewOf(state, "get_orgs_books_by_id")).toMatchObject({
+    shape: "list",
+    membership: "recorded",
+  });
+});
+
+it("keeps page 1 membership recorded because the page base is unproven", () => {
+  const state = stateOf(
+    captureOf([
+      ["GET", "/api/orgs/1/books?page=1", [{ id: 1, name: "Alpha" }]],
+      ["GET", "/api/orgs/1/books/1", { id: 1, name: "Alpha" }],
+    ]),
+  );
+  expect(viewOf(state, "get_orgs_books_by_id")).toMatchObject({
+    shape: "list",
+    membership: "recorded",
+  });
+});
+
+it("keeps membership all when a zero offset lists the collection", () => {
+  const state = stateOf(
+    captureOf([
+      ["GET", "/api/orgs/1/books?offset=0", [{ id: 1, name: "Alpha" }]],
+      ["GET", "/api/orgs/1/books/1", { id: 1, name: "Alpha" }],
+    ]),
+  );
+  expect(viewOf(state, "get_orgs_books_by_id")).toMatchObject({
+    shape: "list",
+    membership: "all",
+  });
+});
+
 it("keeps membership checks specific to the full request line", () => {
   const state = stateOf(
     captureOf([
@@ -1134,4 +1207,20 @@ it("keeps a document out of the state when its value changed across a write unde
   expect(unchanged.documents).toMatchObject([
     { tool: "get_me", value: { credits: 10, plan: "free" }, record_ordinal: 2 },
   ]);
+});
+
+it("refuses a view clock spelling wider than nine fraction digits", () => {
+  const item = stateOf().views.find((view) => view.shape === "item")!;
+  const spelled = (fraction: number) => [
+    {
+      ...item,
+      clock_formats: {
+        created: { kind: "iso", separator: "T", fraction, zone: "Z" },
+      },
+    },
+  ];
+  expect(environmentStateFields.views.safeParse(spelled(9)).success).toBe(true);
+  expect(environmentStateFields.views.safeParse(spelled(10)).success).toBe(
+    false,
+  );
 });

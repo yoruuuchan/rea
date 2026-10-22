@@ -40,8 +40,13 @@ import {
   ProviderStartupDeadline,
   waitForAbortableDelay,
 } from "../process/ProviderDeadline.js";
+import { DarwinProcessOwnershipInspectionError } from "../process/DarwinProcessRunTokenReader.js";
 import { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
-import { resolveXcrunTool, type ResolvedTool } from "./CommandRunner.js";
+import {
+  NativeCommandFailure,
+  resolveXcrunTool,
+  type ResolvedTool,
+} from "./CommandRunner.js";
 import { projectPartialNativeCalls } from "./NativeCallObservation.js";
 import { LldbReadbackFiles } from "./LldbReadbackFiles.js";
 import { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
@@ -193,6 +198,11 @@ export class LldbCallTracer implements NativeCallTracer {
   private readonly environment: NodeJS.ProcessEnv;
   #tail: Promise<void> = Promise.resolve();
   #pendingCleanup: RetainedLldbResources | undefined;
+  /** Resolver supervisors owned by this tracer, distinct from the shared Darwin reader. */
+  readonly #resolverCleanup = new Map<
+    ProviderProcessSupervisor,
+    ProviderCleanupError
+  >();
   constructor(
     environment: Readonly<NodeJS.ProcessEnv>,
     private readonly launch: typeof runLldb = runLldb,
@@ -216,20 +226,12 @@ export class LldbCallTracer implements NativeCallTracer {
     request: Parameters<NativeCallTracer["trace"]>[0],
     signal?: AbortSignal,
   ): Promise<Result<NativeCallTrace, AnalysisError>> {
+    const resolverCleanup = await this.#retryResolverCleanup();
+    if (resolverCleanup !== undefined) return err(resolverCleanup);
     const pendingCleanup = await this.#retryPendingCleanup();
     if (pendingCleanup !== undefined) return err(pendingCleanup);
     const lldb = await this.resolveTool("lldb", signal);
-    if (!lldb.ok)
-      return err(
-        lldb.error.reason === "cancelled"
-          ? new AnalysisCancelledError(OPERATION)
-          : new AnalysisCapabilityUnavailableError(
-              PROVIDER,
-              OPERATION,
-              LLDB_REQUIREMENT,
-              { userMessage: LLDB_REQUIREMENT },
-            ),
-      );
+    if (!lldb.ok) return err(this.#discoveryFailure(lldb.error));
     const root = await PrivateRuntimeRoot.create({ prefix: "rea-lldb-" });
     const paths = lldbRuntimePaths(root.path);
     const owner: RetainedLldbResources = {
@@ -373,7 +375,17 @@ export class LldbCallTracer implements NativeCallTracer {
   }
 
   async #close(): Promise<Result<null, AnalysisError>> {
+    const resolverCleanup = await this.#retryResolverCleanup();
     const failure = await this.#retryPendingCleanup();
+    if (resolverCleanup !== undefined && failure !== undefined)
+      return err(
+        analysisErrorWithCleanupFailure(
+          resolverCleanup,
+          failure,
+          OPERATION,
+        ).bindCleanupDependencies([resolverCleanup, failure]),
+      );
+    if (resolverCleanup !== undefined) return err(resolverCleanup);
     return failure === undefined ? ok(null) : err(failure);
   }
 
@@ -445,6 +457,139 @@ export class LldbCallTracer implements NativeCallTracer {
     );
   }
 
+  /**
+   * Keep a tracer-owned resolver process for retry. A foreign helper marker
+   * stays on the preparation error and is not adopted here.
+   */
+  #retainResolverCleanup(failure: NativeCommandFailure): void {
+    const owned = [
+      ...failure.cleanupFailures.map((entry) => ({
+        owner: entry.owner,
+        marker: entry.marker,
+        reason: entry.reason,
+        resources: entry.resources,
+      })),
+      ...(failure.cleanupOwner === undefined
+        ? []
+        : [
+            {
+              owner: failure.cleanupOwner,
+              marker: failure.cleanupMarker,
+              reason:
+                failure.cleanupFailure ??
+                "LLDB resolver cleanup remains incomplete",
+              resources: [...failure.cleanupResources],
+            },
+          ]),
+    ];
+    for (const entry of owned) {
+      if (this.#resolverCleanup.has(entry.owner)) continue;
+      const marker =
+        entry.marker ??
+        new ProviderCleanupError(
+          PROVIDER,
+          entry.resources.length > 0
+            ? entry.resources
+            : ["lldb-resolver-process"],
+          { reason: entry.reason },
+          { operation: OPERATION, cause: failure },
+        );
+      this.#resolverCleanup.set(entry.owner, marker);
+    }
+  }
+
+  #discoveryFailure(failure: NativeCommandFailure): AnalysisError {
+    this.#retainResolverCleanup(failure);
+    const markers = [
+      ...new Set(
+        [
+          failure.cleanupOwner,
+          ...failure.cleanupFailures.map((entry) => entry.owner),
+        ].flatMap((owner) => {
+          if (owner === undefined) return [];
+          const marker = this.#resolverCleanup.get(owner);
+          return marker === undefined ? [] : [marker];
+        }),
+      ),
+    ];
+    const preparation = failure.preparationFailure;
+    if (preparation !== undefined)
+      return withResolverMarkers(lldbPreparationFailure(preparation), markers);
+    const cleanup =
+      markers.length === 0
+        ? undefined
+        : {
+            reason: markers
+              .map((marker) =>
+                typeof marker.diagnostics?.reason === "string"
+                  ? marker.diagnostics.reason
+                  : marker.message,
+              )
+              .join("; "),
+            resources: [
+              ...new Set(markers.flatMap((marker) => marker.cleanupResources)),
+            ],
+          };
+    const cleanupContext =
+      cleanup === undefined ? {} : { cause: failure, cleanup };
+    const error =
+      failure.reason === "cancelled"
+        ? new AnalysisCancelledError(OPERATION, {
+            ...(cleanup === undefined ? {} : { cleanup }),
+            ...(failure.cancellation === undefined
+              ? cleanup === undefined
+                ? {}
+                : { cause: failure }
+              : { cause: failure.cancellation.reason }),
+          })
+        : new AnalysisCapabilityUnavailableError(
+            PROVIDER,
+            OPERATION,
+            LLDB_REQUIREMENT,
+            { ...cleanupContext, userMessage: LLDB_REQUIREMENT },
+          );
+    return markers.length === 0
+      ? error
+      : error.bindCleanupDependencies(markers);
+  }
+
+  /** Retry only resolver processes this tracer spawned. */
+  async #retryResolverCleanup(): Promise<ProviderCleanupError | undefined> {
+    const retained = [...this.#resolverCleanup];
+    if (retained.length === 0) return undefined;
+    const unresolved: ProviderCleanupError[] = [];
+    for (const [owner, marker] of retained) {
+      let released = false;
+      try {
+        const stopped = await owner.stop();
+        released =
+          stopped.status !== "incomplete" && stopped.status !== "not-owned";
+      } catch {
+        released = false;
+      }
+      if (!released) {
+        unresolved.push(marker);
+        continue;
+      }
+      marker.resolveCleanup();
+      this.#resolverCleanup.delete(owner);
+    }
+    if (unresolved.length === 0) return undefined;
+    if (unresolved.length === 1) return unresolved[0];
+    return new ProviderCleanupError(
+      PROVIDER,
+      [...new Set(unresolved.flatMap((marker) => marker.cleanupResources))],
+      { reason: "LLDB resolver cleanup remains incomplete" },
+      {
+        operation: OPERATION,
+        cause: new AggregateError(
+          unresolved,
+          "LLDB resolver cleanup remains incomplete",
+        ),
+      },
+    ).bindCleanupDependencies(unresolved);
+  }
+
   async #run(
     lldb: ResolvedTool,
     retained: RetainedLldbResources,
@@ -507,6 +652,14 @@ export class LldbCallTracer implements NativeCallTracer {
         ...(signal === undefined ? {} : { signal }),
       },
     );
+    if (exited.kind === "preparation-failed") {
+      // LLDB was never spawned. Release only this tracer's runtime and keep
+      // the shared helper marker on the preparation error.
+      retained.processStopped = true;
+      retained.targetStopped = true;
+      if (this.#pendingCleanup === retained) this.#pendingCleanup = undefined;
+      return err(lldbPreparationFailure(exited.cause));
+    }
     retained.supervisor = exited.cleanupOwner;
     retained.targetIdentity = exited.targetIdentity;
     retained.processStopped =
@@ -1027,6 +1180,81 @@ interface RetainedLldbResources {
 const errorReason = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
 
+/**
+ * Keep command-supervisor markers on a discovery error. A preparation error
+ * that already owns the foreign helper binds the supervisors beside it.
+ * A completed preparation still reports those supervisors as cleanup.
+ */
+const withResolverMarkers = (
+  error: AnalysisError,
+  markers: readonly ProviderCleanupError[],
+): AnalysisError => {
+  if (markers.length === 0) return error;
+  if (error.cleanupIncomplete) return error.bindCleanupDependencies(markers);
+  const cleanup =
+    markers.length === 1
+      ? markers[0]
+      : new ProviderCleanupError(
+          PROVIDER,
+          [...new Set(markers.flatMap((marker) => marker.cleanupResources))],
+          { reason: "LLDB resolver cleanup remains incomplete" },
+          { operation: OPERATION },
+        ).bindCleanupDependencies(markers);
+  if (cleanup === undefined) return error;
+  return analysisErrorWithCleanupFailure(
+    error,
+    cleanup,
+    OPERATION,
+  ).bindCleanupDependencies([error, cleanup]);
+};
+
+/** Preserve compiler facts and a foreign helper marker without inventing an LLDB exit. */
+const lldbPreparationFailure = (
+  cause: DarwinProcessOwnershipInspectionError,
+): AnalysisError => {
+  const marker = cause.cleanupFailure;
+  const compiler = cause.compilerOutcome;
+  const options = {
+    cause,
+    ...(cause.capturedOutput === undefined
+      ? {}
+      : { capturedOutput: cause.capturedOutput }),
+    ...(marker === undefined
+      ? {}
+      : {
+          cleanup: {
+            reason: marker.message,
+            resources: [...marker.cleanupResources],
+          },
+        }),
+    diagnostics: {
+      phase: "process-preparation" as const,
+      tool: "lldb" as const,
+      reason: cause.message,
+      ...(compiler === undefined
+        ? {}
+        : {
+            compiler_outcome: {
+              outcome: compiler.outcome,
+              code: compiler.code,
+              signal: compiler.signal,
+              ...(compiler.timeoutMs === undefined
+                ? {}
+                : { timeout_ms: compiler.timeoutMs }),
+            },
+          }),
+    },
+  };
+  const error =
+    cause.cancellation === undefined
+      ? new ProviderAdapterError(PROVIDER, OPERATION, options)
+      : new AnalysisCancelledError(OPERATION, {
+          ...options,
+          cause: cause.cancellation.reason,
+        });
+  return marker === undefined ? error : error.bindCleanupDependencies([marker]);
+};
+
 /** Root release certifies the hierarchy only after every child confirms completion. */
 const releaseLldbRuntime = async (
   owner: RetainedLldbResources,
@@ -1076,15 +1304,23 @@ type LldbOutcome =
   | { readonly kind: "cancelled" }
   | { readonly kind: "timeout" };
 
-type LldbExit = LldbOutcome & {
-  /** False proves LLDB never started and could not have created a target. */
-  readonly targetLaunched: boolean;
-  readonly targetIdentity: string | undefined;
-  readonly cleanupFailure: string | undefined;
-  /** Internal deadline elapsed during cleanup after a physical LLDB exit. */
-  readonly lateTimeout?: true;
-  readonly cleanupOwner?: ProviderProcessSupervisor;
-};
+type LldbExit =
+  | (LldbOutcome & {
+      /** False proves LLDB never started and could not have created a target. */
+      readonly targetLaunched: boolean;
+      readonly targetIdentity: string | undefined;
+      readonly cleanupFailure: string | undefined;
+      /** Internal deadline elapsed during cleanup after a physical LLDB exit. */
+      readonly lateTimeout?: true;
+      readonly cleanupOwner?: ProviderProcessSupervisor;
+    })
+  | {
+      readonly kind: "preparation-failed";
+      readonly cause: DarwinProcessOwnershipInspectionError;
+      readonly targetLaunched: false;
+      readonly targetIdentity: undefined;
+      readonly cleanupFailure: undefined;
+    };
 
 const lldbCleanupResources = (owner: RetainedLldbResources): string[] => [
   ...(owner.processStopped ? [] : ["lldb-process-group"]),
@@ -1228,6 +1464,18 @@ const runLldb = async (
         : { kind: interruption },
     );
   } catch (cause: unknown) {
+    if (
+      supervisor === undefined &&
+      cause instanceof DarwinProcessOwnershipInspectionError
+    ) {
+      return {
+        kind: "preparation-failed",
+        cause,
+        targetLaunched: false,
+        targetIdentity: undefined,
+        cleanupFailure: undefined,
+      };
+    }
     const interruption = deadline.interruption;
     return await finish(
       interruption === undefined

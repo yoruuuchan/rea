@@ -47,10 +47,7 @@ import {
   type LinuxHopperRelease,
   type LinuxPackageFamily,
 } from "./HopperReleaseFeed.js";
-import {
-  RegularFileCleanupFailure as RegularFileReadCleanupFailure,
-  withRegularFile,
-} from "./RegularFileRead.js";
+import { withRegularFile } from "./RegularFileRead.js";
 
 /** Metadata/key inspection budget, independent of the compressed package budget. */
 const RELEASE_METADATA_BYTES = 1024 * 1024;
@@ -940,7 +937,7 @@ export class LinuxHopperPublisher {
     ).catch((cause: unknown) => {
       if (
         resources === this.#resources &&
-        cause instanceof RegularFileReadCleanupFailure
+        cause instanceof RegularFileCleanupFailure
       )
         pendingCleanup.add(resources);
       throw cause;

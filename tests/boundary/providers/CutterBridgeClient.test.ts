@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CutterBridgeClient } from "../../../src/cutter/CutterBridgeClient.js";
+import { AnalysisInputError } from "../../../src/domain/analysisErrorCore.js";
 import { CutterBridgeService } from "../../../src/cutter/CutterBridgeService.js";
 
 const listen = async (
@@ -197,7 +198,9 @@ it.skipIf(process.platform === "win32").each(["discovery", "command"] as const)(
       await writeDescriptor(directory, sessionId, port, token);
       const { CutterBridgeClient: ObservedClient } =
         await import("../../../src/cutter/CutterBridgeClient.js");
-      const service = new CutterBridgeService(
+      const { CutterBridgeService: ObservedService } =
+        await import("../../../src/cutter/CutterBridgeService.js");
+      const service = new ObservedService(
         new ObservedClient({ REA_CUTTER_BRIDGE_DIR: directory }),
       );
       if (operation === "discovery") {
@@ -696,12 +699,32 @@ describe("CutterBridgeClient: scenario group 4", () => {
       documentGeneration: 9,
       cutterVersion: "new",
     });
+    for (const state of [undefined, "running", "unknown", "failed"]) {
+      response = {
+        ok: false,
+        execution_state: state,
+        error: "active-document-generation-changed",
+      };
+      await expect(run()).resolves.toMatchObject({
+        executionState: state === "failed" ? "failed" : "unknown",
+        error: "active-document-generation-changed",
+      });
+    }
     response = {
       ok: false,
       execution_state: "not_started",
       error: "active-document-generation-changed",
     };
-    await expect(run()).rejects.toThrow("List sessions again");
+    await expect(run()).rejects.toMatchObject({
+      _tag: "AnalysisInputError",
+      issues: [
+        {
+          path: ["expected_generation"],
+          reason: "invalid_value",
+          message: expect.stringContaining("List sessions again"),
+        },
+      ],
+    });
     response = { ok: true, unexpected: true };
     // Valid schema responses can omit all optional fields; the fallback result is nullable.
     await expect(run()).resolves.toMatchObject({
@@ -921,7 +944,7 @@ describe("CutterBridgeClient: scenario group 6", () => {
         command: "pd 1",
         json: false,
       }),
-    ).rejects.toThrow("unavailable or stale");
+    ).rejects.toBeInstanceOf(AnalysisInputError);
 
     const unopened = createServer();
     const port = await listen(unopened);
@@ -997,12 +1020,11 @@ describe("CutterBridgeClient: scenario group 7", () => {
     );
     const controller = new AbortController();
     const signal = controller.signal;
+    const reason = new Error("cancel immediately after listener registration");
     const add = signal.addEventListener.bind(signal);
     vi.spyOn(signal, "addEventListener").mockImplementation((...args) => {
       add(...args);
-      controller.abort(
-        new Error("cancel immediately after listener registration"),
-      );
+      controller.abort(reason);
     });
     await expect(
       createClient({ REA_CUTTER_BRIDGE_DIR: directory }).execute({
@@ -1012,7 +1034,10 @@ describe("CutterBridgeClient: scenario group 7", () => {
         json: false,
         signal,
       }),
-    ).rejects.toThrow("Cutter bridge request was cancelled");
+    ).rejects.toMatchObject({
+      _tag: "AnalysisCancelledError",
+      cause: reason,
+    });
   });
 
   it("supports platforms without O_NOFOLLOW using the documented read-only flags", async () => {

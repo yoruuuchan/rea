@@ -19,7 +19,10 @@ import {
 } from "../domain/analysisErrorCore.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import { OwnedCommandFailure } from "../process/OwnedCommand.js";
-import { PrivateRuntimeRootUnavailableError } from "../process/PrivateRuntimeRootUnavailableError.js";
+import {
+  RuntimeControlUnavailableError,
+  runtimeControlCapabilityError,
+} from "../process/RuntimeControlUnavailableError.js";
 import {
   DEFAULT_WASM_COMMAND_TIMEOUT_MS,
   MAX_WASM_COMMAND_TIMEOUT_MS,
@@ -192,12 +195,11 @@ const classifyWabtFailure = (
       );
     return new AnalysisOutputError("inspect_wasm_artifact", reason, options);
   }
-  if (cause instanceof PrivateRuntimeRootUnavailableError)
-    return new AnalysisCapabilityUnavailableError(
+  if (cause instanceof RuntimeControlUnavailableError)
+    return runtimeControlCapabilityError(
       WABT_PROVIDER_IDENTITY.id,
       "inspect_wasm_artifact",
-      reason,
-      { cause, retryable: cause.retryable },
+      cause,
     );
   if (
     phase === "configuration" &&

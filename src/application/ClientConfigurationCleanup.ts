@@ -6,11 +6,11 @@ import {
 import type { AnalysisCleanupLease } from "../artifacts/AnalysisCleanupLease.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import type { AnalysisCleanupObservation } from "../domain/analysisErrorBase.js";
-import type { RegularFileOperationOutcome } from "../filesystem/OwnedRegularFile.js";
 import {
   RegularFileCleanupFailure,
-  retryRegularFileCleanupFailures,
-} from "./RegularFileRead.js";
+  type RegularFileOperationOutcome,
+} from "../filesystem/OwnedRegularFile.js";
+import { retryRegularFileCleanupFailures } from "./RegularFileRead.js";
 
 /** Completion and exact staging owner retained when publication cleanup fails. */
 export class ClientConfigurationPublicationFailure<

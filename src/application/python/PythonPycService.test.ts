@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   AnalysisInputError,
   AnalysisCancelledError,
+  AnalysisOutputError,
 } from "../../domain/analysisErrorCore.js";
 import type { PythonPyc } from "../../domain/python/pythonPyc.js";
 import { ok } from "../../domain/result.js";
@@ -105,12 +106,13 @@ it("records the selected artifact and the header plus marshal ranges", async () 
   ]);
 });
 
-it("discards an observation if the caller cancels while the provider completes", async () => {
+it("retains completed pyc Evidence and the opaque caller reason on late cancellation", async () => {
   const controller = new AbortController();
+  const reason = new AnalysisInputError("opaque caller metadata");
   const service = new PythonPycService({
     identity,
     inspect: () => {
-      controller.abort();
+      controller.abort(reason);
       return Promise.resolve(ok(report));
     },
   });
@@ -119,5 +121,54 @@ it("discards an observation if the caller cancels while the provider completes",
     { signal: controller.signal },
   );
   expect(result.ok).toBe(false);
-  if (!result.ok) expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+  if (result.ok) throw new Error("Expected cancellation");
+  expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+  expect(result.error.cause).toBe(reason);
+  expect(result.error.partialObservation).toMatchObject({
+    operation: "inspect_python_pyc",
+    normalized_result: report,
+    subject: { local_path: report.artifact.path },
+  });
+});
+
+it("retains a pre-admission cancellation reason without calling the pyc provider", async () => {
+  const reason = new Error("caller stopped before pyc admission");
+  let calls = 0;
+  const service = new PythonPycService({
+    identity,
+    inspect: async () => {
+      calls++;
+      return ok(report);
+    },
+  });
+  const result = await service.inspect(
+    { path: report.artifact.path },
+    { signal: AbortSignal.abort(reason) },
+  );
+  if (result.ok) throw new Error("Expected cancellation");
+  expect(result.error).toBeInstanceOf(AnalysisCancelledError);
+  expect(result.error.cause).toBe(reason);
+  expect(result.error.partialObservation).toBeUndefined();
+  expect(calls).toBe(0);
+});
+
+it("preserves malformed provider output instead of relabeling it as a late abort", async () => {
+  const controller = new AbortController();
+  const service = new PythonPycService({
+    identity,
+    inspect: async () => {
+      controller.abort(new Error("later caller stop"));
+      return ok({
+        ...report,
+        artifact: { ...report.artifact, path: "/different.pyc" },
+      });
+    },
+  });
+  const result = await service.inspect(
+    { path: report.artifact.path },
+    { signal: controller.signal },
+  );
+  if (result.ok) throw new Error("Expected output failure");
+  expect(result.error).toBeInstanceOf(AnalysisOutputError);
+  expect(result.error.partialObservation).toBeUndefined();
 });

@@ -41,10 +41,8 @@ import {
 } from "../mcpStartupPolicy.js";
 import { resolveClientConfigTransactionPath } from "./ClientConfigPath.js";
 import { packageReadTargetChanged } from "./MsixPackageStorage.js";
-import {
-  readRegularFileText,
-  RegularFileCleanupFailure,
-} from "./RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
+import { readRegularFileText } from "./RegularFileRead.js";
 import {
   preserveCurrentRecoveryBackup,
   selectCurrentRecoveryBackup,

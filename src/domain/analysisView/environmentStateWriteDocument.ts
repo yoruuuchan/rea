@@ -1,8 +1,8 @@
 import type { JsonValue } from "../jsonValue.js";
 import {
   at as valueAt,
-  decodedSegment,
   isObject,
+  pathSegmentMatches,
   pointerTo,
   same,
   segmentsOf,
@@ -27,16 +27,14 @@ import {
 } from "./environmentStateWriteEffects.js";
 import { documentPointerOf } from "./environmentStateWriteExplain.js";
 
-/** Whether a write's path names the held document's, a segment verbatim or once percent-decoded, as serving matches a call. */
+/** Whether a write's path names the held document's: each segment verbatim, or either spelling once percent-decoded, as serving matches a supplied value. */
 const namesDocument = (path: string, held: string): boolean => {
   const written = segmentsOf(path);
   const recorded = segmentsOf(held);
   return (
     written.length === recorded.length &&
-    recorded.every(
-      (segment, index) =>
-        segment === written[index] ||
-        decodedSegment(segment) === written[index],
+    recorded.every((segment, index) =>
+      pathSegmentMatches(segment, written[index]!),
     )
   );
 };

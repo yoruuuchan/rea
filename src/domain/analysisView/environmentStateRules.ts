@@ -2,6 +2,10 @@ import type { ListQuery } from "./environmentStateListQuery.js";
 import { canonicalJson } from "../comparisonSemantics.js";
 import type { JsonValue } from "../jsonValue.js";
 import type { StateWritePlan } from "./environmentStateWriteRules.js";
+import {
+  respellClock,
+  type ClockFormat,
+} from "./environmentStateWriteValues.js";
 import { ENTRY_BYTES, textBytes } from "./webNetworkRouteTemplates.js";
 
 /** How records are ordered: by recorded start time, or by record order when any start time is missing. */
@@ -99,12 +103,32 @@ interface EntityViewPlan {
   readonly fields: string[];
   readonly required_fields: string[];
   readonly checked_record_ordinals: number[];
+  /** How the view spells the clock fields it always spells otherwise than the entities' stored values. */
+  readonly clock_formats?: Readonly<Record<string, ClockFormat>> | undefined;
 }
 
 export type StateItemView = EntityViewPlan & {
   readonly shape: "item";
   readonly envelope_ordinal: number;
+  /** Recorded reads that asked for some fields only and did not return the item, which replay answers. */
+  readonly projected_record_ordinals?: number[] | undefined;
 };
+
+/** A query parameter that asks for some fields only (`fields`, `fields[...]`, `select`, `$select`). */
+export const isProjectionParameter = (name: string): boolean => {
+  const lower = name.toLowerCase();
+  return (
+    lower === "fields" ||
+    lower.startsWith("fields[") ||
+    lower === "select" ||
+    lower === "$select"
+  );
+};
+
+/** Whether a recorded query string names a projection parameter. */
+export const projectsFields = (query: string | undefined): boolean =>
+  query !== undefined &&
+  [...new URLSearchParams(query).keys()].some(isProjectionParameter);
 
 export type StateListView = EntityViewPlan & {
   readonly shape: "list";
@@ -212,6 +236,60 @@ export const decodedSegment = (segment: string): string => {
   } catch {
     return segment;
   }
+};
+
+/**
+ * Whether two path spellings name one segment: they are equal, or either decodes once to the other.
+ * Decoding both would make `book%2531` match `book1`.
+ */
+export const pathSegmentMatches = (segment: string, value: string): boolean =>
+  segment === value ||
+  decodedSegment(segment) === value ||
+  decodedSegment(value) === segment;
+
+/** One segment of a call: a template literal, or a supplied path value. */
+export interface SuppliedSegment {
+  readonly text: string;
+  readonly supplied: boolean;
+}
+
+/** How many supplied segments a held collection matches verbatim, when it matches the call under the path rule. */
+export const collectionMatch = (
+  collection: string,
+  segments: readonly SuppliedSegment[],
+): number | undefined => {
+  const held = segmentsOf(collection);
+  if (held.length !== segments.length) return undefined;
+  let verbatim = 0;
+  for (const [index, { text, supplied }] of segments.entries()) {
+    const segment = held[index]!;
+    if (supplied ? !pathSegmentMatches(segment, text) : segment !== text)
+      return undefined;
+    if (supplied && segment === text) verbatim += 1;
+  }
+  return verbatim;
+};
+
+/** The collection a create writes: the candidate with the most verbatim supplied segments, the earliest on a tie, else the call with each supplied segment encoded. */
+export const selectedCollection = (
+  segments: readonly SuppliedSegment[],
+  candidates: readonly string[],
+): string => {
+  let chosen: string | undefined;
+  let verbatim = -1;
+  for (const collection of candidates) {
+    const matched = collectionMatch(collection, segments);
+    if (matched !== undefined && matched > verbatim) {
+      chosen = collection;
+      verbatim = matched;
+    }
+  }
+  return (
+    chosen ??
+    `/${segments
+      .map(({ text, supplied }) => (supplied ? encodeURIComponent(text) : text))
+      .join("/")}`
+  );
 };
 
 /** The decoded final path segment, which an item request names its entity by. */
@@ -516,13 +594,14 @@ export const listItems = (
 /** One entity as a view shows it: the view's fields it has, view-specific values first; volatile fields take `observed` values when given. */
 export const renderStateEntity = (
   entity: StateEntity,
-  view: Pick<EntityViewPlan, "tool" | "fields">,
+  view: Pick<EntityViewPlan, "tool" | "fields" | "clock_formats">,
   volatileFields: ReadonlySet<string>,
   observed?: JsonObject,
 ): JsonObject => {
   const own =
     entity.view_fields.find((candidate) => candidate.tool === view.tool)
       ?.fields ?? {};
+  const formats = view.clock_formats ?? {};
   return Object.fromEntries(
     view.fields.flatMap((name): [string, JsonValue][] => {
       const source =
@@ -531,7 +610,16 @@ export const renderStateEntity = (
           : Object.hasOwn(own, name)
             ? own
             : entity.fields;
-      return Object.hasOwn(source, name) ? [[name, source[name]!]] : [];
+      if (!Object.hasOwn(source, name)) return [];
+      // A stored value the view never recorded, such as a written one, takes the view's spelling.
+      return [
+        [
+          name,
+          source === entity.fields && Object.hasOwn(formats, name)
+            ? respellClock(source[name]!, formats[name]!)
+            : source[name]!,
+        ],
+      ];
     }),
   );
 };

@@ -702,6 +702,7 @@ const fileFailureProviders = [
   ["PE certificates", () => new PeCertificatesProvider()],
   ["native exports", () => new NativeExportsProvider()],
   ["BEAM", () => new BeamProvider()],
+  ["Python pyc", () => new PythonPycProvider()],
 ] as const;
 
 const inspectFileFailure = (
@@ -710,6 +711,11 @@ const inspectFileFailure = (
   signal?: AbortSignal,
 ) => {
   const options = signal === undefined ? undefined : { signal };
+  if (provider instanceof PythonPycProvider)
+    return provider.inspect(
+      inspectPythonPycInputSchema.parse({ path }),
+      options,
+    );
   if (provider instanceof ElfNotesProvider)
     return provider.inspect(
       inspectElfNotesInputSchema.parse({ path }),
@@ -843,6 +849,42 @@ it.each(
       fault.blocked.clear();
       await provider.close();
       await scope.close();
+    }
+  },
+);
+
+it.each([false, true])(
+  "preserves a pyc permission failure through late cancellation (failed close: %s)",
+  async (failedClose) => {
+    const path = await selectedImage();
+    const provider = new PythonPycProvider();
+    const controller = new AbortController();
+    const physical = Object.assign(new Error("pyc descriptor stat denied"), {
+      code: "EACCES",
+    });
+    fault.blockNew = failedClose;
+    fault.readFailure = { cause: physical };
+    fault.onClose = () => controller.abort(physical);
+    try {
+      const result = await provider.inspect(
+        inspectPythonPycInputSchema.parse({ path }),
+        { signal: controller.signal },
+      );
+      if (result.ok) throw new Error("Expected physical read failure");
+      const primary = result.error.cleanupPrimary ?? result.error;
+      expect(primary).toBeInstanceOf(AnalysisAccessDeniedError);
+      expect(primary.cause).toBe(physical);
+      expect(result.error.cleanupIncomplete).toBe(failedClose);
+      expect(fault.handles).toHaveLength(1);
+      expect(fault.handles[0]!.fd >= 0).toBe(failedClose);
+      fault.blocked.clear();
+      await provider.close();
+      expect(result.error.cleanupIncomplete).toBe(false);
+      expect(fault.handles[0]!.fd).toBe(-1);
+    } finally {
+      fault.onClose = undefined;
+      fault.blocked.clear();
+      await provider.close();
     }
   },
 );

@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 
+import { DEFAULT_REGEX_MATCHING_DEADLINE } from "../config/regexMatchingDeadline.js";
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import {
   execArgvFromCommandLine,
@@ -454,6 +455,13 @@ it("describes the effective heap and the configurable matching deadline", () => 
     expect(limitation).toContain("REA_REGEX_MATCHING_DEADLINE_MS");
     expect(limitation).toContain("floor 1 ms");
     expect(limitation).toContain("maximum 2147483647 ms");
+    expect(limitation).toContain("REA_REGEX_WORKER_HEAP_REQUEST_MIB");
+    expect(limitation).toContain(
+      "source default; default 128 MiB, floor 7 MiB, maximum 16384 MiB",
+    );
+    expect(limitation).toContain(
+      "Set REA_REGEX_WORKER_HEAP_REQUEST_MIB in the environment that starts REA",
+    );
     expect(limitation).not.toContain("no runtime override");
     expect(limitation).not.toContain("either cap");
     expect(limitation).not.toContain("no runtime override for the heap");
@@ -476,10 +484,14 @@ it("describes the effective heap and the configurable matching deadline", () => 
       );
       expect(projected.message).toContain("was not established");
       expect(projected.details).toMatchObject({
-        reported_limits: { requested_worker_heap_mib: 128 },
+        reported_limits: {
+          requested_worker_heap_mib: 128,
+          requested_worker_heap_source: "default",
+        },
       });
       expect(projected.details?.reported_limits).toEqual({
         requested_worker_heap_mib: 128,
+        requested_worker_heap_source: "default",
       });
     } else {
       expect(limitation).toContain(`effective ${String(heap.mib)} MiB`);
@@ -488,8 +500,57 @@ it("describes the effective heap and the configurable matching deadline", () => 
         reported_limits: {
           worker_heap_mib: heap.mib,
           requested_worker_heap_mib: 128,
+          requested_worker_heap_source: "default",
         },
       });
     }
   }
+});
+
+it("keeps a selected heap request unless a positive Node flag overrides it", () => {
+  const request = { heapMiB: 256, source: "setting" as const };
+  expect(resolveRegexWorkerHeap([], undefined, request)).toEqual(
+    effective(256, false),
+  );
+  expect(
+    resolveRegexWorkerHeap(["--max-old-space-size=64"], undefined, request),
+  ).toEqual(effective(64, true));
+  const selected = regexMatchingLimitation(
+    effective(256, false),
+    DEFAULT_REGEX_MATCHING_DEADLINE,
+    request,
+  );
+  expect(selected).toContain("effective 256 MiB");
+  expect(selected).toContain(
+    "The effective REA_REGEX_WORKER_HEAP_REQUEST_MIB value is 256 MiB (source setting; default 128 MiB, floor 7 MiB, maximum 16384 MiB).",
+  );
+  const overridden = regexMatchingLimitation(
+    effective(64, true),
+    DEFAULT_REGEX_MATCHING_DEADLINE,
+    request,
+  );
+  expect(overridden).toContain("effective 64 MiB");
+  expect(overridden).toContain("source setting");
+  expect(overridden).toContain("floor 7 MiB");
+  expect(overridden).toContain("maximum 16384 MiB");
+  const projected = projectAnalysisError(
+    regexWorkerHeapError(
+      "search_procedures",
+      new Error("heap"),
+      effective(64, true),
+      request,
+    ),
+  );
+  expect(projected.details).toMatchObject({
+    reported_limits: {
+      worker_heap_mib: 64,
+      requested_worker_heap_mib: 256,
+      requested_worker_heap_source: "setting",
+    },
+  });
+  expect(projected.remediation.action).toContain("source setting");
+  expect(projected.remediation.action).toContain(
+    "Set REA_REGEX_WORKER_HEAP_REQUEST_MIB in the environment that starts REA",
+  );
+  expect(projected.remediation.action).not.toContain("no runtime override");
 });

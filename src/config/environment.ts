@@ -19,14 +19,29 @@ import { mcpInputSchemaProfileSchema } from "./mcpInputSchemaProfile.js";
 import { mcpOutputSchemaProfileSchema } from "./mcpOutputSchemaProfile.js";
 import { mcpResponseBudgetSchema } from "./mcpResponseBudget.js";
 import { asarMaxHeaderBytesSchema } from "./asarHeaderAdmission.js";
+import { captureDecoderOldGenerationMiBSchema } from "./captureDecoderHeap.js";
 import { regexMatchingDeadlineMsSchema } from "./regexMatchingDeadline.js";
+import { regexWorkerHeapRequestMiBSchema } from "./regexWorkerHeapRequest.js";
+import {
+  mcpDoctorDeadlineMsSchema,
+  mcpFirstCatalogBudgetMsSchema,
+  mcpInitializeBudgetMsSchema,
+  mcpToolsListBudgetMsSchema,
+} from "./mcpStartupBudgets.js";
 import { parseLoaderArgs, parseStringArray } from "./parsers.js";
 
 const environmentSchema = z.object({
   REA_ANALYSIS_PROVIDER: analysisProviderSelectorSchema.default("auto"),
   REA_MCP_MAX_RESPONSE_BYTES: mcpResponseBudgetSchema.optional(),
   REA_ASAR_MAX_HEADER_BYTES: asarMaxHeaderBytesSchema.optional(),
+  REA_CAPTURE_DECODER_OLD_GENERATION_MIB:
+    captureDecoderOldGenerationMiBSchema.optional(),
   REA_REGEX_MATCHING_DEADLINE_MS: regexMatchingDeadlineMsSchema.optional(),
+  REA_REGEX_WORKER_HEAP_REQUEST_MIB: regexWorkerHeapRequestMiBSchema.optional(),
+  REA_MCP_INITIALIZE_BUDGET_MS: mcpInitializeBudgetMsSchema.optional(),
+  REA_MCP_TOOLS_LIST_BUDGET_MS: mcpToolsListBudgetMsSchema.optional(),
+  REA_MCP_FIRST_CATALOG_BUDGET_MS: mcpFirstCatalogBudgetMsSchema.optional(),
+  REA_MCP_DOCTOR_DEADLINE_MS: mcpDoctorDeadlineMsSchema.optional(),
   REA_MCP_INPUT_SCHEMA_PROFILE: mcpInputSchemaProfileSchema.optional(),
   REA_MCP_OUTPUT_SCHEMA_PROFILE: mcpOutputSchemaProfileSchema.optional(),
   REA_IDA_MCP_CONFIG: z

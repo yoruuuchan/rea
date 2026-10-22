@@ -49,6 +49,7 @@ export const deriveProcessComparisonStatus = (
   dimensions: readonly ComparisonStatus[],
 ): ComparisonStatus => {
   if (dimensions.includes("truncated")) return "truncated";
+  if (dimensions.includes("contradiction")) return "contradiction";
   if (
     dimensions.some((status) =>
       ["changed", "added", "removed"].includes(status),

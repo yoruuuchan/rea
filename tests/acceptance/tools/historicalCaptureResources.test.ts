@@ -64,13 +64,14 @@ it.skipIf(process.versions.bun !== undefined && jobLimit === null)(
       sensitive_values: ["caller-marked"],
     });
     expect(response.isError).toBe(true);
-    expect(parseMcpToolError(response)).toMatchObject({
+    const exhausted = parseMcpToolError(response);
+    expect(exhausted).toMatchObject({
       error: {
         code: "resource_constraint",
         retryable: false,
         message: expect.stringContaining(
           jobLimit === null
-            ? "fixed V8 heap"
+            ? "192 MiB V8 old-generation heap (source default)"
             : "Windows Job Object memory limit",
         ),
         remediation: {
@@ -101,6 +102,14 @@ it.skipIf(process.versions.bun !== undefined && jobLimit === null)(
     });
     expect(JSON.stringify(response)).not.toContain("caller-marked");
     expect(JSON.stringify(response)).not.toContain("rea doctor");
+    const remediation = String(exhausted.error.remediation?.action ?? "");
+    expect(remediation).toContain(
+      "The effective REA_CAPTURE_DECODER_OLD_GENERATION_MIB value is 192 MiB (source default; default 192 MiB, floor 8 MiB, maximum 16384 MiB).",
+    );
+    expect(remediation).toContain(
+      "Set REA_CAPTURE_DECODER_OLD_GENERATION_MIB in the environment that starts REA",
+    );
+    expect(remediation).not.toContain("no runtime override");
     const failed: unknown = await execute(process.execPath, [
       cli,
       "inspect-web-network-capture",
@@ -117,6 +126,9 @@ it.skipIf(process.versions.bun !== undefined && jobLimit === null)(
         ? String(failed.stdout)
         : "";
     expect(JSON.parse(stdout)).toMatchObject({ code: "resource_constraint" });
+    expect(stdout).toContain("REA_CAPTURE_DECODER_OLD_GENERATION_MIB");
+    expect(stdout).toContain("source default");
+    expect(stdout).not.toContain("no runtime override");
     const small = join(root, "small.har");
     await writeFile(small, capture(2));
     await client.ping();
@@ -128,6 +140,16 @@ it.skipIf(process.versions.bun !== undefined && jobLimit === null)(
     expect(control.structuredContent).toMatchObject({
       normalized_result: { total_records: 2 },
     });
+    const controlText = JSON.stringify(control.structuredContent);
+    expect(controlText).toContain(
+      "The effective REA_CAPTURE_DECODER_OLD_GENERATION_MIB value is 192 MiB (source default; default 192 MiB, floor 8 MiB, maximum 16384 MiB).",
+    );
+    expect(controlText).toContain("source default");
+    expect(controlText).toContain("floor 8 MiB");
+    expect(controlText).toContain("maximum 16384 MiB");
+    expect(controlText).toContain(
+      "Set REA_CAPTURE_DECODER_OLD_GENERATION_MIB in the environment that starts REA",
+    );
     await truncate(path, WEB_NETWORK_CAPTURE_LIMITS.inputBytes + 1);
     const oversized = await call("inspect_web_network_capture", {
       capture_path: path,

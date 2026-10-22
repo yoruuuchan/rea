@@ -125,6 +125,3 @@ export const inspectApkSignatureInputSchema = z
           "view requires summary delivery; omit it for complete Evidence",
       });
   });
-export type InspectApkSignatureInput = z.infer<
-  typeof inspectApkSignatureInputSchema
->;

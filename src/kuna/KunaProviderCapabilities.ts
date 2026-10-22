@@ -8,6 +8,10 @@ import {
   DEFAULT_REGEX_MATCHING_DEADLINE,
   type RegexMatchingDeadline,
 } from "../config/regexMatchingDeadline.js";
+import {
+  DEFAULT_REGEX_WORKER_HEAP_REQUEST,
+  type RegexWorkerHeapRequest,
+} from "../config/regexWorkerHeapRequest.js";
 import { launchRegexMatchingLimitation } from "../process/RegexMatcher.js";
 import { KUNA_FUNCTION_TEXT_BYTES } from "./KunaLimits.js";
 
@@ -67,6 +71,7 @@ const KUNA_TEXT_CAPACITY_LIMITATION = `Each buffered source facet admits at most
 export const kunaLimitations = (
   operation: KunaOperation,
   deadline: RegexMatchingDeadline = DEFAULT_REGEX_MATCHING_DEADLINE,
+  heapRequest: RegexWorkerHeapRequest = DEFAULT_REGEX_WORKER_HEAP_REQUEST,
 ): readonly string[] => {
   switch (operation) {
     case "list_documents":
@@ -77,7 +82,7 @@ export const kunaLimitations = (
       return [
         KUNA_PROVENANCE,
         KUNA_STRING_LIMITATION,
-        launchRegexMatchingLimitation(deadline),
+        launchRegexMatchingLimitation(deadline, heapRequest),
       ];
     case "list_procedures":
     case "procedure_address":
@@ -87,7 +92,7 @@ export const kunaLimitations = (
       return [
         KUNA_PROVENANCE,
         KUNA_ENTRY_LIMITATION,
-        launchRegexMatchingLimitation(deadline),
+        launchRegexMatchingLimitation(deadline, heapRequest),
       ];
     case "procedure_callers":
     case "procedure_callees":
@@ -119,6 +124,7 @@ export const kunaCapabilities = (
         readonly code: ProviderRejectionCode;
       },
   deadline: RegexMatchingDeadline = DEFAULT_REGEX_MATCHING_DEADLINE,
+  heapRequest: RegexWorkerHeapRequest = DEFAULT_REGEX_WORKER_HEAP_REQUEST,
 ): readonly CapabilityDescriptor[] =>
   KUNA_OPERATIONS.map((operation) => ({
     provider: KUNA_PROVIDER_IDENTITY,
@@ -142,5 +148,5 @@ export const kunaCapabilities = (
       changesPermissions: false,
       requiresRoot: false,
     },
-    limitations: kunaLimitations(operation, deadline),
+    limitations: kunaLimitations(operation, deadline, heapRequest),
   }));

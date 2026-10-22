@@ -212,12 +212,18 @@ from the environment that starts REA, so a change needs a restart. A deadline
 failure names the effective milliseconds, whether they came from the default
 or the setting, the default, and the maximum. The worker old-generation heap
 does not raise it. Kuna regex search uses the same deadline. The worker
-requests 128
-MiB. A positive Node.js `--max-old-space-size` on the process that starts
+heap request is `REA_REGEX_WORKER_HEAP_REQUEST_MIB`, a decimal integer from
+7 to 16384 MiB. Unset uses 128 MiB. A request below 7 MiB aborts the worker
+during startup, and a larger value is refused. Invalid values are
+configuration errors and do not fall back to 128. The setting is read from
+the environment that starts REA, so a change needs a restart. A heap failure
+names the effective request, whether it came from the default or the setting,
+the default, the floor, and the maximum. A positive Node.js
+`--max-old-space-size` on the process that starts
 REA, including `NODE_OPTIONS`, overrides that request and sets the effective
 heap. `--max-old-space-size-percentage` takes precedence over that flag in
 either order. REA does not turn the percentage into a MiB, so the effective
-heap stays unestablished instead of the 128 MiB request or the absolute flag.
+heap stays unestablished instead of the worker heap request or the absolute flag.
 The reported `NODE_OPTIONS` value is the process initial environment when that
 block can be read. A later edit to the environment is not the value Node
 applied, and an unreadable initial value leaves the effective heap
@@ -229,11 +235,11 @@ buffer without a program entry leaves the effective heap unestablished.
 `--env-file` or `--env-file-if-exists` can supply `NODE_OPTIONS`
 when the initial environment has none. That file is not part of the initial
 environment block, so the effective heap stays unestablished instead of the
-128 MiB request. An initial `NODE_OPTIONS` is still used, because Node does
+worker heap request. An initial `NODE_OPTIONS` is still used, because Node does
 not let the file replace it. A positive `--max-heap-size`, including the
 underscore form and launch `NODE_OPTIONS` on Node versions that allow it,
 sets the total heap rather than the old generation and can be lower than the
-128 MiB request. The effective old generation stays unestablished while that
+worker heap request. The effective old generation stays unestablished while that
 value is in effect. A zero or empty value clears it.
 `--experimental-config-file` or `--experimental-default-config-file` can set
 `nodeOptions`, including a heap percentage, from a file that is not read

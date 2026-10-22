@@ -11,6 +11,13 @@ export type ClockFormat =
     }
   | { readonly kind: "epoch"; readonly unit: "s" | "ms" };
 
+interface ClockReading {
+  readonly ms: number;
+  /** Nanoseconds after the floored millisecond, so distinct recorded instants stay distinct. */
+  readonly subMillisecond: number;
+  readonly format: ClockFormat;
+}
+
 const ISO_INSTANT =
   /^(\d{4})-(\d{2})-(\d{2})([T ])(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:?\d{2})?$/u;
 const MINUTE_MS = 60_000;
@@ -25,9 +32,7 @@ const zoneMinutes = (zone: string): number => {
 };
 
 /** The instant of an ISO-8601 date-time and how it is spelled, or undefined when it is not one. */
-const readIsoClock = (
-  value: string,
-): { readonly ms: number; readonly format: ClockFormat } | undefined => {
+const readIsoClock = (value: string): ClockReading | undefined => {
   const match = ISO_INSTANT.exec(value);
   if (match === null) return undefined;
   const [year, month, day, separator, hour, minute, second] = match
@@ -56,6 +61,7 @@ const readIsoClock = (
     return undefined;
   return {
     ms: local - zoneMinutes(zone) * MINUTE_MS,
+    subMillisecond: Number(fraction.padEnd(9, "0").slice(3)),
     format: {
       kind: "iso",
       separator: separator as "T" | " ",
@@ -68,30 +74,77 @@ const readIsoClock = (
 /** The instant a clock value names and its format: an ISO-8601 date-time, or epoch seconds or milliseconds. */
 export const readClock = (
   value: JsonValue | undefined,
-): { readonly ms: number; readonly format: ClockFormat } | undefined => {
+): ClockReading | undefined => {
   if (typeof value === "string") return readIsoClock(value);
   if (typeof value !== "number" || !Number.isSafeInteger(value))
     return undefined;
   if (value >= 1e9 && value < 1e10)
-    return { ms: value * 1000, format: { kind: "epoch", unit: "s" } };
+    return {
+      ms: value * 1000,
+      subMillisecond: 0,
+      format: { kind: "epoch", unit: "s" },
+    };
   if (value >= 1e12 && value < 1e13)
-    return { ms: value, format: { kind: "epoch", unit: "ms" } };
+    return {
+      ms: value,
+      subMillisecond: 0,
+      format: { kind: "epoch", unit: "ms" },
+    };
   return undefined;
 };
 
 const pad = (value: number, width: number): string =>
   String(value).padStart(width, "0");
 
+/** An ISO-8601 date-time from the UTC fields of `at`, with fraction digits and a zone suffix. */
+const isoText = (
+  at: Date,
+  separator: string,
+  digits: string,
+  zone: string,
+): string =>
+  `${pad(at.getUTCFullYear(), 4)}-${pad(at.getUTCMonth() + 1, 2)}-${pad(at.getUTCDate(), 2)}${separator}${pad(at.getUTCHours(), 2)}:${pad(at.getUTCMinutes(), 2)}:${pad(at.getUTCSeconds(), 2)}${digits === "" ? "" : `.${digits}`}${zone}`;
+
 /** An instant spelled in a recorded clock format; fraction digits past milliseconds are zeros. */
 export const formatClock = (ms: number, format: ClockFormat): JsonValue => {
   if (format.kind === "epoch")
     return format.unit === "s" ? Math.floor(ms / 1000) : ms;
   const at = new Date(ms + zoneMinutes(format.zone) * MINUTE_MS);
-  const fraction =
-    format.fraction === 0
-      ? ""
-      : `.${`${pad(at.getUTCMilliseconds(), 3)}${"0".repeat(9)}`.slice(0, format.fraction)}`;
-  return `${pad(at.getUTCFullYear(), 4)}-${pad(at.getUTCMonth() + 1, 2)}-${pad(at.getUTCDate(), 2)}${format.separator}${pad(at.getUTCHours(), 2)}:${pad(at.getUTCMinutes(), 2)}:${pad(at.getUTCSeconds(), 2)}${fraction}${format.zone}`;
+  const digits = `${pad(at.getUTCMilliseconds(), 3)}${"0".repeat(9)}`.slice(
+    0,
+    format.fraction,
+  );
+  return isoText(at, format.separator, digits, format.zone);
+};
+
+/**
+ * A clock value spelled in another ISO format: its wall clock in the format's zone, under the format's separator, with
+ * the value's own fraction digits padded to the format's width, so no digit is lost; an epoch format is computed from
+ * the instant.
+ */
+export const respellClock = (
+  value: JsonValue,
+  format: ClockFormat,
+): JsonValue => {
+  const clock = readClock(value);
+  if (clock === undefined) return value;
+  if (format.kind === "epoch") return formatClock(clock.ms, format);
+  const millis = ((clock.ms % 1000) + 1000) % 1000;
+  // An epoch value's fraction is its milliseconds, without trailing zeros.
+  const digits =
+    clock.format.kind === "epoch"
+      ? pad(millis, 3).replace(/0+$/u, "")
+      : `${pad(millis, 3)}${pad(clock.subMillisecond, 6)}`.slice(
+          0,
+          clock.format.fraction,
+        );
+  const at = new Date(clock.ms - millis + zoneMinutes(format.zone) * MINUTE_MS);
+  return isoText(
+    at,
+    format.separator,
+    digits.padEnd(format.fraction, "0"),
+    format.zone,
+  );
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
@@ -120,7 +173,58 @@ export const nextSequence = (
 
 /** An integer spelled as the recorded value spells integers: a number, or a string of digits. */
 export const spelledLike = (exemplar: JsonValue, value: number): JsonValue =>
-  typeof exemplar === "string" ? String(value) : value;
+  maskedCount(exemplar) !== undefined
+    ? fillMask(exemplar as string, value)
+    : typeof exemplar === "string"
+      ? String(value)
+      : value;
+
+const MASKED_DIGITS = /^\d{2,}(?:-\d{2,})+$/u;
+
+/** The count `-`-separated digit groups of one width spell, such as an asset number `000-005`; dates, versions and addresses are not counts. */
+const maskedCount = (value: JsonValue | undefined): number | undefined => {
+  if (typeof value !== "string" || !MASKED_DIGITS.test(value)) return undefined;
+  const groups = value.split("-");
+  if (groups.some((group) => group.length !== groups[0]!.length))
+    return undefined;
+  const digits = groups.join("");
+  return digits.length <= 15 ? Number(digits) : undefined;
+};
+
+/** A count that outgrew the exemplar's mask, read only when it is spelled as serving spells it, so dates never match. */
+const outgrownMask = (
+  value: JsonValue | undefined,
+  exemplar: JsonValue | undefined,
+): number | undefined => {
+  if (typeof value !== "string" || maskedCount(exemplar) === undefined)
+    return undefined;
+  const digits = value.replaceAll("-", "");
+  if (!/^\d{1,15}$/u.test(digits)) return undefined;
+  const count = Number(digits);
+  return fillMask(exemplar as string, count) === value ? count : undefined;
+};
+
+/** A sequence's number: an integer, digit groups that count, or with the sequence's exemplar a count that outgrew its mask. */
+export const sequenceNumber = (
+  value: JsonValue | undefined,
+  exemplar?: JsonValue,
+): number | undefined =>
+  integerOf(value) ?? maskedCount(value) ?? outgrownMask(value, exemplar);
+
+/** A number written into a mask's digit positions, zero-padded; digits that outgrow the mask lead it. */
+const fillMask = (mask: string, value: number): string => {
+  const padded = String(value).padStart(mask.replace(/\D/gu, "").length, "0");
+  let next = padded.length - 1;
+  let out = "";
+  for (let at = mask.length - 1; at >= 0; at -= 1) {
+    const character = mask[at]!;
+    if (/\d/u.test(character)) {
+      out = padded[next]! + out;
+      next -= 1;
+    } else out = character + out;
+  }
+  return padded.slice(0, next + 1) + out;
+};
 
 /** Lower case, with every run of other characters joined by one `-` and none at either end. */
 export const slugOf = (text: string): string =>

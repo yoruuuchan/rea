@@ -4,13 +4,14 @@ import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   captureProcessScenarioFile,
   compareProcessEvidenceFiles,
+  PROCESS_UNEXPECTED_FAILURE_REMEDIATION,
 } from "../../../src/application/process/ProcessCli.js";
 import { JSON_BYTE_ORDER_MARK_MESSAGE } from "../../../src/application/Utf8JsonInput.js";
 import { createEvidence } from "../../../src/domain/evidence.js";
 import { PROCESS_PROVIDER } from "../../../src/domain/process/processEvidenceProvider.js";
 import { EMPTY_PROCESS_CAPTURE_EXAMPLE } from "../../../src/domain/process/processCaptureExample.js";
 import { OwnedFileHandle } from "../../../src/filesystem/OwnedFileHandle.js";
-import { RegularFileCleanupFailure } from "../../../src/application/RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../../../src/filesystem/OwnedRegularFile.js";
 import { analysisCliErrorEnvelopeSchema } from "../../../src/contracts/errorSchemas.js";
 import { EvidenceFileError } from "../../../src/domain/evidenceErrors.js";
 import { err } from "../../../src/domain/result.js";
@@ -53,6 +54,7 @@ describe("process CLI error projection", () => {
           retryable: false,
           message:
             "Process command could not complete: SECRET internal failure /private/path",
+          remediation: { action: PROCESS_UNEXPECTED_FAILURE_REMEDIATION },
           details: {
             operation,
             provider_id: PROCESS_PROVIDER.id,
@@ -60,6 +62,10 @@ describe("process CLI error projection", () => {
           },
         });
         expect(JSON.stringify(projected)).not.toContain("stack");
+        expect(PROCESS_UNEXPECTED_FAILURE_REMEDIATION).not.toContain("SECRET");
+        expect(PROCESS_UNEXPECTED_FAILURE_REMEDIATION).not.toMatch(
+          /\bretry\b/iu,
+        );
       } finally {
         read.mockRestore();
       }

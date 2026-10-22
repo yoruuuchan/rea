@@ -26,7 +26,7 @@ import {
   type JsonObjectMemberReader,
 } from "./JsonInputFile.js";
 import { NonRegularFileReadError } from "../filesystem/RegularFile.js";
-import { RegularFileCleanupFailure } from "./RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import type { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";
 import { bindArtifactFileCleanup } from "../artifacts/ArtifactFileOperation.js";

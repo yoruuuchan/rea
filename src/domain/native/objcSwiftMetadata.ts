@@ -356,7 +356,6 @@ export const objcSwiftMetadataSchema = z.strictObject({
 });
 export type ObjcSwiftMetadata = z.infer<typeof objcSwiftMetadataSchema>;
 
-/** Provider and target identity for one normalized dispatch-metadata result. */
 /** Retained-image budget when the caller selects none. */
 export const DEFAULT_DISPATCH_METADATA_INPUT_BYTES = 64 * 1024 * 1024;
 
@@ -366,6 +365,42 @@ export const DEFAULT_DISPATCH_METADATA_INPUT_BYTES = 64 * 1024 * 1024;
  * its own process.
  */
 export const MAXIMUM_DISPATCH_METADATA_INPUT_BYTES = 1024 * 1024 * 1024;
+
+/** Shared metadata row allowance for provider reads and class-import discovery. */
+export const MAX_DISPATCH_METADATA_RECORDS = 20_000;
+export const DEFAULT_DISPATCH_METADATA_RECORDS = 5_000;
+
+/** Selected dispatch facts and retained-image budget, shared by providers and adapters. */
+export const nativeDispatchMetadataInputSchema = z.strictObject({
+  max_records: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_DISPATCH_METADATA_RECORDS)
+    .default(DEFAULT_DISPATCH_METADATA_RECORDS),
+  objc_class_import_addresses: z
+    .array(z.string())
+    .max(MAX_DISPATCH_METADATA_RECORDS)
+    .describe(
+      "Optional exact pointer-slot addresses from the selected name inventory; used to report decoded Objective-C class import bindings.",
+    )
+    .optional(),
+  objc_class_import_addresses_complete: z
+    .boolean()
+    .describe(
+      "Whether the candidate addresses include every selected class-label row; false keeps binding coverage partial when the existing record budget truncates the scan.",
+    )
+    .optional(),
+  max_input_bytes: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAXIMUM_DISPATCH_METADATA_INPUT_BYTES)
+    .optional()
+    .describe(
+      "Largest target file REA reads into memory for binary metadata, in bytes. Omitted: 67108864 (64 MiB). The whole file counts, including every slice of a universal Mach-O. At most 1073741824 (1 GiB).",
+    ),
+});
 
 /** Effective input budget of one binary metadata read and the bytes it retained. */
 export const dispatchMetadataInputAdmissionSchema = z.strictObject({
@@ -381,6 +416,7 @@ export type DispatchMetadataInputAdmission = z.infer<
   typeof dispatchMetadataInputAdmissionSchema
 >;
 
+/** Provider and target identity for one normalized dispatch-metadata result. */
 export const nativeDispatchMetadataResultSchema = z.strictObject({
   target_sha256: z
     .string()
@@ -401,7 +437,7 @@ export const nativeDispatchMetadataResultSchema = z.strictObject({
 /** Decode only facts visible in a provider's existing name inventory. */
 export const inspectNativeDispatchMetadata = (
   names: readonly { readonly address: string; readonly name: string }[],
-  maxRecords = 5_000,
+  maxRecords = DEFAULT_DISPATCH_METADATA_RECORDS,
 ): ObjcSwiftMetadata => {
   const symbolEvidence = (
     entry: (typeof names)[number],

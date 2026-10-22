@@ -20,7 +20,6 @@ import { readStableArtifact } from "../artifacts/readStableArtifact.js";
 import type { StableArtifactSnapshot } from "../artifacts/readStableArtifact.js";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
-  AnalysisCapabilityUnavailableError,
   AnalysisCancelledError,
   AnalysisTimeoutError,
   AnalysisOutputError,
@@ -37,7 +36,10 @@ import {
   type WebBundleScriptAnalysis,
 } from "../domain/webBundleScriptAnalysis.js";
 import { OwnedWorkerRuntime } from "../process/OwnedWorkerRuntime.js";
-import { PrivateRuntimeRootUnavailableError } from "../process/PrivateRuntimeRootUnavailableError.js";
+import {
+  RuntimeControlUnavailableError,
+  runtimeControlCapabilityError,
+} from "../process/RuntimeControlUnavailableError.js";
 import { spawnOwnedProviderProcess } from "../process/ProviderProcess.js";
 import { ProviderStartupDeadline } from "../process/ProviderDeadline.js";
 import { prepareProcessOwnershipInspection } from "../process/ProcessOwnershipObservation.js";
@@ -432,13 +434,8 @@ export class WebBundleAnalysisWorker {
           : interrupted !== undefined && observedFailure !== undefined
             ? observedFailure
             : (interrupted ??
-              (cause instanceof PrivateRuntimeRootUnavailableError
-                ? new AnalysisCapabilityUnavailableError(
-                    PROVIDER,
-                    OPERATION,
-                    cause.message,
-                    { cause, retryable: cause.retryable },
-                  )
+              (cause instanceof RuntimeControlUnavailableError
+                ? runtimeControlCapabilityError(PROVIDER, OPERATION, cause)
                 : cause instanceof AnalysisError
                   ? cause
                   : new AnalysisOutputError(

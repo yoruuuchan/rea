@@ -497,6 +497,36 @@ it.each([
     "REA_REGEX_MATCHING_DEADLINE_MS",
   ],
   [
+    "capture decoder heap below its floor",
+    { REA_CAPTURE_DECODER_OLD_GENERATION_MIB: "7" },
+    "REA_CAPTURE_DECODER_OLD_GENERATION_MIB",
+  ],
+  [
+    "regex worker heap request below its floor",
+    { REA_REGEX_WORKER_HEAP_REQUEST_MIB: "6" },
+    "REA_REGEX_WORKER_HEAP_REQUEST_MIB",
+  ],
+  [
+    "MCP initialize budget of zero",
+    { REA_MCP_INITIALIZE_BUDGET_MS: "0" },
+    "REA_MCP_INITIALIZE_BUDGET_MS",
+  ],
+  [
+    "MCP tools/list budget above its maximum",
+    { REA_MCP_TOOLS_LIST_BUDGET_MS: "2147483648" },
+    "REA_MCP_TOOLS_LIST_BUDGET_MS",
+  ],
+  [
+    "MCP first-catalog budget with a leading zero",
+    { REA_MCP_FIRST_CATALOG_BUDGET_MS: "020000" },
+    "REA_MCP_FIRST_CATALOG_BUDGET_MS",
+  ],
+  [
+    "MCP doctor deadline that is not decimal",
+    { REA_MCP_DOCTOR_DEADLINE_MS: "30_000" },
+    "REA_MCP_DOCTOR_DEADLINE_MS",
+  ],
+  [
     "malformed loader JSON",
     { HOPPER_LOADER_ARGS_JSON: "{" },
     "HOPPER_LOADER_ARGS_JSON",

@@ -52,7 +52,13 @@ const range = (node: t.Node): JavaScriptRouteSegment["location"] => {
 };
 
 type Mechanism = JavaScriptRouteCandidate["mechanism"];
-type LegacyRoute = { node: t.Node; value: string; mechanism: string };
+type LegacyRoute = {
+  node: t.Node;
+  value: string;
+  mechanism: string;
+  /** Set when only the property name, not a router record, suggests a route. */
+  interpretation?: "candidate";
+};
 interface SegmentLink {
   readonly previous: SegmentLink | null;
   readonly segment: JavaScriptRouteSegment;
@@ -151,6 +157,34 @@ const isRouteChildKey = (key: string, typed: boolean): boolean =>
   typed ? !key.startsWith("_") && !key.startsWith("$") : key === "children";
 const isRouteSegmentKey = (key: string | undefined): boolean =>
   key === "path" || key === "route" || key === "_$";
+interface RouteRecordShape {
+  readonly typed: boolean;
+  readonly hasPath: boolean;
+  readonly hasChildren: boolean;
+  readonly hasView: boolean;
+  readonly hasIndex: boolean;
+}
+/** Read the static keys that identify a router record. */
+const routeRecordShape = (node: t.ObjectExpression): RouteRecordShape => {
+  let typed = false,
+    hasPath = false,
+    hasChildren = false,
+    hasView = false,
+    hasIndex = false;
+  for (const property of node.properties) {
+    if (!t.isObjectProperty(property)) continue;
+    const key = semanticStaticPropertyName(property.key, property.computed);
+    typed ||= key === "_$";
+    hasPath ||= key === "path" || key === "route";
+    hasChildren ||= key === "children";
+    hasView ||= key === "element" || key === "Component" || key === "component";
+    hasIndex ||= key === "index";
+  }
+  return { typed, hasPath, hasChildren, hasView, hasIndex };
+};
+/** A path-bearing record that also names a view, children, or typed route. */
+const isRouterRecord = (shape: RouteRecordShape): boolean =>
+  shape.typed || shape.hasView || shape.hasChildren;
 /** Follow data-bearing edges, not references used only to select or describe it. */
 const isNavigationDataEdge = (node: t.Node, parent: t.Node | null): boolean => {
   if (parent === null) return true;
@@ -221,6 +255,8 @@ export class JavaScriptRouteScan {
   readonly #dynamicValues = new WeakMap<t.Node, DynamicRouteValueOwner>();
   readonly #expressionParents = new WeakMap<t.Node, t.Node>();
   readonly #fieldsCache = new WeakMap<t.ObjectExpression, Fields>();
+  // One key scan per object, however many path or route properties it repeats.
+  readonly #shapeCache = new WeakMap<t.ObjectExpression, RouteRecordShape>();
   readonly #routeParents = new WeakMap<
     t.ObjectExpression,
     t.ObjectExpression | null
@@ -445,7 +481,7 @@ export class JavaScriptRouteScan {
       this.#dynamicValues.set(node, owner);
     // Legacy projections receive the same owned literal observations even when the new facet is full.
     if (t.isObjectProperty(node)) {
-      this.#property(node);
+      this.#property(node, parent);
       return;
     }
     if (
@@ -533,12 +569,21 @@ export class JavaScriptRouteScan {
     } else if (t.isObjectExpression(node)) this.#object(node);
   }
 
-  #property(node: t.ObjectProperty): void {
+  #property(node: t.ObjectProperty, parent: t.Node | null): void {
     const name = semanticStaticPropertyName(node.key, node.computed);
     if (name === "path" || name === "route") {
       const value = stringValue(node.value);
       if (value !== undefined)
-        this.onLegacyRoute?.({ node, value, mechanism: `property:${name}` });
+        this.onLegacyRoute?.({
+          node,
+          value,
+          mechanism: `property:${name}`,
+          // A path key alone also names data records such as patch operations.
+          ...(t.isObjectExpression(parent) &&
+          isRouterRecord(this.#shape(parent))
+            ? {}
+            : { interpretation: "candidate" }),
+        });
     }
     if (this.#result.capacity === null && isRouteSegmentKey(name))
       this.#propertyValues.add(unwrapJavaScriptExpression(node.value).node);
@@ -629,27 +674,21 @@ export class JavaScriptRouteScan {
       );
   }
 
+  #shape(node: t.ObjectExpression): RouteRecordShape {
+    const cached = this.#shapeCache.get(node);
+    if (cached !== undefined) return cached;
+    const shape = routeRecordShape(node);
+    this.#shapeCache.set(node, shape);
+    return shape;
+  }
+
   #object(node: t.ObjectExpression): void {
     // Structured navigation owns these data containers before either automatic
     // roots or parent edges are discovered. Callable bodies are already outside
     // that ownership at the traversal boundary.
-    if (this.#dynamicValues.has(node)) return;
-    let typed = false,
-      hasPath = false,
-      hasChildren = false,
-      hasView = false,
-      hasIndex = false;
-    for (const property of node.properties) {
-      if (this.#result.capacity !== null) break;
-      if (!t.isObjectProperty(property)) continue;
-      const key = semanticStaticPropertyName(property.key, property.computed);
-      typed ||= key === "_$";
-      hasPath ||= key === "path" || key === "route";
-      hasChildren ||= key === "children";
-      hasView ||=
-        key === "element" || key === "Component" || key === "component";
-      hasIndex ||= key === "index";
-    }
+    if (this.#dynamicValues.has(node) || this.#result.capacity !== null) return;
+    const { typed, hasPath, hasChildren, hasView, hasIndex } =
+      this.#shape(node);
     // Only router children establish path ancestry. Ordinary object wrappers
     // can contain routes without contributing URL segments.
     if (!typed && hasChildren && this.#queue(node))

@@ -1,3 +1,4 @@
+import { nativeProcedureInputSchema } from "../domain/native/nativeProcedureInput.js";
 import { CALL_RELATIONSHIP_TRAVERSALS } from "./CallRelationshipTraversal.js";
 import { z } from "zod";
 
@@ -9,7 +10,6 @@ import type {
 } from "./AnalysisProvider.js";
 import {
   enhancedInputSchemas,
-  MAX_ENHANCED_RECORDS,
   type CallRelationshipDirection,
   type EnhancedToolName,
 } from "../contracts/enhancedInputs.js";
@@ -21,7 +21,6 @@ import {
 import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import type { AnalysisError } from "../domain/analysisErrorBase.js";
 import {
-  functionDossierSchema,
   parseFunctionDossier,
   parseListCount,
   parseRelatedAddresses,
@@ -40,7 +39,10 @@ import { traceNativeValues } from "./native/NativeValueTrace.js";
 import { traceNativeUiAction } from "./native/NativeUiActionTrace.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { addressedValueSchema } from "../domain/native/nativeInventory.js";
-import { nativeDispatchMetadataResultSchema } from "../domain/native/objcSwiftMetadata.js";
+import {
+  nativeDispatchMetadataResultSchema,
+  MAX_DISPATCH_METADATA_RECORDS,
+} from "../domain/native/objcSwiftMetadata.js";
 import { isMachOFormat } from "../domain/binaryTargetTypes.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 import {
@@ -269,12 +271,7 @@ export class EnhancedTools {
     input: unknown,
     signal?: AbortSignal,
   ): EnhancedResult {
-    if (name === "analyze_function") {
-      const parsed = enhancedInputSchemas.analyze_function.safeParse(input);
-      if (!parsed.success) return invalidEnhancedInput(name, parsed.error);
-      return this.executeValidated({ name, input: parsed.data }, signal);
-    }
-    const parsed = enhancedInputSchemas.inspect_native_api.safeParse(input);
+    const parsed = nativeProcedureInputSchema.safeParse(input);
     if (!parsed.success) return invalidEnhancedInput(name, parsed.error);
     return this.executeValidated({ name, input: parsed.data }, signal);
   }
@@ -288,18 +285,14 @@ export class EnhancedTools {
   }
 
   async #inspectNativeApi(
-    input: z.output<typeof enhancedInputSchemas.inspect_native_api>,
+    input: z.output<typeof nativeProcedureInputSchema>,
     signal?: AbortSignal,
   ): EnhancedResult {
-    const analysisInput = enhancedInputSchemas.analyze_function.parse({
-      procedure: input.procedure,
-    });
-    const result = await this.#call("analyze_function", analysisInput, signal);
+    const result = await this.#call("analyze_function", input, signal);
     if (!result.ok) return result;
     const parsed = parseFunctionDossier(result.value);
     if (!parsed.ok) return parsed;
-    const dossier = functionDossierSchema.parse(parsed.value);
-    return ok(jsonValueSchema.parse(projectNativeApiInspection(dossier)));
+    return ok(jsonValueSchema.parse(projectNativeApiInspection(parsed.value)));
   }
 
   async #objcClasses(pattern: string, signal?: AbortSignal): EnhancedResult {
@@ -320,14 +313,14 @@ export class EnhancedTools {
       );
 
     const addresses = [...new Set(candidates.map(({ address }) => address))];
-    const scannedAddresses = addresses.slice(0, MAX_ENHANCED_RECORDS);
+    const scannedAddresses = addresses.slice(0, MAX_DISPATCH_METADATA_RECORDS);
     const bindingsExecution = await this.#observe(
       "inspect_native_dispatch_metadata",
       {
-        max_records: MAX_ENHANCED_RECORDS,
+        max_records: MAX_DISPATCH_METADATA_RECORDS,
         objc_class_import_addresses: scannedAddresses,
         objc_class_import_addresses_complete:
-          addresses.length <= MAX_ENHANCED_RECORDS,
+          addresses.length <= MAX_DISPATCH_METADATA_RECORDS,
       },
       signal,
     );

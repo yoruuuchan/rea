@@ -5,7 +5,7 @@ import { expect, it, vi } from "vitest";
 
 import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { readJsonFile } from "../../../src/application/JsonFiles.js";
-import { RegularFileCleanupFailure } from "../../../src/application/RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../../../src/filesystem/OwnedRegularFile.js";
 import { OwnedFileHandle } from "../../../src/filesystem/OwnedFileHandle.js";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 

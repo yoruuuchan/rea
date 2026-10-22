@@ -23,6 +23,8 @@ import {
   firmwareProcessLimitRecovery,
   firmwareSignalLimitError,
 } from "./FirmwareFailures.js";
+import { prlimitArgumentVector } from "../process/LinuxResourceLimits.js";
+import { cleanupOwnedProcessGroup } from "../process/ProcessOwnership.js";
 import {
   spawnOwnedProviderProcess,
   ProviderProcessSupervisor,
@@ -30,7 +32,6 @@ import {
   type ProviderProcessSnapshot,
   type SpawnedOwnedProviderProcess,
 } from "../process/ProviderProcess.js";
-import { cleanupOwnedProcessGroup } from "../process/ProcessOwnership.js";
 import { FIRMWARE_LIMITS } from "./FirmwareRelease.js";
 import {
   FirmwareFileAccess,
@@ -159,12 +160,15 @@ export const runFirmwareCommand = async (context: {
   const spawned = await (context.launcher ?? spawnOwnedProviderProcess)({
     command: context.limiter,
     arguments: [
-      `--as=${FIRMWARE_LIMITS.addressSpaceBytes}`,
-      `--fsize=${context.outputBudget?.bytes ?? FIRMWARE_LIMITS.reportBytes}`,
-      "--core=0",
-      `--cpu=${FIRMWARE_LIMITS.cpuSeconds}`,
-      "--",
-      context.command,
+      ...prlimitArgumentVector(
+        {
+          address_space_bytes: FIRMWARE_LIMITS.addressSpaceBytes,
+          file_bytes:
+            context.outputBudget?.bytes ?? FIRMWARE_LIMITS.reportBytes,
+          cpu_seconds: FIRMWARE_LIMITS.cpuSeconds,
+        },
+        context.command,
+      ),
       ...context.args,
     ],
     expectedCommand: null,

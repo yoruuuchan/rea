@@ -377,8 +377,13 @@ describe("production MCP doctor child lifecycle", () => {
     const result = await vi.waitFor(() => pending, { timeout: 10_000 });
     vi.useRealTimers();
     expect(result.healthy).toBe(false);
-    expect(result.checks[0]?.detail).toContain("60000 ms");
-    expect(result.checks[0]?.detail).toContain("no runtime override");
+    expect(result.checks[0]?.detail).toContain(
+      "The effective REA_MCP_DOCTOR_DEADLINE_MS value for the MCP doctor startup deadline is 60000 ms (source setting; default 30000 ms, floor 1 ms, maximum 2147483647 ms).",
+    );
+    expect(result.checks[0]?.detail).toContain(
+      "Set REA_MCP_DOCTOR_DEADLINE_MS in the environment that starts REA",
+    );
+    expect(result.checks[0]?.detail).not.toContain("no runtime override");
     expect(result.checks[0]?.detail).toContain(
       "Codex startup_timeout_sec of 30 seconds is client guidance",
     );
@@ -417,35 +422,107 @@ describe("production MCP doctor request-flow deadline", () => {
       (check) => check.name === "request-flow",
     );
     expect(requestFlow?.ok).toBe(false);
-    expect(requestFlow?.detail).toContain("60000 ms");
-    expect(requestFlow?.detail).toContain("no runtime override");
+    expect(requestFlow?.detail).toContain(
+      "The effective REA_MCP_DOCTOR_DEADLINE_MS value for the MCP doctor startup deadline is 60000 ms (source setting; default 30000 ms, floor 1 ms, maximum 2147483647 ms).",
+    );
+    expect(requestFlow?.detail).toContain(
+      "Set REA_MCP_DOCTOR_DEADLINE_MS in the environment that starts REA",
+    );
+    expect(requestFlow?.detail).not.toContain("no runtime override");
     expect(requestFlow?.detail).toContain(
       "Codex startup_timeout_sec of 30 seconds is client guidance",
     );
-    expect(requestFlow?.detail).not.toContain("30000 ms");
+    expect(requestFlow?.detail).not.toContain("is 30000 ms");
     expect(requestFlow?.detail).not.toContain("REA_MCP_STARTUP");
   }, 15_000);
 
-  it("does not add deadline guidance to an unrelated binary_session failure", async () => {
-    const result = await runProductionMcpDoctor({
+  it.each([
+    "unrelated fixture method refusal",
+    "Request timed out while reading a remote fixture",
+    "Maximum total timeout exceeded in a remote operation",
+    "Production MCP doctor deadline expired is remote diagnostic text",
+  ])(
+    "does not infer the doctor deadline from remote failure prose: %s",
+    async (message) => {
+      const result = await runProductionMcpDoctor({
+        command: process.execPath,
+        args: [resolve("tests/fixtures/mcpStartupProbeChild.mjs")],
+        cwd: process.cwd(),
+        environment: {
+          ...process.env,
+          REA_MCP_PROBE_MODE: "refuse-call",
+          REA_MCP_PROBE_ERROR_MESSAGE: message,
+        },
+        deadlineMs: 5_000,
+      });
+      expect(result.server).not.toBeNull();
+      const requestFlow = result.checks.find(
+        (check) => check.name === "request-flow",
+      );
+      expect(requestFlow?.ok).toBe(false);
+      expect(requestFlow?.detail).toContain(message);
+      expect(requestFlow?.detail).not.toContain("no runtime override");
+      expect(requestFlow?.detail).not.toContain("MCP doctor startup deadline");
+    },
+    10_000,
+  );
+
+  it("uses REA_MCP_DOCTOR_DEADLINE_MS when no caller deadline is passed", async () => {
+    const root = await createTestTempDirectory("rea-mcp-doctor-setting-");
+    const pidPath = join(root, "pid");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const pending = runProductionMcpDoctor({
       command: process.execPath,
-      args: [resolve("tests/fixtures/mcpStartupProbeChild.mjs")],
+      args: [resolve("tests/fixtures/mcpDoctorHang.mjs")],
       cwd: process.cwd(),
       environment: {
         ...process.env,
-        REA_MCP_PROBE_MODE: "refuse-call",
+        REA_MCP_DOCTOR_PID_PATH: pidPath,
+        REA_MCP_DOCTOR_DEADLINE_MS: "2000",
       },
-      deadlineMs: 5_000,
     });
-    expect(result.server).not.toBeNull();
-    const requestFlow = result.checks.find(
-      (check) => check.name === "request-flow",
+    const pid = await vi.waitFor(
+      async () => {
+        const value = Number.parseInt(await readFile(pidPath, "utf8"), 10);
+        expect(Number.isSafeInteger(value) && value > 0).toBe(true);
+        return value;
+      },
+      { timeout: 10_000 },
     );
-    expect(requestFlow?.ok).toBe(false);
-    expect(requestFlow?.detail).toContain("unrelated fixture method refusal");
-    expect(requestFlow?.detail).not.toContain("no runtime override");
-    expect(requestFlow?.detail).not.toContain("MCP doctor startup deadline");
+    await vi.advanceTimersByTimeAsync(2_000);
+    const result = await vi.waitFor(() => pending, { timeout: 10_000 });
+    vi.useRealTimers();
+    expect(result.healthy).toBe(false);
+    expect(result.checks[0]?.detail).toContain(
+      "The effective REA_MCP_DOCTOR_DEADLINE_MS value for the MCP doctor startup deadline is 2000 ms (source setting; default 30000 ms, floor 1 ms, maximum 2147483647 ms).",
+    );
+    expect(result.checks[0]?.detail).not.toContain("no runtime override");
+    await expect(waitForExit(pid)).resolves.toBeUndefined();
   }, 10_000);
+
+  it("refuses an invalid phase budget before starting a child", async () => {
+    const result = await runProductionMcpDoctor({
+      command: process.execPath,
+      args: ["definitely-missing-mcp-doctor-child.mjs"],
+      cwd: process.cwd(),
+      environment: {
+        ...process.env,
+        REA_MCP_INITIALIZE_BUDGET_MS: "0",
+        REA_MCP_DOCTOR_DEADLINE_MS: "0",
+      },
+    });
+    expect(result.healthy).toBe(false);
+    expect(result.server).toBeNull();
+    expect(result.checks.map(({ name }) => name)).toEqual([
+      "REA_MCP_INITIALIZE_BUDGET_MS",
+      "REA_MCP_DOCTOR_DEADLINE_MS",
+    ]);
+    expect(result.checks[0]?.detail).toContain(
+      "REA_MCP_INITIALIZE_BUDGET_MS must be a positive decimal integer from 1 to 2147483647 ms",
+    );
+    expect(result.checks[1]?.detail).toContain("REA_MCP_DOCTOR_DEADLINE_MS");
+    expect(result.checks[0]?.detail).not.toContain("no runtime override");
+  });
 });
 
 const runNoisyDoctorChild = async (body: string) => {

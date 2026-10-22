@@ -31,7 +31,7 @@ import { createEvidenceBundle } from "../../../src/domain/evidenceBundle.js";
 import { readJsonObjectFile } from "../../../src/application/JsonInputFile.js";
 import { RegularFileChangedError } from "../../../src/filesystem/RegularFile.js";
 import { OwnedFileHandle } from "../../../src/filesystem/OwnedFileHandle.js";
-import { RegularFileCleanupFailure } from "../../../src/application/RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../../../src/filesystem/OwnedRegularFile.js";
 import { OwnedStagedOutput } from "../../../src/filesystem/OwnedStagedOutput.js";
 import { createTestBinarySession } from "../../fixtures/binarySession.js";
 
@@ -383,3 +383,40 @@ it("rejects copied preparation handles and prevents mutable caller values from c
     /not parsed in this realm/u,
   );
 });
+
+it.each([
+  new Error("Parser callback state is unavailable"),
+  new SyntaxError("selected member consumer failure"),
+  Object.assign(new TypeError("consumer text decoder failure"), {
+    code: "ERR_ENCODING_INVALID_ENCODED_DATA",
+  }),
+])(
+  "preserves a selected-member callback failure instead of blaming JSON: %s",
+  async (failure) => {
+    const directory = await createTestTempDirectory("rea-json-member-failure-");
+    const path = join(directory, "input.json");
+    const members = new Map([
+      [
+        "value",
+        {
+          mode: "value" as const,
+          begin: () => {
+            throw failure;
+          },
+          accept: () => {
+            throw new Error("Unexpected member acceptance");
+          },
+          reject: () => {
+            throw new Error("Unexpected member rejection");
+          },
+        },
+      ],
+    ]);
+    for (const padding of ["", " ".repeat(9 * 1024 * 1024)]) {
+      await writeFile(path, `${padding}{"value":1}`);
+      await expect(
+        readJsonObjectFile(path, "test-input", [members]),
+      ).rejects.toBe(failure);
+    }
+  },
+);

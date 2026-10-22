@@ -2,6 +2,10 @@ import {
   DEFAULT_REGEX_MATCHING_DEADLINE,
   type RegexMatchingDeadline,
 } from "../config/regexMatchingDeadline.js";
+import {
+  DEFAULT_REGEX_WORKER_HEAP_REQUEST,
+  type RegexWorkerHeapRequest,
+} from "../config/regexWorkerHeapRequest.js";
 import { launchRegexMatchingLimitation } from "../process/RegexMatcher.js";
 import type {
   CapabilityDescriptor,
@@ -68,6 +72,7 @@ const MUTATING_OPERATIONS = new Set<string>([
 /** Source-owned capabilities without acquiring or probing a Hopper session. */
 export const hopperCapabilities = (
   deadline: RegexMatchingDeadline = DEFAULT_REGEX_MATCHING_DEADLINE,
+  heapRequest: RegexWorkerHeapRequest = DEFAULT_REGEX_WORKER_HEAP_REQUEST,
 ): readonly CapabilityDescriptor[] =>
   Object.freeze(
     [...HOPPER_OPERATIONS, "search_bytes" as const].map((operation) =>
@@ -99,7 +104,7 @@ export const hopperCapabilities = (
           ...(operation === "search_strings" ||
           operation === "search_procedures"
             ? [
-                `${launchRegexMatchingLimitation(deadline)} Literal mode retains native casefold semantics.`,
+                `${launchRegexMatchingLimitation(deadline, heapRequest)} Literal mode retains native casefold semantics.`,
               ]
             : []),
           ...(operation === "list_strings" ||

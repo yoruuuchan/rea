@@ -1322,3 +1322,85 @@ it("restores an environment mutation that completes after its deadline", async (
   );
   expect(browser.close).toHaveBeenCalledOnce();
 });
+
+it.each([
+  new Error("Timeout unrelated launch diagnostic"),
+  Object.assign(new Error("unrelated launch failure"), {
+    name: "TimeoutError",
+  }),
+])(
+  "preserves a launch failure without inferring a Playwright deadline: %s",
+  async (failure) => {
+    const scenario = browserScenarioSchema.parse({
+      browser: {
+        mode: "launch",
+        executable_path: process.execPath,
+        headless: true,
+      },
+      start_url: { url: "https://example.test" },
+      command_timeout_ms: 4_321,
+      actions: scenarioActions,
+    });
+    let profilePath: string | undefined;
+    await expect(
+      openPlaywrightScenarioBrowser(
+        scenario,
+        {},
+        {
+          launcher: {
+            connectOverCDP: async () => {
+              throw new Error("Unexpected connection");
+            },
+            launchPersistentContext: async (profile) => {
+              profilePath = profile;
+              throw failure;
+            },
+          },
+        },
+      ),
+    ).rejects.toBe(failure);
+    expect(profilePath).toBeDefined();
+    await expect(access(profilePath!)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  },
+);
+
+it("normalizes a genuine Playwright launch timeout and releases its profile", async () => {
+  const { errors } = await import("playwright-core");
+  const failure = new errors.TimeoutError("native launch deadline");
+  const scenario = browserScenarioSchema.parse({
+    browser: {
+      mode: "launch",
+      executable_path: process.execPath,
+      headless: true,
+    },
+    start_url: { url: "https://example.test" },
+    command_timeout_ms: 4_321,
+    actions: scenarioActions,
+  });
+  let profilePath: string | undefined;
+  await expect(
+    openPlaywrightScenarioBrowser(
+      scenario,
+      {},
+      {
+        launcher: {
+          connectOverCDP: async () => {
+            throw new Error("Unexpected connection");
+          },
+          launchPersistentContext: async (profile) => {
+            profilePath = profile;
+            throw failure;
+          },
+        },
+      },
+    ),
+  ).rejects.toMatchObject({
+    reason: "timeout",
+    userMessage: expect.stringContaining("4321 ms command_timeout_ms"),
+    cause: failure,
+  });
+  expect(profilePath).toBeDefined();
+  await expect(access(profilePath!)).rejects.toMatchObject({ code: "ENOENT" });
+});

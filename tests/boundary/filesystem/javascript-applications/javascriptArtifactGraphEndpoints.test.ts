@@ -125,3 +125,50 @@ it("preserves partial and exact endpoint identity through graph projection", asy
     await rm(root, { recursive: true, force: true });
   }
 });
+
+it("projects path data records as inferred route candidates", async () => {
+  const root = await createTestTempDirectory("rea-js-route-property-");
+  await writeFile(
+    join(root, "app.js"),
+    'const ops = [{ type: "set", path: "updatedAt", value: 1 }];\n' +
+      'const routes = [{ path: "/settings", component: Settings }];',
+  );
+  const snapshot = await scanCanonicalArtifactInventory(root, {});
+  const reader = createJavaScriptArtifactReader(root, "directory");
+  try {
+    const files = await readJavaScriptArtifactFiles(reader, snapshot);
+    const analysis = analyzeJavaScriptArtifactFiles(files);
+    const graph = buildJavaScriptArtifactGraph(snapshot, files, analysis);
+    const route = (value: string) =>
+      graph.nodes
+        .find(
+          ({ kind, observations }) =>
+            kind === "endpoint" &&
+            observations.some(({ properties }) => properties.value === value),
+        )
+        ?.observations.find(({ properties }) => properties.value === value);
+
+    expect(route("updatedAt")?.properties).toMatchObject({
+      endpoint_kind: "route",
+      mechanism: "property:path",
+      interpretation: "candidate",
+    });
+    expect(route("updatedAt")?.evidence).toMatchObject({
+      authority: "static-relationship-inference",
+      state: "inferred",
+      confidence: "low",
+    });
+    expect(route("updatedAt")?.evidence.limitations).toEqual(
+      expect.arrayContaining([expect.stringContaining("no router fields")]),
+    );
+    expect(route("/settings")?.properties.interpretation).toBeUndefined();
+    expect(route("/settings")?.evidence).toMatchObject({
+      authority: "ast-static-analysis",
+      state: "observed",
+      confidence: "exact",
+    });
+  } finally {
+    await reader.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

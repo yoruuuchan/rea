@@ -20,7 +20,7 @@ import {
   readSkillFile,
   skillDestinations,
 } from "../../../src/application/SetupSkill.js";
-import { RegularFileCleanupFailure } from "../../../src/application/RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../../../src/filesystem/OwnedRegularFile.js";
 import { systemSetupHost } from "../../../src/application/SetupHost.js";
 import {
   runUninstall,

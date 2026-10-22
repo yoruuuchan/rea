@@ -435,7 +435,7 @@ export type FunctionDossier = z.infer<typeof functionDossierSchema>;
 /** Strictly parse a complete provider-neutral function dossier. */
 export const parseFunctionDossier = (
   value: JsonValue,
-): Result<JsonValue, AnalysisOutputError> => {
+): Result<FunctionDossier, AnalysisOutputError> => {
   const parsed = functionDossierSchema.safeParse(value);
   return parsed.success
     ? ok(parsed.data)

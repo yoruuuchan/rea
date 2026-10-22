@@ -88,7 +88,11 @@ identify `cutter_command` and retain `status` in
 `details.diagnostics.auxiliary_operation`; malformed proof still blocks dispatch.
 Descriptor failures likewise retain the requesting operation through cleanup.
 Command admission reports typed cancellation and treats the caller's abort reason
-as opaque metadata, without inferring cleanup ownership from it.
+as opaque metadata, without inferring cleanup ownership from it. A generation
+mismatch is an input correction only when the authenticated reply confirms
+`not_started`. Missing or ambiguous execution state retains the command's
+completion uncertainty until terminal proof arrives, even if the reply names a
+generation error.
 
 ## Configuration and coverage
 

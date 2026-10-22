@@ -4,9 +4,15 @@ import { isAbsolute } from "node:path";
 import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { AnalysisCapabilityUnavailableError } from "../domain/analysisErrorCore.js";
 import type { ArtifactAnalysisResources } from "../process/ArtifactAnalysisResources.js";
+import {
+  BOUNDED_PRODUCER_LIMITS,
+  prlimitCeilingArguments,
+} from "../process/LinuxResourceLimits.js";
 import type { runPcapCommand } from "./PcapCommand.js";
 
 const PRLIMIT_COMMAND_ENV = "REA_TSHARK_PRLIMIT_COMMAND";
+/** Capture CPU ceiling, in seconds. */
+const PCAP_CPU_SECONDS = 300;
 
 /** Own native capture admission and the exact enforced resource profile. */
 export const preparePcapNativeBound = async (
@@ -18,7 +24,9 @@ export const preparePcapNativeBound = async (
 }> => {
   if (process.platform === "win32") {
     return {
-      nativeBound: { memoryLimitBytes: 1024 ** 3 },
+      nativeBound: {
+        memoryLimitBytes: BOUNDED_PRODUCER_LIMITS.address_space_bytes,
+      },
       limitations: [
         "Each owned Windows tool tree has a 1 GiB Job Object committed-memory limit; this is not a machine-wide quota.",
       ],
@@ -41,20 +49,14 @@ export const preparePcapNativeBound = async (
     const limiter = await realpath(configured);
     await access(limiter, constants.X_OK);
     const limits = await resources.readLimits({
-      address_space_bytes: 1024 ** 3,
-      file_bytes: 64 * 1024 ** 2,
-      cpu_seconds: 300,
+      address_space_bytes: BOUNDED_PRODUCER_LIMITS.address_space_bytes,
+      file_bytes: BOUNDED_PRODUCER_LIMITS.file_bytes,
+      cpu_seconds: PCAP_CPU_SECONDS,
     });
     const nativeBound = {
       limiter: {
         command: limiter,
-        arguments: [
-          `--as=${limits.address_space_bytes}:${limits.address_space_bytes}`,
-          `--fsize=${limits.file_bytes}:${limits.file_bytes}`,
-          `--cpu=${limits.cpu_seconds}:${limits.cpu_seconds}`,
-          "--core=0:0",
-          "--",
-        ],
+        arguments: prlimitCeilingArguments(limits),
       },
     };
     const limitations = [

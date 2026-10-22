@@ -13,6 +13,8 @@ import {
   type StateView,
 } from "./environmentStateRules.js";
 import { updatedEntity } from "./environmentStateWriteApply.js";
+import { projectedRead } from "./environmentStateWriteObserve.js";
+import { OmittedFields } from "./environmentStateWriteOmitted.js";
 import {
   checkDocumentRead,
   checkItemRead,
@@ -92,6 +94,8 @@ export class EnvironmentStateWriteSimulation {
   readonly #taint: WriteTaint;
   readonly #touched: TouchedTargets = new Map();
   readonly #effects = new WriteEffects();
+  /** Fields reads show the application leaves out, which serving then does not require. */
+  readonly omitted = new OmittedFields((bytes) => this.#input.io.retain(bytes));
   readonly #lastCheck = new Map<string, number>();
   /** When the latest modelled write to each target since its last check ended. */
   readonly #touchedSince: PendingTargets = new Map();
@@ -178,8 +182,12 @@ export class EnvironmentStateWriteSimulation {
       io: this.#input.io,
       records: this.#input.records,
       timed: this.#input.timed,
-      viewOf: (ordinal) =>
-        this.#input.views.get(this.#toolOf.get(ordinal)?.name ?? ""),
+      viewOf: (ordinal) => {
+        const view = this.#input.views.get(
+          this.#toolOf.get(ordinal)?.name ?? "",
+        );
+        return view === undefined ? undefined : this.omitted.view(view);
+      },
       idField: (type) => this.#types.get(type)!.id_field,
       observed: (ordinal) =>
         this.#observations.set(
@@ -311,9 +319,11 @@ export class EnvironmentStateWriteSimulation {
         checkDocumentRead(this.#state, view.tool, record, body),
       );
     const item = view.shape === "item";
-    const collection = item
-      ? itemTarget(this.#state, view.type, record).collection
-      : line!.collection;
+    const target = item
+      ? itemTarget(this.#state, view.type, record)
+      : undefined;
+    const collection =
+      target === undefined ? line!.collection : target.collection;
     if (this.#taint.under(collection)) return undefined;
     if (!item) {
       const ids = this.#state
@@ -336,10 +346,16 @@ export class EnvironmentStateWriteSimulation {
         idField: this.#types.get(view.type)?.id_field ?? "",
         volatile: this.#input.volatileOf(view.type),
         collection,
+        ...(target === undefined ? {} : { itemId: target.id }),
       };
-      return item
-        ? checkItemRead(this.#state, view, record, check)
-        : checkListRead(this.#state, view, record, { ...check, line: line! });
+      return this.omitted.check(this.#state, view, record, check, (loosened) =>
+        loosened.shape === "item"
+          ? checkItemRead(this.#state, loosened, record, check)
+          : checkListRead(this.#state, loosened, record, {
+              ...check,
+              line: line!,
+            }),
+      );
     });
   }
 
@@ -349,10 +365,12 @@ export class EnvironmentStateWriteSimulation {
   }
 
   #read(record: StateRecordFacts, index: number, tool: StateToolFacts): void {
-    const view = this.#input.views.get(tool.name);
+    const original = this.#input.views.get(tool.name);
+    if (original === undefined) return;
+    const view = this.omitted.view(original);
+    if (projectedRead(view, record, this.#input.io)) return;
     const borrowers = this.#observations.get(record.ordinal);
-    if (view === undefined || (!borrowers && this.#resynced(view, record)))
-      return;
+    if (!borrowers && this.#resynced(view, record)) return;
     let outcome = this.#check(view, record);
     if (outcome === undefined) return;
     let keys = [...outcome.targets, ...outcome.unheld];
@@ -365,6 +383,7 @@ export class EnvironmentStateWriteSimulation {
     if (blocked(keys)) return;
     let exercised = exercisedBy(this.#touched, keys, borrowers);
     if (borrowers !== undefined) {
+      this.omitted.keep(view, outcome);
       if (!outcome.pass)
         this.#contradictOthers(
           exercised,
@@ -384,6 +403,8 @@ export class EnvironmentStateWriteSimulation {
         exercised = exercisedBy(this.#touched, keys, borrowers);
       }
     }
+    // Retain omissions only after the final check's coverage passes the ownership guards.
+    this.omitted.keep(view, outcome);
     const interferes = interference(this.#history, outcome);
     const unseen = outcome.pass
       ? this.#confirm(view, record, outcome, exercised)

@@ -4,9 +4,9 @@ import type { FileHandle } from "node:fs/promises";
 
 import { MANAGED_STATIC_PROVIDER } from "../application/InvestigationProviders.js";
 import { classifyBinaryTargetFilesystemFailure } from "../application/BinaryTargetResolver.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import {
   withRegularFile,
-  RegularFileCleanupFailure,
   type RegularFileReadOptions,
 } from "../application/RegularFileRead.js";
 import { ArtifactReaderFailure } from "../artifacts/ArtifactReader.js";

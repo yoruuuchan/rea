@@ -71,6 +71,7 @@ import { KunaQueryWork } from "./KunaQueryWork.js";
 import { KunaStringQueries } from "./KunaStringQueries.js";
 import { normalizeKunaAddress } from "./KunaAddress.js";
 import type { RegexMatchingDeadline } from "../config/regexMatchingDeadline.js";
+import type { RegexWorkerHeapRequest } from "../config/regexWorkerHeapRequest.js";
 import { KUNA_FUNCTION_TEXT_BYTES } from "./KunaLimits.js";
 import type { KunaRunRelease, KunaRunSlots } from "./KunaRunSlots.js";
 import {
@@ -253,6 +254,7 @@ export class KunaSessionClient implements AnalysisClient {
   readonly #references: KunaReferenceQueries;
   readonly #strings: KunaStringQueries;
   readonly #deadline: RegexMatchingDeadline;
+  readonly #heapRequest: RegexWorkerHeapRequest;
   #installation:
     | SharedStartupAttempt<Result<KunaInstallation, AnalysisError>>
     | undefined;
@@ -285,6 +287,7 @@ export class KunaSessionClient implements AnalysisClient {
       readonly runSlots: KunaRunSlots;
       readonly environment: Readonly<NodeJS.ProcessEnv>;
       readonly deadline: RegexMatchingDeadline;
+      readonly heapRequest: RegexWorkerHeapRequest;
       readonly launcher?: KunaProcessLauncher;
     },
   ) {
@@ -301,6 +304,7 @@ export class KunaSessionClient implements AnalysisClient {
         : { launcher: dependencies.launcher }),
     });
     this.#deadline = dependencies.deadline;
+    this.#heapRequest = dependencies.heapRequest;
     this.#queryWork = new KunaQueryWork(
       this.#commands,
       {
@@ -309,6 +313,7 @@ export class KunaSessionClient implements AnalysisClient {
         runSlots: dependencies.runSlots,
       },
       dependencies.deadline,
+      dependencies.heapRequest,
     );
     this.#references = new KunaReferenceQueries(this.#queryWork);
     this.#strings = new KunaStringQueries(this.#queryWork);
@@ -419,7 +424,7 @@ export class KunaSessionClient implements AnalysisClient {
         );
       return ok(
         this.#execution(
-          kunaLimitations(operation, this.#deadline),
+          kunaLimitations(operation, this.#deadline, this.#heapRequest),
           installation.value,
           answer.value,
         ),
@@ -1271,7 +1276,11 @@ export class KunaSessionClient implements AnalysisClient {
         cfg: unavailable("Kuna exports no basic blocks."),
       },
       limitations: [
-        ...kunaLimitations("analyze_function", this.#deadline),
+        ...kunaLimitations(
+          "analyze_function",
+          this.#deadline,
+          this.#heapRequest,
+        ),
         ...pseudocode.value.limitations,
         KUNA_RELATIONSHIP_LIMITATION,
         ...(relationships.ok

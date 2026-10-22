@@ -2,21 +2,24 @@ import { expect, it } from "vitest";
 
 import { analyzeJavaScriptStaticSource } from "./javascriptStaticAnalysis.js";
 
-it("reads exact route-property templates and leaves interpolated values unknown", () => {
-  const analysis = analyzeJavaScriptStaticSource(`
-    const routes = [
-      { path: \`settings\` },
-      { route: \`users/\${userId}\` },
-      { path: "/login" },
-    ];
-  `);
-
-  expect(
-    analysis.endpoints.map(({ value, mechanism, interpretation }) => ({
+const routeEndpoints = (source: string) =>
+  analyzeJavaScriptStaticSource(source)
+    .endpoints.filter(({ kind }) => kind === "route")
+    .map(({ value, mechanism, interpretation }) => ({
       value,
       mechanism,
       interpretation,
-    })),
+    }));
+
+it("reads exact route-property templates and leaves interpolated values unknown", () => {
+  expect(
+    routeEndpoints(`
+      const routes = [
+        { path: \`settings\`, component: Settings },
+        { route: \`users/\${userId}\`, component: User },
+        { path: "/login", element: login },
+      ];
+    `),
   ).toEqual([
     {
       value: "settings",
@@ -30,3 +33,51 @@ it("reads exact route-property templates and leaves interpolated values unknown"
     },
   ]);
 });
+
+it("keeps route properties on router records exact", () => {
+  expect(
+    routeEndpoints(`
+      const routes = [
+        { path: "admin", children: [] },
+        { _$: "route", path: "typed" },
+      ];
+    `).map(({ value, interpretation }) => [value, interpretation]),
+  ).toEqual([
+    ["admin", undefined],
+    ["typed", undefined],
+  ]);
+});
+
+it("reports path properties outside router records only as candidates", () => {
+  expect(
+    routeEndpoints(`
+      const patch = [{ type: "set", path: "updatedAt", value: 1 }];
+      const worktree = { path: "", head: "" };
+      const routes = [{ path: "/bare" }];
+    `),
+  ).toEqual([
+    {
+      value: "updatedAt",
+      mechanism: "property:path",
+      interpretation: "candidate",
+    },
+    { value: "", mechanism: "property:path", interpretation: "candidate" },
+    {
+      value: "/bare",
+      mechanism: "property:path",
+      interpretation: "candidate",
+    },
+  ]);
+});
+
+it("scans an object's route fields once for repeated path keys", () => {
+  const start = performance.now();
+  const endpoints = routeEndpoints(
+    `const record = { ${Array.from({ length: 20_000 }, (_, i) => `path: "p${String(i)}"`).join(", ")} };`,
+  );
+  expect(endpoints).toHaveLength(20_000);
+  expect(
+    endpoints.every(({ interpretation }) => interpretation === "candidate"),
+  ).toBe(true);
+  expect(performance.now() - start).toBeLessThan(2000);
+}, 30000);

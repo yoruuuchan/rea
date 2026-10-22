@@ -7,6 +7,7 @@ import {
 } from "../../fixtures/firmware/provider.js";
 import { firmwareResultSchemas } from "../../../src/domain/firmware/firmwareAnalysis.js";
 import { FirmwareAnalysisService } from "../../../src/application/firmware/FirmwareAnalysisService.js";
+import { FIRMWARE_LIMITS } from "../../../src/firmware/FirmwareRelease.js";
 import { FirmwareProvider } from "../../../src/firmware/FirmwareProvider.js";
 import { projectAnalysisError } from "../../../src/domain/analysisErrorProjection.js";
 import { AnalysisError } from "../../../src/domain/analysisErrorBase.js";
@@ -109,7 +110,11 @@ it("binds region observations to exact bytes and preserves provider-reported unc
     report: [{ Analysis: { file_map: [{ id: "hit" }] } }],
   });
   expect(fixture.launches[1]?.args).toEqual(
-    expect.arrayContaining(["--as=1073741824", "--threads", "1"]),
+    expect.arrayContaining([
+      `--as=${String(FIRMWARE_LIMITS.addressSpaceBytes)}:${String(FIRMWARE_LIMITS.addressSpaceBytes)}`,
+      "--threads",
+      "1",
+    ]),
   );
   await assertFirmwareCleanup(fixture.launches);
 });

@@ -141,7 +141,7 @@ vi.mock("../../src/application/RegularFileRead.js", async (importOriginal) => {
 
 import { ClientConfigurationPublication } from "../../src/application/ClientConfigurationPublication.js";
 import { configureClientConfiguration } from "../../src/application/SetupClientConfiguration.js";
-import { RegularFileCleanupFailure } from "../../src/application/RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../../src/filesystem/OwnedRegularFile.js";
 import { OwnedFileHandle } from "../../src/filesystem/OwnedFileHandle.js";
 import type { DoctorHost } from "../../src/application/Doctor.js";
 import { systemSetupHost } from "../../src/application/SetupHost.js";

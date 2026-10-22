@@ -1,14 +1,20 @@
 import { ok as javaProbeOk } from "../../../../src/domain/result.js";
 import type { GhidraJavaObservation } from "../../../../src/ghidra/GhidraJavaProbe.js";
-import { mkdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile, readFile, readdir } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { describe, expect, it, onTestFinished } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { ArtifactResourceScope } from "../../../../src/artifacts/ArtifactResourceScope.js";
+import { ArtifactFileCleanupFailure } from "../../../../src/artifacts/ArtifactFileOperation.js";
+import { GhidraLaunchSupportError } from "../../../../src/ghidra/GhidraJavaLaunch.js";
+import { OwnedFileHandle } from "../../../../src/filesystem/OwnedFileHandle.js";
+import { AnalysisCancelledError } from "../../../../src/domain/analysisErrorCore.js";
 
 import { createTestTempDirectory } from "../../../fixtures/temporaryDirectory.js";
 import { createGhidraDiagnostics } from "../../../../src/ghidra/GhidraDiagnostics.js";
 import {
   GhidraHeadlessLauncher,
+  GhidraLaunchError,
   GHIDRA_LAUNCH_COMMAND_OUTPUT_BYTES,
   type GhidraLaunchSession,
 } from "../../../../src/ghidra/GhidraLauncher.js";
@@ -16,6 +22,7 @@ import { bindGhidraSessionFailure } from "../../../../src/ghidra/GhidraSessionEr
 import { spawnOwnedProviderProcess } from "../../../../src/process/ProviderProcess.js";
 import { cleanupOwnedProcessGroup } from "../../../../src/process/ProcessOwnership.js";
 import { waitForAbortableDelay } from "../../../../src/process/ProviderDeadline.js";
+import { execFileOutput } from "../../../../src/process/ExecFileOutput.js";
 import { GhidraProvider } from "../../../../src/ghidra/GhidraProvider.js";
 import { GhidraClient } from "../../../../src/ghidra/GhidraClient.js";
 import { parseConfig } from "../../../../src/config/parseConfig.js";
@@ -52,8 +59,9 @@ if (mode === "env-failure" || (probe === "-vmargs" && mode === "vm-failure")) {
   process.stderr.write("failed " + probe + "\\n");
   process.exitCode = 3;
 } else if (probe === "-envvars") {
-  process.stdout.write(mode === "env-malformed" ? "invalid environment\\n" : mode.startsWith("env-injection:") ? mode.slice("env-injection:".length) + "\\n" : "GHIDRA_MAXMEM=1G\\n");
+  process.stdout.write(mode === "env-malformed" ? "invalid environment\\n" : mode.startsWith("env-injection:") ? mode.slice("env-injection:".length) + "\\n" : mode.startsWith("env-race:") ? "JDK_JAVA_OPTIONS=@" + mode.slice("env-race:".length) + "\\n" : "GHIDRA_MAXMEM=1G\\n");
 } else {
+  if (mode.startsWith("env-race:")) require("node:fs").writeFileSync(mode.slice("env-race:".length), "-Dos.arch=changed_after_admission\\n");
   const vmArguments = mode === "vm-malformed"
     ? "invalid JVM argument\\n"
     : mode === "os-arch-override"
@@ -80,6 +88,9 @@ if (mode === "env-failure" || (probe === "-vmargs" && mode === "vm-failure")) {
     profileDigest: "test",
   };
   const analysisArguments: (readonly string[])[] = [];
+  const analysisEnvironments: NodeJS.ProcessEnv[] = [];
+  const resources = new ArtifactResourceScope();
+  onTestFinished(() => resources.close());
   const controller = new AbortController();
   const launcher = new GhidraHeadlessLauncher({
     environment: { PATH: process.env.PATH ?? "" },
@@ -91,6 +102,7 @@ if (mode === "env-failure" || (probe === "-vmargs" && mode === "vm-failure")) {
     bridgeScriptPath: join(root, "ReaGhidraBridge.java"),
     spawnProcess: async (options) => {
       analysisArguments.push(options.arguments);
+      analysisEnvironments.push(options.env ?? {});
       const spawned = await spawnOwnedProviderProcess({
         ...options,
         command: process.execPath,
@@ -110,7 +122,14 @@ if (mode === "env-failure" || (probe === "-vmargs" && mode === "vm-failure")) {
       return spawned;
     },
   });
-  return { session, launcher, analysisArguments, controller };
+  return {
+    session,
+    launcher,
+    analysisArguments,
+    analysisEnvironments,
+    controller,
+    resources,
+  };
 };
 
 describe.skipIf(process.platform === "win32")(
@@ -406,6 +425,326 @@ describe.skipIf(process.platform === "win32")(
         expect(output.stderr).toContain("explicit credential: [REDACTED]");
         expect(output.stderr).not.toContain(session.token);
         expect(output.stderr_truncated).toBe(false);
+      }
+    });
+  },
+);
+
+describe.skipIf(process.platform === "win32")(
+  "Ghidra LaunchSupport JDK_JAVA_OPTIONS argument files",
+  () => {
+    it.each([
+      '-Dnote="prefix\\"#suffix" -Dos.arch=rea_argfile_probe\n',
+      '"-Dos.ar\\\n    ch=rea_argfile_probe"\n',
+      '"-Dos.ar"discard#comment\n  ch=rea_argfile_probe\n',
+    ])(
+      "rejects effective platform overrides after argfile quoting and continuation: %s",
+      async (text) => {
+        const root = await createTestTempDirectory("rea-ghidra-jdk-grammar-");
+        const optionsFile = join(root, "platform.options");
+        await writeFile(optionsFile, text);
+        const { session, launcher, analysisArguments, resources } =
+          await fixture(`env-injection:JDK_JAVA_OPTIONS=@${optionsFile}`);
+        const launched = await launcher.launch(session, {
+          resourceScope: resources,
+        });
+        expect(launched.ok).toBe(false);
+        expect(analysisArguments).toEqual([]);
+        if (launched.ok)
+          throw new Error("Expected an effective platform override refusal");
+        expect(launched.error.cause).toMatchObject({
+          message: expect.stringContaining(
+            "may not override os.arch or os.name",
+          ),
+        });
+      },
+    );
+
+    it("rejects argument-file platform overrides before starting analysis", async () => {
+      const root = await createTestTempDirectory("rea-ghidra-jdk-argfile-");
+      const optionsFile = join(root, "platform.options");
+      await writeFile(optionsFile, "-Dos.arch=rea_argfile_probe\n");
+      const { session, launcher, analysisArguments, resources } = await fixture(
+        `env-injection:JDK_JAVA_OPTIONS=@${optionsFile}`,
+      );
+      const launched = await launcher.launch(session, {
+        resourceScope: resources,
+      });
+      expect(launched.ok).toBe(false);
+      expect(analysisArguments).toEqual([]);
+      if (launched.ok)
+        throw new Error("Expected a JVM platform override failure");
+      expect(launched.error.cause).toMatchObject({
+        message: expect.stringContaining("may not override os.arch or os.name"),
+      });
+    });
+
+    it("admits an argument file that does not override the platform", async () => {
+      const root = await createTestTempDirectory("rea-ghidra-jdk-argfile-ok-");
+      const optionsFile = join(root, "platform.options");
+      await writeFile(optionsFile, "-Dfile.encoding=UTF8\n");
+      const { session, launcher, analysisArguments, resources } = await fixture(
+        `env-injection:JDK_JAVA_OPTIONS=@${optionsFile}`,
+      );
+      const launched = await launcher.launch(session, {
+        resourceScope: resources,
+      });
+      if (!launched.ok) throw launched.error;
+      expect(analysisArguments).toHaveLength(1);
+    });
+
+    it("rejects an unreadable argument file before starting analysis", async () => {
+      const root = await createTestTempDirectory(
+        "rea-ghidra-jdk-argfile-missing-",
+      );
+      const optionsFile = join(root, "missing.options");
+      const { session, launcher, analysisArguments, resources } = await fixture(
+        `env-injection:JDK_JAVA_OPTIONS=@${optionsFile}`,
+      );
+      const launched = await launcher.launch(session, {
+        resourceScope: resources,
+      });
+      expect(launched.ok).toBe(false);
+      expect(analysisArguments).toEqual([]);
+      if (launched.ok)
+        throw new Error("Expected an unreadable argument-file failure");
+      expect(launched.error.cause).toMatchObject({
+        message: expect.stringContaining("argument file is unreadable"),
+      });
+    });
+
+    it("rejects nested argument-file references before starting analysis", async () => {
+      const root = await createTestTempDirectory(
+        "rea-ghidra-jdk-argfile-nested-",
+      );
+      const nested = join(root, "nested.options");
+      const optionsFile = join(root, "platform.options");
+      await writeFile(nested, "-Dfile.encoding=UTF8\n");
+      await writeFile(optionsFile, `@${nested}\n`);
+      const { session, launcher, analysisArguments, resources } = await fixture(
+        `env-injection:JDK_JAVA_OPTIONS=@${optionsFile}`,
+      );
+      const launched = await launcher.launch(session, {
+        resourceScope: resources,
+      });
+      expect(launched.ok).toBe(false);
+      expect(analysisArguments).toEqual([]);
+      if (launched.ok)
+        throw new Error("Expected a nested argument-file failure");
+      expect(launched.error.cause).toMatchObject({
+        message: expect.stringContaining("may not nest @ references"),
+      });
+    });
+  },
+);
+
+describe.skipIf(process.platform === "win32")(
+  "Ghidra argument-file admission",
+  () => {
+    it.each([false, true])(
+      "keeps @ values literal after expansion was disabled by a file: %s",
+      async (fromFile) => {
+        const root = await createTestTempDirectory(
+          "rea-ghidra-options-disabled-",
+        );
+        const path = join(root, "options.args"),
+          missing = join(root, "literal-classpath");
+        await writeFile(path, "--disable-@files\n");
+        const value = `${fromFile ? `@${path}` : "--disable-@files"} --class-path @${missing}`;
+        const { session, launcher, resources, analysisEnvironments } =
+          await fixture(`env-injection:JDK_JAVA_OPTIONS=${value}`);
+        const result = await launcher.launch(session, {
+          resourceScope: resources,
+        });
+        if (!result.ok) throw result.error;
+        expect(analysisEnvironments[0]?.JDK_JAVA_OPTIONS).toContain(missing);
+        const snapshots = (await readdir(session.runtimeRoot)).filter((name) =>
+          name.startsWith("rea-jdk-options-"),
+        );
+        expect(snapshots).toHaveLength(fromFile ? 1 : 0);
+      },
+    );
+
+    it.each([100, 40000])(
+      "counts repeated references within the cumulative byte budget: %s",
+      async (size) => {
+        const root = await createTestTempDirectory(
+          "rea-ghidra-options-repeat-",
+        );
+        const path = join(root, "options.args");
+        await writeFile(path, " ".repeat(size));
+        const { session, launcher, resources, analysisArguments } =
+          await fixture(`env-injection:JDK_JAVA_OPTIONS=@${path} @${path}`);
+        const result = await launcher.launch(session, {
+          resourceScope: resources,
+        });
+        expect(result.ok).toBe(size * 2 <= 65536);
+        expect(analysisArguments).toHaveLength(result.ok ? 1 : 0);
+        const snapshots = (await readdir(session.runtimeRoot)).filter((name) =>
+          name.startsWith("rea-jdk-options-"),
+        );
+        expect(snapshots).toHaveLength(1);
+      },
+    );
+
+    it.each([
+      { label: "oversized", content: Buffer.alloc(65537, 32) },
+      { label: "invalid UTF-8", content: Buffer.from([255]) },
+    ])(
+      "refuses $label input without starting analysis",
+      async ({ content }) => {
+        const root = await createTestTempDirectory(
+          "rea-ghidra-options-admission-",
+        );
+        const path = join(root, "options.args");
+        await writeFile(path, content);
+        const { session, launcher, resources, analysisArguments } =
+          await fixture(`env-injection:JDK_JAVA_OPTIONS=@${path}`);
+        const result = await launcher.launch(session, {
+          resourceScope: resources,
+        });
+        expect(result.ok).toBe(false);
+        expect(analysisArguments).toEqual([]);
+        expect(resources.hasPending).toBe(false);
+      },
+    );
+
+    it("refuses a named pipe without blocking an owned file read", async () => {
+      const root = await createTestTempDirectory("rea-ghidra-options-pipe-");
+      const path = join(root, "options.args");
+      await execFileOutput("mkfifo", [path], { maxBuffer: 1024 });
+      const { session, launcher, resources, analysisArguments } = await fixture(
+        `env-injection:JDK_JAVA_OPTIONS=@${path}`,
+      );
+      const result = await launcher.launch(session, {
+        resourceScope: resources,
+      });
+      expect(result.ok).toBe(false);
+      expect(analysisArguments).toEqual([]);
+      expect(resources.hasPending).toBe(false);
+    }, 5000);
+  },
+);
+
+describe.skipIf(process.platform === "win32")(
+  "Ghidra argument-file ownership",
+  () => {
+    it("launches with admitted bytes rather than reopening a file changed by the next helper", async () => {
+      const root = await createTestTempDirectory(
+        "rea-ghidra-options-snapshot-",
+      );
+      const path = join(root, "options.args");
+      const content = '-Dnote="retained\\"#literal"\n';
+      await writeFile(path, content);
+      const { session, launcher, resources, analysisEnvironments } =
+        await fixture(`env-race:${path}`);
+      const result = await launcher.launch(session, {
+        resourceScope: resources,
+      });
+      if (!result.ok) throw result.error;
+      expect(await readFile(path, "utf8")).toContain("changed_after_admission");
+      expect(analysisEnvironments[0]?.JDK_JAVA_OPTIONS).not.toContain(path);
+      const snapshots = (await readdir(session.runtimeRoot)).filter((name) =>
+        name.startsWith("rea-jdk-options-"),
+      );
+      expect(snapshots).toHaveLength(1);
+      expect(
+        await readFile(join(session.runtimeRoot, snapshots[0]!), "utf8"),
+      ).toBe(content);
+    });
+
+    it.each([false, true])(
+      "retains the exact failed close owner alongside an invalid-read fact: %s",
+      async (invalid) => {
+        const root = await createTestTempDirectory("rea-ghidra-options-close-");
+        const path = join(root, "options.args");
+        await writeFile(
+          path,
+          invalid ? "-Dos.arch=invalid\n" : "-Dnote=valid\n",
+        );
+        const { session, launcher, resources, analysisArguments } =
+          await fixture(`env-injection:JDK_JAVA_OPTIONS=@${path}`);
+        const close = OwnedFileHandle.prototype.close;
+        let denied: OwnedFileHandle | undefined;
+        const calls: OwnedFileHandle[] = [];
+        const spy = vi
+          .spyOn(OwnedFileHandle.prototype, "close")
+          .mockImplementation(async function (this: OwnedFileHandle) {
+            calls.push(this);
+            if (denied === undefined) {
+              denied = this;
+              throw new Error("controlled file close denial");
+            }
+            await close.call(this);
+          });
+        try {
+          const result = await launcher.launch(session, {
+            resourceScope: resources,
+          });
+          expect(result.ok).toBe(false);
+          expect(analysisArguments).toEqual([]);
+          expect(resources.hasPending).toBe(true);
+          if (
+            result.ok ||
+            !(result.error.cause instanceof GhidraLaunchSupportError)
+          )
+            throw new Error("Expected a retained argument-file failure");
+          const cleanup = result.error.cause.cause;
+          if (!(cleanup instanceof ArtifactFileCleanupFailure))
+            throw new Error("Expected the exact artifact file owner");
+          expect(cleanup.fileCleanupFailure.owner).toBe(denied);
+          expect(cleanup.fileCleanupFailure.outcome.kind).toBe(
+            invalid ? "failed" : "completed",
+          );
+          if (cleanup.fileCleanupFailure.outcome.kind === "failed")
+            expect(cleanup.fileCleanupFailure.outcome.cause).toMatchObject({
+              message: expect.stringContaining(
+                "may not override os.arch or os.name",
+              ),
+            });
+          await resources.retryCleanup();
+          expect(resources.hasPending).toBe(false);
+          expect(calls).toEqual([denied, denied]);
+        } finally {
+          spy.mockRestore();
+          await resources.close();
+        }
+      },
+    );
+
+    it("preserves an abort observed during final descriptor close", async () => {
+      const root = await createTestTempDirectory(
+        "rea-ghidra-options-late-abort-",
+      );
+      const path = join(root, "options.args");
+      await writeFile(path, "-Dnote=valid\n");
+      const { session, launcher, resources, analysisArguments, controller } =
+        await fixture(`env-injection:JDK_JAVA_OPTIONS=@${path}`);
+      const reason = { phase: "argument-file close" };
+      const close = OwnedFileHandle.prototype.close;
+      const spy = vi
+        .spyOn(OwnedFileHandle.prototype, "close")
+        .mockImplementation(async function (this: OwnedFileHandle) {
+          await close.call(this);
+          controller.abort(reason);
+        });
+      try {
+        const result = await launcher.launch(session, {
+          resourceScope: resources,
+          signal: controller.signal,
+        });
+        expect(result.ok).toBe(false);
+        if (result.ok || !(result.error instanceof GhidraLaunchError))
+          throw new Error("Expected a typed launch cancellation");
+        expect(result.error.primaryFailure).toBeInstanceOf(
+          AnalysisCancelledError,
+        );
+        expect(result.error.primaryFailure?.cause).toBe(reason);
+        expect(analysisArguments).toEqual([]);
+        expect(resources.hasPending).toBe(false);
+      } finally {
+        spy.mockRestore();
+        await resources.close();
       }
     });
   },

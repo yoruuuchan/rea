@@ -1,6 +1,12 @@
 import { expect, it } from "vitest";
 
 import {
+  deriveProcessComparisonStatus,
+  PROCESS_COMPARISON_DIMENSIONS,
+  processCaptureComparisonSchema,
+} from "./processComparison.js";
+
+import {
   accountFullyObservedProcessCapture,
   compareUnverifiedProcessCaptures as compareProcessCaptures,
   emptyProcessCapture as emptyCapture,
@@ -16,6 +22,58 @@ const compareFullyObserved = (
     accountFullyObservedProcessCapture(right),
     options,
   );
+
+it.each(PROCESS_COMPARISON_DIMENSIONS)(
+  "requires a contradiction aggregate for a contradictory %s dimension",
+  (dimension) => {
+    const baseline = compareFullyObserved(emptyCapture(), emptyCapture());
+    const result = { ...baseline, [dimension]: "contradiction" as const };
+    expect(
+      deriveProcessComparisonStatus(
+        PROCESS_COMPARISON_DIMENSIONS.map((name) => result[name]),
+      ),
+    ).toBe("contradiction");
+    expect(processCaptureComparisonSchema.safeParse(result).success).toBe(
+      false,
+    );
+    expect(
+      processCaptureComparisonSchema.parse({
+        ...result,
+        status: "contradiction",
+      }),
+    ).toMatchObject({ status: "contradiction", [dimension]: "contradiction" });
+  },
+);
+
+it.each([
+  ["unchanged", "contradiction"],
+  ["added", "contradiction"],
+  ["removed", "contradiction"],
+  ["changed", "contradiction"],
+  ["unknown", "contradiction"],
+  ["contradiction", "contradiction"],
+  ["truncated", "truncated"],
+] as const)(
+  "combines contradiction with %s as %s independently of dimension order",
+  (other, expected) => {
+    for (const [terminal, interaction] of [
+      ["contradiction", other],
+      [other, "contradiction"],
+    ] as const) {
+      expect(deriveProcessComparisonStatus([terminal, interaction])).toBe(
+        expected,
+      );
+      expect(
+        processCaptureComparisonSchema.parse({
+          ...compareFullyObserved(emptyCapture(), emptyCapture()),
+          terminal,
+          interaction,
+          status: expected,
+        }),
+      ).toMatchObject({ status: expected });
+    }
+  },
+);
 
 it("compares normalized terminal facts while retaining different source text for audit", () => {
   const capture = emptyCapture();

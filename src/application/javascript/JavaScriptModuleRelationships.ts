@@ -38,7 +38,7 @@ import {
 } from "./JavaScriptArtifactPathResolution.js";
 import { projectJavaScriptExportReturnShapes } from "../../domain/javascript/javascriptExportReturnShapeProjection.js";
 
-import type { JavaScriptModuleSemanticIr } from "./JavaScriptArtifactAnalysisTypes.js";
+import type { JavaScriptModuleSemanticIr } from "../../domain/javascript/javascriptModuleSemanticIr.js";
 
 interface SemanticAnalysis {
   readonly ir: JavaScriptModuleSemanticIr;

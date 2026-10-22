@@ -5,6 +5,7 @@ import {
 import { z } from "zod";
 
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
+import { translateArtifactFailure } from "../../artifacts/ArtifactOperationFailure.js";
 import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import {
   analyzeJavaScriptApplicationInputSchema,
@@ -144,7 +145,7 @@ export const analyzeJavaScriptApplicationValidated = async (
             result,
           );
         return err(
-          artifactFailureToOperationError(cause).retainPartialObservation(
+          translateArtifactFailure(OPERATION, cause).retainPartialObservation(
             evidence,
           ),
         );
@@ -157,7 +158,7 @@ export const analyzeJavaScriptApplicationValidated = async (
     // Preserve execution constraints and their completed partial Evidence.
     if (cause instanceof AnalysisError) return err(cause);
     if (cause instanceof ArtifactReaderFailure)
-      return err(artifactFailureToOperationError(cause));
+      return err(translateArtifactFailure(OPERATION, cause));
     if (cause instanceof z.ZodError)
       return err(
         new AnalysisOutputError(OPERATION, describeResultSchemaFailure(cause), {
@@ -188,24 +189,6 @@ export const analyzeJavaScriptApplicationValidated = async (
     );
   }
 };
-
-const artifactFailureToOperationError = (
-  cause: ArtifactReaderFailure,
-): ArtifactOperationError =>
-  new ArtifactOperationError(
-    OPERATION,
-    cause.reason,
-    cause.details,
-    cause.message,
-    {
-      cause,
-      ...(cause.cleanup === undefined ? {} : { cleanup: cause.cleanup }),
-      ...(cause.partialObservation === undefined
-        ? {}
-        : { partialObservation: cause.partialObservation }),
-      ...(cause.admission === undefined ? {} : { admission: cause.admission }),
-    },
-  );
 
 const describeResultSchemaFailure = (cause: z.ZodError): string => {
   const issue = cause.issues[0];

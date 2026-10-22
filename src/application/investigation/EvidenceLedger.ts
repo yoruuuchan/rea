@@ -1,4 +1,5 @@
 import canonicalize from "canonicalize";
+import { z } from "zod";
 
 import {
   createEvidenceBundle,
@@ -23,6 +24,7 @@ import {
 import { err, ok, type Result } from "../../domain/result.js";
 import { compareUnicodeCodePoints } from "../../domain/unicodeCodePointOrder.js";
 import type { UnknownPage, UnknownQuery } from "./InvestigationRecordPort.js";
+import { requestInputError } from "../workflowInputError.js";
 
 type EvidenceLedgerFailure = EvidenceIntegrityError;
 type RecordResult = Result<"added" | "duplicate", EvidenceLedgerFailure>;
@@ -213,7 +215,10 @@ export class EvidenceLedger {
   recordUnknown(
     input: RecordUnknownInput,
     mutationEvidence: Evidence,
-  ): Result<ResidualUnknown, EvidenceIntegrityError | UnknownRegistryError> {
+  ): Result<
+    ResidualUnknown,
+    EvidenceIntegrityError | UnknownRegistryError | AnalysisInputError
+  > {
     let parsedMutation: Evidence;
     try {
       parsedMutation = immutableEvidence(mutationEvidence);
@@ -232,7 +237,7 @@ export class EvidenceLedger {
         parsedMutation.subject?.digest.sha256 ?? null,
       );
     } catch (cause: unknown) {
-      return err(new UnknownRegistryError("invalid-transition", { cause }));
+      return err(unknownInputError("record_unknown", cause, input));
     }
     if (this.#unknownHeads.has(unknown.unknown_id))
       return err(new UnknownRegistryError("already-exists"));
@@ -295,7 +300,10 @@ export class EvidenceLedger {
   updateUnknown(
     input: UpdateUnknownInput,
     mutationEvidence: Evidence,
-  ): Result<ResidualUnknown, EvidenceIntegrityError | UnknownRegistryError> {
+  ): Result<
+    ResidualUnknown,
+    EvidenceIntegrityError | UnknownRegistryError | AnalysisInputError
+  > {
     const current = this.#unknownHeads.get(input.unknown_id);
     if (current === undefined)
       return err(new UnknownRegistryError("not-found"));
@@ -309,7 +317,7 @@ export class EvidenceLedger {
         mutationEvidence.evidence_id,
       );
     } catch (cause: unknown) {
-      return err(new UnknownRegistryError("invalid-transition", { cause }));
+      return err(unknownInputError("update_unknown", cause, input));
     }
     return this.#appendUnknown(unknown, mutationEvidence);
   }
@@ -476,6 +484,16 @@ export class EvidenceLedger {
     }
   }
 }
+
+/** A caller's unknown that fails its schema is an input mistake, not a state change. */
+const unknownInputError = (
+  operation: "record_unknown" | "update_unknown",
+  cause: unknown,
+  input: RecordUnknownInput | UpdateUnknownInput,
+): UnknownRegistryError | AnalysisInputError =>
+  cause instanceof z.ZodError
+    ? requestInputError(operation, cause, input)
+    : new UnknownRegistryError("invalid-transition", { cause });
 
 const unknownRevisionKey = (unknown: ResidualUnknown): string =>
   `${unknown.unknown_id}:${String(unknown.revision)}`;

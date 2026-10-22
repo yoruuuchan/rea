@@ -67,10 +67,8 @@ const SOURCE_MAP_OUTPUT_BYTES = WEB_SOURCE_MAP_LIMITS.outputBytes;
 const SOURCE_MAP_FAILURE_LIMITATION_RESERVE = 512;
 const SOURCE_MAP_COLLECTION_ENVELOPE_RESERVE = 1_024;
 
-type SourceMaps = WebSourceMaps;
-type SourceMapItem = WebSourceMapItem;
 type ParsedSourceMapItem = Extract<
-  SourceMapItem,
+  WebSourceMapItem,
   { status: "included" | "partial" }
 >;
 interface SourceMapDecodeContext {
@@ -90,7 +88,7 @@ export const fetchWebSourceMaps = async (
   input: AnalyzeWebBundleInput,
   signal?: AbortSignal,
   host: SourceMapFetchHost = { fetch: globalThis.fetch },
-): Promise<SourceMaps> => {
+): Promise<WebSourceMaps> => {
   throwIfAborted(signal);
   if (requests.length === 0)
     return webSourceMapsSchema.parse({
@@ -99,7 +97,7 @@ export const fetchWebSourceMaps = async (
       processed: 0,
       items: [],
     });
-  const items: SourceMapItem[] = [];
+  const items: WebSourceMapItem[] = [];
   const operationController = new AbortController();
   const fetchTimeoutMs =
     host.timeoutMs ??
@@ -203,9 +201,9 @@ const sourceMapOutputLimitation = (unprocessed: number): string =>
   `source-map output budget could not retain results for ${String(unprocessed)} requested map${unprocessed === 1 ? "" : "s"}. their results are unknown.`;
 
 const sourceMapsStatus = (
-  items: readonly SourceMapItem[],
+  items: readonly WebSourceMapItem[],
   omitted: boolean,
-): SourceMaps["status"] => {
+): WebSourceMaps["status"] => {
   const retained = items.filter(
     ({ status }) => status === "included" || status === "partial",
   ).length;
@@ -264,7 +262,7 @@ const fetchOne = async (
       resolvedSourceBytes: number;
     };
   },
-): Promise<SourceMapItem> => {
+): Promise<WebSourceMapItem> => {
   if (!approvedUrl(request.fetchUrl, input.allowed_origins))
     return emptySourceMapItem(
       request,
@@ -563,7 +561,7 @@ const normalizeSourceMap = (
   text: string,
   fetchedUrl: string,
   context: SourceMapDecodeContext,
-): SourceMapItem => {
+): WebSourceMapItem => {
   const parsedJson = safeParseJson(sourceMapJsonText(text));
   if (!parsedJson.ok)
     return emptySourceMapItem(
@@ -886,10 +884,10 @@ const sourceMapContext = (
 
 const emptySourceMapItem = (
   request: WebSourceMapRequest,
-  status: Extract<SourceMapItem, { readonly artifact: null }>["status"],
+  status: Extract<WebSourceMapItem, { readonly artifact: null }>["status"],
   limitation: string,
   effectiveUrl: string | null = null,
-): Extract<SourceMapItem, { readonly artifact: null }> => ({
+): Extract<WebSourceMapItem, { readonly artifact: null }> => ({
   ...sourceMapContext(request, effectiveUrl),
   status,
   artifact: null,
@@ -1023,7 +1021,7 @@ const sourceMapFailureReservation = (
   effectiveUrl: string | null = null,
   limitation?: string,
   status: Extract<
-    SourceMapItem,
+    WebSourceMapItem,
     { readonly artifact: null }
   >["status"] = "fetch_failed",
 ): number =>

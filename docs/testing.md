@@ -26,6 +26,14 @@ behavior, and complete CI evidence before merging.
 | `npm run check:pr`                | Opt-in complete local deterministic gate and generated-file checks                                                      |
 | `npm run docs:check`              | Generated-document validation and fresh onboarding example consistency checks                                           |
 
+The general source suite above runs on Linux in CI, and Windows CI runs a
+curated lane ([Native platform baseline in CI](#native-platform-baseline-in-ci)).
+A Windows source checkout can fail source tests for reasons unrelated to the
+change, such as POSIX fixture paths, `#!/bin/sh` tool stubs, or POSIX rename
+semantics. Compare failures against the base revision, or run the suite on
+Linux or WSL, before attributing them to a change. See `CONTRIBUTING.md` →
+Windows source checkouts.
+
 For example:
 
 ```bash
@@ -1493,14 +1501,19 @@ fallback weight for new files, rather than dividing only by file count.
 Each file keeps its full duration on one worker. Extra workers overlap other
 files in the same sequence group, and `process-boundary` runs after that
 group. History published before the competing-loader split still names only
-`javascriptLiteralPercentPaths.test.ts`. Until that artifact records one of
-the three new files, the sequencer assigns that recorded duration by the
-pre-split case counts: 54/192 to the remaining file and 46/192 to each new
-file. Every discovered file still belongs to exactly one shard; worker limits
-and project ordering remain unchanged. Fast qualification keeps eight built
-shards without coverage. The merge job rejects successful reports with missing,
-unexpected, or duplicate portable files. Coverage instrumentation and aggregate
-thresholds remain enforced in full qualification.
+`javascriptLiteralPercentPaths.test.ts`. Until an artifact records
+`javascriptLiteralLoaderOwnership.test.ts`, the sequencer assigns that
+recorded duration by the pre-split case counts: 54/192 stays with the
+percent-path file and 138/192 goes to the consolidated loader file. History
+that names the retired Early, Middle, and Late shards sums those durations
+onto the consolidated file instead, and scales a partial set as three equal
+shares. That weight is the old dual-surface cost. The demoted file runs every
+loader once through the shared stdio MCP session, so the first schedule
+overestimates it. Every discovered file still belongs to exactly one shard;
+worker limits and project ordering remain unchanged. Fast qualification keeps
+eight built shards without coverage. The merge job rejects successful reports
+with missing, unexpected, or duplicate portable files. Coverage instrumentation
+and aggregate thresholds remain enforced in full qualification.
 Missing or unusable history falls back to Vitest's default assignment. Only
 timing data is reused; live provider results are never cached. Turbo outputs are
 restored by task hash, with trusted default-branch runs as cache writers and PRs

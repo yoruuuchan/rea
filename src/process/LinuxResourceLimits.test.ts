@@ -11,6 +11,7 @@ import {
   BOUNDED_PRODUCER_LIMITS,
   clampLinuxResourceLimits,
   prlimitArgumentVector,
+  prlimitCeilingArguments,
   readLinuxResourceLimits,
 } from "./LinuxResourceLimits.js";
 
@@ -87,9 +88,11 @@ it("pins the shared producer budget in one place", () => {
   });
 });
 it("pairs each effective ceiling with itself before the producer argv", () => {
-  expect(
-    prlimitArgumentVector(BOUNDED_PRODUCER_LIMITS, "/bin/producer"),
-  ).toEqual([
+  const vector = prlimitArgumentVector(
+    BOUNDED_PRODUCER_LIMITS,
+    "/bin/producer",
+  );
+  expect(vector).toEqual([
     "--as=1073741824:1073741824",
     "--fsize=67108864:67108864",
     "--cpu=30:30",
@@ -97,6 +100,9 @@ it("pairs each effective ceiling with itself before the producer argv", () => {
     "--",
     "/bin/producer",
   ]);
+  expect(prlimitCeilingArguments(BOUNDED_PRODUCER_LIMITS)).toEqual(
+    vector.slice(0, -1),
+  );
   expect(
     prlimitArgumentVector(
       clampLinuxResourceLimits(BOUNDED_PRODUCER_LIMITS, report("10 20")),

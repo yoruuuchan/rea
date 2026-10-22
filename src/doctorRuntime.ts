@@ -120,7 +120,15 @@ const inspectLinuxHopperDemoRuntime = async (
   const selection = await selectLinuxPrivateDisplayStrategy({
     helperPath: HOPPER_DEMO_HELPER_PATH,
     environment,
+    ...(signal === undefined ? {} : { signal }),
   });
+  if (signal?.aborted === true)
+    throw new AnalysisCancelledError("doctor", {
+      cause: signal.reason,
+      diagnostics: {
+        hopper_demo_runtime: { private_display: { ...selection.diagnostic } },
+      },
+    });
   const python = await inspectLinuxHopperPythonRuntime(environment, signal);
   const pythonFailure = !python.ok
     ? python.error

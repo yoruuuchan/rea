@@ -7,7 +7,6 @@ import {
   AnalysisAccessDeniedError,
   AnalysisArtifactChangedError,
   AnalysisCancelledError,
-  AnalysisCapabilityUnavailableError,
   AnalysisInputError,
   AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
@@ -21,7 +20,10 @@ import {
   sameRegularFileState,
 } from "../filesystem/RegularFile.js";
 import { PrivateRuntimeRoot } from "../process/PrivateRuntimeRoot.js";
-import { PrivateRuntimeRootUnavailableError } from "../process/PrivateRuntimeRootUnavailableError.js";
+import {
+  RuntimeControlUnavailableError,
+  runtimeControlCapabilityError,
+} from "../process/RuntimeControlUnavailableError.js";
 import { privateWorkspaceFailure } from "../process/privateWorkspaceFailure.js";
 
 const OPERATION = "inspect_pcap_capture";
@@ -47,13 +49,8 @@ export class PcapSnapshot {
         await PrivateRuntimeRoot.create({ prefix: "rea-pcap-" }),
       );
     } catch (cause) {
-      if (cause instanceof PrivateRuntimeRootUnavailableError)
-        throw new AnalysisCapabilityUnavailableError(
-          "pcap",
-          OPERATION,
-          cause.message,
-          { cause, retryable: cause.retryable },
-        );
+      if (cause instanceof RuntimeControlUnavailableError)
+        throw runtimeControlCapabilityError("pcap", OPERATION, cause);
       throw privateWorkspaceFailure("pcap", OPERATION, cause, null);
     }
   }

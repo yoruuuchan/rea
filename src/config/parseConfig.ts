@@ -5,6 +5,7 @@ import { ok, type Result } from "../domain/result.js";
 import { parseEnvironment } from "./environment.js";
 import { homeDirectoryFromEnvironment } from "./homeDirectory.js";
 import { DEFAULT_REGEX_MATCHING_DEADLINE } from "./regexMatchingDeadline.js";
+import { DEFAULT_REGEX_WORKER_HEAP_REQUEST } from "./regexWorkerHeapRequest.js";
 import type { AppConfig } from "./types.js";
 import {
   linuxHopperLauncherCandidates,
@@ -127,6 +128,13 @@ export const parseConfig = (
         ? DEFAULT_REGEX_MATCHING_DEADLINE
         : {
             deadlineMs: env.REA_REGEX_MATCHING_DEADLINE_MS,
+            source: "setting",
+          },
+    regexWorkerHeapRequest:
+      env.REA_REGEX_WORKER_HEAP_REQUEST_MIB === undefined
+        ? DEFAULT_REGEX_WORKER_HEAP_REQUEST
+        : {
+            heapMiB: env.REA_REGEX_WORKER_HEAP_REQUEST_MIB,
             source: "setting",
           },
   });

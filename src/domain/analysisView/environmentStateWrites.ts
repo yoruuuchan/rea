@@ -24,20 +24,28 @@ const clockStart = (
     : null;
 };
 
-/** The write plans a capture's own timeline confirms against an extracted state, and the served clock's start. */
+/**
+ * The write plans a capture's own timeline confirms against an extracted state, the served clock's
+ * start, and the views without the fields reads showed the application leaves out.
+ */
 export const extractWrites = (
   state: Pick<ExtractedState, "views" | "types" | "entities" | "documents">,
   input: Omit<
     WriteSimulationInput,
     "views" | "types" | "entities" | "documents"
   >,
-): Pick<ExtractedState, "writes" | "write_clock"> => ({
-  writes: new EnvironmentStateWriteSimulation({
+): Pick<ExtractedState, "writes" | "write_clock" | "views"> => {
+  const simulation = new EnvironmentStateWriteSimulation({
     ...input,
     views: new Map(state.views.map((view) => [view.tool, view])),
     types: state.types,
     entities: state.entities,
     documents: state.documents,
-  }).run(),
-  write_clock: clockStart(input.records, input.timed),
-});
+  });
+  const writes = simulation.run();
+  return {
+    writes,
+    write_clock: clockStart(input.records, input.timed),
+    views: simulation.omitted.views(state.views),
+  };
+};

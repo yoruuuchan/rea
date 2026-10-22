@@ -21,7 +21,7 @@ import {
 } from "../../../../src/dotnet/ManagedSnapshot.js";
 import { OwnedFileHandle } from "../../../../src/filesystem/OwnedFileHandle.js";
 import { ArtifactResourceScope } from "../../../../src/artifacts/ArtifactResourceScope.js";
-import { RegularFileCleanupFailure } from "../../../../src/application/RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../../../../src/filesystem/OwnedRegularFile.js";
 import { projectAnalysisError } from "../../../../src/domain/analysisErrorProjection.js";
 import * as boundedFileBytes from "../../../../src/process/BoundedFileBytes.js";
 

@@ -24,18 +24,25 @@ export const BOUNDED_PRODUCER_LIMITS = {
   cpu_seconds: 30,
 } as const;
 
-/** Pin soft and hard ceilings together, then hand the producer argv to the limiter. */
-export const prlimitArgumentVector = (
+/**
+ * Pin soft and hard ceilings together, ending at the prlimit option terminator.
+ * Callers that append the producer command themselves use this prefix.
+ */
+export const prlimitCeilingArguments = (
   limits: LinuxResourceLimits,
-  command: string,
 ): string[] => [
   `--as=${limits.address_space_bytes}:${limits.address_space_bytes}`,
   `--fsize=${limits.file_bytes}:${limits.file_bytes}`,
   `--cpu=${limits.cpu_seconds}:${limits.cpu_seconds}`,
   "--core=0:0",
   "--",
-  command,
 ];
+
+/** Pin soft and hard ceilings together, then hand the producer argv to the limiter. */
+export const prlimitArgumentVector = (
+  limits: LinuxResourceLimits,
+  command: string,
+): string[] => [...prlimitCeilingArguments(limits), command];
 
 /** Never raise either inherited soft policy or hard ceiling. */
 export const clampLinuxResourceLimits = (

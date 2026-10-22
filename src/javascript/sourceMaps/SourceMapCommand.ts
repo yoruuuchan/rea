@@ -6,7 +6,6 @@ import type { ExecutionOptions } from "../../application/AnalysisProvider.js";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   AnalysisCancelledError,
-  AnalysisCapabilityUnavailableError,
   AnalysisOutputError,
   AnalysisResourceConstraintError,
   AnalysisTimeoutError,
@@ -22,7 +21,10 @@ import {
   webSourceMapDecodeTimeoutRecovery,
 } from "../../domain/webSourceLocation.js";
 import { PrivateRuntimeRoot } from "../../process/PrivateRuntimeRoot.js";
-import { PrivateRuntimeRootUnavailableError } from "../../process/PrivateRuntimeRootUnavailableError.js";
+import {
+  RuntimeControlUnavailableError,
+  runtimeControlCapabilityError,
+} from "../../process/RuntimeControlUnavailableError.js";
 import { ProviderStartupDeadline } from "../../process/ProviderDeadline.js";
 import { javaScriptWorkerMemoryLimitBytes } from "../../process/JavaScriptWorkerMemoryLimit.js";
 import { cleanupOwnedProcessGroup } from "../../process/ProcessOwnership.js";
@@ -310,13 +312,8 @@ class OwnedCodec implements SourceMapCleanupOwner {
         webSourceMapDecodeTimeoutRecovery(this.decodeTimeoutMs),
       );
     if (cause instanceof AnalysisError) return cause;
-    return cause instanceof PrivateRuntimeRootUnavailableError
-      ? new AnalysisCapabilityUnavailableError(
-          PROVIDER,
-          OPERATION,
-          cause.message,
-          { cause, retryable: cause.retryable },
-        )
+    return cause instanceof RuntimeControlUnavailableError
+      ? runtimeControlCapabilityError(PROVIDER, OPERATION, cause)
       : new ProviderAdapterError(PROVIDER, OPERATION, {
           cause,
           diagnostics: { map_path: this.path, error_message: message(cause) },

@@ -1,3 +1,4 @@
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { readClientPolicyBlock } from "./GeminiClientSettings.js";
 import { readEffectiveClientRegistrationConfiguration } from "./ClientConfigurationFiles.js";
 import {
@@ -13,7 +14,6 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { valid } from "semver";
 
-import { RegularFileCleanupFailure } from "./RegularFileRead.js";
 import { PRODUCT_IDENTITY } from "../identity.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import { CURRENT_ENTRYPOINT_PATH } from "../process/CurrentEntrypointPath.js";

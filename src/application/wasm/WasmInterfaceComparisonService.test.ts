@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
-import { createEvidence } from "../../domain/evidence.js";
+import { setImmediate as nextTurn } from "node:timers/promises";
+import { createEvidence, parseEvidence } from "../../domain/evidence.js";
 import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 import { wasmInterfaceComparisonSchema } from "../../contracts/wasm/wasmComparisonContracts.js";
 import { compareWasmInterfaces } from "./WasmInterfaceComparisonService.js";
@@ -173,15 +174,17 @@ it("resolves exact retained references and permits cancellation between comparis
     ...Array.from({ length: 2000 }, (_, i) => facts(`f${i}`).entries[0]!),
   );
   const controller = new AbortController();
+  const reason = { request: "cancel between interface batches" };
   const pending = compareWasmInterfaces(
     { left: evidence(large), right: evidence(large), scope: "both" },
     { signal: controller.signal },
   );
-  setImmediate(() => controller.abort());
-  expect(await pending).toMatchObject({
-    ok: false,
-    error: { _tag: "AnalysisCancelledError" },
-  });
+  setImmediate(() => controller.abort(reason));
+  const cancelled = await pending;
+  if (cancelled.ok) throw new Error("Expected cancellation between batches");
+  expect(cancelled.error).toMatchObject({ _tag: "AnalysisCancelledError" });
+  expect(cancelled.error.cause).toBe(reason);
+  expect(cancelled.error.partialObservation).toBeUndefined();
 });
 
 /** One inventory under the comparison cap; two of them exceed it together. */
@@ -267,3 +270,47 @@ it.each([false, true])(
     );
   },
 );
+
+it("preserves the caller reason when comparison admission is already cancelled", async () => {
+  const left = evidence(facts("f"));
+  const right = evidence(facts("f"));
+  const reason = { request: "cancel before comparison" };
+  const preAborted = await compareWasmInterfaces(
+    { left, right, scope: "both" },
+    { signal: AbortSignal.abort(reason) },
+  );
+  if (preAborted.ok) throw new Error("Expected cancellation before comparison");
+  expect(preAborted.error.cause).toBe(reason);
+});
+
+it("retains the complete comparison when cancelled at the final handoff", async () => {
+  const left = evidence(facts("changed"));
+  const right = evidence(facts("changed", "i64"));
+  const reason = { request: "cancel completed comparison" };
+  const controller = new AbortController();
+  const pending = compareWasmInterfaces(
+    { left, right, scope: "both" },
+    { signal: controller.signal },
+  );
+  // One entry per side needs no batched yields. The initial turn resumes the
+  // comparison and queues its final handoff before this control turn resumes.
+  await nextTurn();
+  controller.abort(reason);
+  const result = await pending;
+  if (result.ok) throw new Error("Expected cancellation during final handoff");
+  expect(result.error).toMatchObject({ _tag: "AnalysisCancelledError" });
+  expect(result.error.cause).toBe(reason);
+  const partial = parseEvidence(result.error.partialObservation);
+  expect(partial).toMatchObject({
+    operation: "compare_wasm_interfaces",
+    confidence: "derived",
+    authority: "analyst-inference",
+    evidence_links: [left.evidence_id, right.evidence_id],
+  });
+  expect(
+    wasmInterfaceComparisonSchema.parse(partial.normalized_result),
+  ).toMatchObject({
+    coverage: "complete-within-inputs",
+    summary: { changed: 1, added: 0, removed: 0, unchanged: 0, unknown: 0 },
+  });
+});

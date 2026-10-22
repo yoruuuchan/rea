@@ -22,6 +22,7 @@ import {
   locateItem,
   locateList,
   normalizedPath,
+  projectsFields,
   rootOf,
   same,
   scalarText,
@@ -230,14 +231,22 @@ export class EnvironmentStateExtraction {
     return first;
   }
 
-  /** Successful recordings that finished before the first related write began. */
-  #initRecordings(tool: StateToolFacts, template: string): StateRecordFacts[] {
-    const limit = this.#initLimit(template);
-    const before = (record: StateRecordFacts): boolean =>
+  /** Initial-state admission is shared with later projection-evidence selection. */
+  #beforeInitLimit(
+    record: StateRecordFacts,
+    limit: StateRecordFacts | undefined,
+  ): boolean {
+    return (
       limit === undefined ||
       (this.#position.get(record.ordinal)! <
         this.#position.get(limit.ordinal)! &&
-        (this.#timeline === "record-order" || record.end <= limit.start));
+        (this.#timeline === "record-order" || record.end <= limit.start))
+    );
+  }
+
+  /** Successful recordings that finished before the first related write began. */
+  #initRecordings(tool: StateToolFacts, template: string): StateRecordFacts[] {
+    const limit = this.#initLimit(template);
     return tool.record_ordinals
       .map((ordinal) => this.#byOrdinal.get(ordinal))
       .filter(
@@ -246,7 +255,7 @@ export class EnvironmentStateExtraction {
           record.status !== null &&
           record.status >= 200 &&
           record.status < 300 &&
-          before(record),
+          this.#beforeInitLimit(record, limit),
       )
       .sort(
         (left, right) =>
@@ -276,13 +285,48 @@ export class EnvironmentStateExtraction {
     candidate: Candidate,
     pointer: string,
     recordings: readonly StateRecordFacts[],
+    projected: readonly number[] = [],
   ): void {
     this.#plans.push({
       ...candidate,
       pointer,
       recordings,
       latest: this.#latestPerLine(recordings),
+      projected,
     });
+  }
+
+  /** Later identity-free projections are evidence of replay, never initial entities. Read only those query bodies. */
+  #addLateProjections(
+    tool: StateToolFacts,
+    type: string,
+    projected: number[],
+  ): void {
+    const limit = this.#initLimit(type);
+    if (limit === undefined) return;
+    for (const ordinal of tool.record_ordinals) {
+      const record = this.#byOrdinal.get(ordinal);
+      if (
+        record === undefined ||
+        record.status === null ||
+        record.status < 200 ||
+        record.status >= 300 ||
+        !projectsFields(record.query) ||
+        this.#beforeInitLimit(record, limit)
+      )
+        continue;
+      if (
+        this.#withBody(
+          ordinal,
+          (body) =>
+            body !== undefined &&
+            locateItem(body, lastSegmentValue(record.path)) === undefined,
+        )
+      ) {
+        this.#retain(ENTRY_BYTES);
+        projected.push(ordinal);
+      }
+    }
   }
 
   /** Item tools prove a type's identity field by the path value their bodies repeat. */
@@ -292,6 +336,8 @@ export class EnvironmentStateExtraction {
     if (recordings === undefined) return;
     let pointer: string | undefined;
     let keys: string[] | undefined;
+    const kept: StateRecordFacts[] = [];
+    const projected: number[] = [];
     for (const record of recordings) {
       const located = this.#withBody(record.ordinal, (body) =>
         body === undefined
@@ -302,6 +348,13 @@ export class EnvironmentStateExtraction {
         this.#recorded(tool, "body-unusable");
         return;
       }
+      // A read that asked for some fields only may leave the identity out; replay answers it.
+      if (located === undefined && projectsFields(record.query)) {
+        this.#retain(ENTRY_BYTES);
+        projected.push(record.ordinal);
+        continue;
+      }
+      kept.push(record);
       if (
         located === undefined ||
         (pointer ?? located.pointer) !== located.pointer
@@ -328,7 +381,11 @@ export class EnvironmentStateExtraction {
       return;
     }
     this.#identity.set(type, { field, basis: "path-parameter" });
-    this.#addPlan(candidate, pointer, recordings);
+    this.#addLateProjections(tool, type, projected);
+    projected.sort(
+      (left, right) => this.#position.get(left)! - this.#position.get(right)!,
+    );
+    this.#addPlan(candidate, pointer, kept, projected);
   }
 
   /**

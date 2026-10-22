@@ -120,9 +120,6 @@ export type JavaScriptJsonModuleObservation = JavaScriptStructuredObservation &
       }
   );
 
-/** Module facts needed after file-local semantic projection has finished. */
-export type { JavaScriptModuleSemanticIr } from "../../domain/javascript/javascriptModuleSemanticIr.js";
-
 /** Applicable processing of inventoried files; native bytes remain metadata-only. */
 export const javascriptArtifactAnalysisScopes = {
   javascript: {

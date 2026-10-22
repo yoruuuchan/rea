@@ -100,7 +100,7 @@ describe("agent recovery metadata", () => {
       "raise its tool deadline",
     );
     expect(projected.remediation.action).not.toMatch(
-      /declared timeout controls|larger server\/provider budget/u,
+      /declared timeout controls|larger server\/provider budget|without assuming adjustable limits|do not assume adjustable/u,
     );
     expect(analysisErrorProjectionSchema.parse(projected)).toEqual(projected);
   });

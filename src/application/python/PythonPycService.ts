@@ -14,7 +14,8 @@ import {
   pythonPycSchema,
 } from "../../domain/python/pythonPyc.js";
 import { analysisInputErrorFromIssues } from "../../domain/inputIssueProjection.js";
-import { err, ok, type Result } from "../../domain/result.js";
+import { err, type Result } from "../../domain/result.js";
+import { completeProviderEvidence } from "../ProviderOperationExecution.js";
 
 const OPERATION = "inspect_python_pyc";
 
@@ -31,7 +32,9 @@ export class PythonPycService {
     options?: ExecutionOptions,
   ): Promise<Result<Evidence, AnalysisError>> {
     if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION));
+      return err(
+        new AnalysisCancelledError(OPERATION, { cause: options.signal.reason }),
+      );
     const input = inspectPythonPycInputSchema.safeParse(rawInput);
     if (!input.success)
       return err(
@@ -51,8 +54,6 @@ export class PythonPycService {
       );
     const result = await this.provider.inspect(input.data, options);
     if (!result.ok) return result;
-    if (options?.signal?.aborted)
-      return err(new AnalysisCancelledError(OPERATION));
     const report = pythonPycSchema.safeParse(result.value);
     if (
       !report.success ||
@@ -68,7 +69,7 @@ export class PythonPycService {
         ),
       );
     const value = report.data;
-    return ok(
+    return completeProviderEvidence(
       createEvidence(
         {
           path: value.artifact.path,
@@ -97,6 +98,7 @@ export class PythonPycService {
           ],
         },
       ),
+      options?.signal,
     );
   }
 }

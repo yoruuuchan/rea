@@ -30,6 +30,7 @@ describe("JavaScript source selection cancellation boundary", () => {
     const snapshot = await scanCanonicalArtifactInventory(root, {});
     const reader = createJavaScriptArtifactReader(root, "directory");
     const controller = new AbortController();
+    const reason = { request: "caller cancelled selected sources" };
     const sourcePaths = ["main.mjs"];
     try {
       const files = await readJavaScriptArtifactFiles(
@@ -52,7 +53,7 @@ describe("JavaScript source selection cancellation boundary", () => {
           {
             analyze: async (...args) => {
               const result = await realWorker(...args);
-              controller.abort();
+              controller.abort(reason);
               return result;
             },
           },
@@ -64,6 +65,7 @@ describe("JavaScript source selection cancellation boundary", () => {
         await worker.close();
       }
       expect(outcome.interruption).toBeInstanceOf(AnalysisCancelledError);
+      expect(outcome.interruption?.cause).toBe(reason);
       const unselected = outcome.analysis.files.filter(
         ({ file }) =>
           !file.text.included && file.text.reason === "outside-analysis-scope",
@@ -151,6 +153,7 @@ describe("Selected JavaScript source failure diagnostics", () => {
     await writeJavaScriptSourceSelectionFixture(root);
     await writeFile(join(root, "z-later.mjs"), "export const later = 1;\n");
     const controller = new AbortController();
+    const reason = { request: "caller cancelled selected sources" };
     const source_paths = ["main.mjs", "z-later.mjs"];
     const result = await analyzeJavaScriptApplication(
       { input_path: root, source_paths },
@@ -162,12 +165,13 @@ describe("Selected JavaScript source failure diagnostics", () => {
               event.phase === "parse_javascript_source" &&
               event.message.includes("z-later.mjs")
             )
-              controller.abort();
+              controller.abort(reason);
           },
         },
       },
     );
     if (result.ok) throw new Error("Expected selected-source cancellation");
+    expect(result.error.cause).toBe(reason);
     expect(projectAnalysisError(result.error).code).toBe("cancelled");
     const evidence = parseEvidence(result.error.partialObservation);
     const partial = javascriptApplicationAnalysisResultSchema.parse(

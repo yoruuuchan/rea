@@ -9,6 +9,7 @@ import { projectAnalysisError } from "../../src/domain/analysisErrorProjection.j
 import { ProviderProcessSupervisor } from "../../src/process/ProviderProcess.js";
 import { finishAnalysisCommand } from "../../src/cli/finishAnalysisCommand.js";
 import { AnalysisOutputError } from "../../src/domain/analysisErrorCore.js";
+import { FIRMWARE_LIMITS } from "../../src/firmware/FirmwareRelease.js";
 import {
   firmwareFixture,
   assertFirmwareCleanup,
@@ -279,7 +280,11 @@ test("uses the selected phase deadline inside an owned command beyond the former
   });
   expect(fixture.launches).toHaveLength(2);
   expect(
-    fixture.launches.every((launch) => launch.args.includes("--cpu=120")),
+    fixture.launches.every((launch) =>
+      launch.args.includes(
+        `--cpu=${String(FIRMWARE_LIMITS.cpuSeconds)}:${String(FIRMWARE_LIMITS.cpuSeconds)}`,
+      ),
+    ),
   ).toBe(true);
   await fixture.close();
   await assertFirmwareCleanup(fixture.launches);

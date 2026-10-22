@@ -102,9 +102,14 @@ it("honors cancellation before and during streaming", async () => {
   const path = join(root, "bytes");
   await writeFile(path, Buffer.alloc(1024 * 1024));
   const service = new ByteEntropyService();
-  expect(
-    await service.inspect({ path }, { signal: AbortSignal.abort() }),
-  ).toMatchObject({ ok: false, error: { _tag: "AnalysisCancelledError" } });
+  const reason = { request: "opaque cancellation" };
+  const before = await service.inspect(
+    { path },
+    { signal: AbortSignal.abort(reason) },
+  );
+  if (before.ok) throw new Error("Expected cancellation before admission");
+  expect(before.error.cause).toBe(reason);
+  expect(before.error.partialObservation).toBeUndefined();
   const controller = new AbortController();
   let reads = 0;
   const streaming = new ByteEntropyService({
@@ -115,7 +120,7 @@ it("honors cancellation before and during streaming", async () => {
       vi.spyOn(file, "read").mockImplementation(async (...readArgs) => {
         const result = await read(...readArgs);
         reads += 1;
-        controller.abort();
+        controller.abort(reason);
         return result;
       });
       return file;
@@ -125,10 +130,11 @@ it("honors cancellation before and during streaming", async () => {
     { path, block_size: 256 },
     { signal: controller.signal },
   );
-  expect(await pending).toMatchObject({
-    ok: false,
-    error: { _tag: "AnalysisCancelledError" },
-  });
+  const during = await pending;
+  if (during.ok) throw new Error("Expected cancellation during read");
+  expect(during.error).toMatchObject({ _tag: "AnalysisCancelledError" });
+  expect(during.error.cause).toBe(reason);
+  expect(during.error.partialObservation).toBeUndefined();
   expect(reads).toBe(1);
 });
 
@@ -161,58 +167,84 @@ it("maps cancellation during open to the cancelled algebra with its original cau
   await service.close();
 });
 
-it("keeps finalizer cancellation primary when close also fails, then resolves its cleanup owner", async () => {
-  const root = await createTestTempDirectory("rea-entropy-finalizer-cancel-");
-  const path = join(root, "bytes");
-  await writeFile(path, Buffer.alloc(512));
-  const controller = new AbortController();
-  const reason = new Error("cancelled during close");
-  const closeFailure = new Error("injected close failure");
-  let failClose = true;
-  const service = new ByteEntropyService({
-    stat,
-    open: async (...args) => {
-      const file = await open(...args);
-      const close = file.close.bind(file);
-      vi.spyOn(file, "close").mockImplementation(async () => {
-        if (failClose) {
+it.each([false, true])(
+  "retains completed Evidence when final close is cancelled (close fails: %s)",
+  async (closeFails) => {
+    const root = await createTestTempDirectory("rea-entropy-finalizer-cancel-");
+    const path = join(root, "bytes");
+    await writeFile(path, Buffer.alloc(512));
+    const controller = new AbortController();
+    const reason = new Error("cancelled during close");
+    const closeFailure = new Error("injected close failure");
+    let failClose = closeFails;
+    let closes = 0;
+    const service = new ByteEntropyService({
+      stat,
+      open: async (...args) => {
+        const file = await open(...args);
+        const close = file.close.bind(file);
+        vi.spyOn(file, "close").mockImplementation(async () => {
+          closes += 1;
           controller.abort(reason);
-          throw closeFailure;
-        }
-        await close();
+          if (failClose) throw closeFailure;
+          await close();
+        });
+        return file;
+      },
+    });
+
+    const result = await service.inspect(
+      { path, block_size: 256 },
+      { signal: controller.signal },
+    );
+
+    if (result.ok) throw new Error("Expected cancellation during finalization");
+    expect(result.error).toMatchObject({
+      _tag: "AnalysisCancelledError",
+      cleanupIncomplete: closeFails,
+    });
+    expect(result.error.cause).toBe(reason);
+    const evidence = result.error.partialObservation;
+    expect(evidence).toMatchObject({
+      operation: "inspect_byte_entropy",
+      confidence: "observed",
+      normalized_result: {
+        artifact: {
+          path,
+          bytes: 512,
+          sha256: createHash("sha256").update(Buffer.alloc(512)).digest("hex"),
+        },
+        window: { offset: 0, length: 512 },
+        file_entropy: 0,
+        blocks: [
+          { offset: 0, length: 256, entropy: 0 },
+          { offset: 256, length: 256, entropy: 0 },
+        ],
+      },
+    });
+    expect(closes).toBe(1);
+    if (closeFails) {
+      expect(result.error.secondaryFailures).toMatchObject([
+        { _tag: "AnalysisOutputError", cleanupIncomplete: true },
+      ]);
+      expect(projectAnalysisError(result.error)).toMatchObject({
+        code: "cleanup_incomplete",
+        retryable: false,
+        details: { cleanup: "incomplete", execution_failure: "cancelled" },
       });
-      return file;
-    },
-  });
-
-  const result = await service.inspect(
-    { path, block_size: 256 },
-    { signal: controller.signal },
-  );
-
-  if (result.ok) throw new Error("Expected cancellation during finalization");
-  expect(result.error).toMatchObject({
-    _tag: "AnalysisCancelledError",
-    cleanupIncomplete: true,
-    secondaryFailures: [
-      { _tag: "AnalysisOutputError", cleanupIncomplete: true },
-    ],
-  });
-  expect(result.error.cause).toBe(reason);
-  expect(result.error.secondaryFailures[0]?.cause).toBeDefined();
-  expect(projectAnalysisError(result.error)).toMatchObject({
-    code: "cleanup_incomplete",
-    retryable: false,
-    details: {
-      cleanup: "incomplete",
-      execution_failure: "cancelled",
-    },
-  });
-
-  failClose = false;
-  await service.close();
-  expect(result.error.cleanupIncomplete).toBe(false);
-});
+    } else {
+      expect(result.error.secondaryFailures).toEqual([]);
+      expect(projectAnalysisError(result.error)).toMatchObject({
+        code: "cancelled",
+      });
+    }
+    failClose = false;
+    await service.close();
+    expect(result.error.cleanupIncomplete).toBe(false);
+    expect(result.error.partialObservation).toBe(evidence);
+    expect(closes).toBe(closeFails ? 2 : 1);
+  },
+);
 
 it("reports a changed artifact when its parent directory moves during streaming", async () => {
   const root = await createTestTempDirectory("rea-entropy-moved-");
@@ -313,6 +345,11 @@ it("retains a failed descriptor close and retries it before opening another file
     _tag: "AnalysisOutputError",
     cleanupIncomplete: true,
   });
+  const observation = first.error.partialObservation;
+  expect(observation).toMatchObject({
+    operation: "inspect_byte_entropy",
+    normalized_result: { artifact: { path, bytes: 512 }, file_entropy: 0 },
+  });
   expect(opens).toBe(1);
 
   const retryDenied = await service.inspect({ path, block_size: 256 });
@@ -326,6 +363,7 @@ it("retains a failed descriptor close and retries it before opening another file
   const recovered = await service.inspect({ path, block_size: 256 });
   expect(recovered.ok).toBe(true);
   expect(first.error.cleanupIncomplete).toBe(false);
+  expect(first.error.partialObservation).toBe(observation);
   expect(opens).toBe(2);
   await service.close();
 });
@@ -371,3 +409,76 @@ it("preserves a primary read failure through failed close and resolves it on ret
   expect(first.error.cleanupIncomplete).toBe(false);
   await service.close();
 });
+
+it.each(["stat", "open"] as const)(
+  "preserves %s access failure when the signal aborts before rejection is consumed",
+  async (stage) => {
+    const root = await createTestTempDirectory("rea-entropy-physical-failure-");
+    const path = join(root, "bytes");
+    await writeFile(path, Buffer.alloc(512));
+    const controller = new AbortController();
+    const failure = Object.assign(new Error("access denied"), {
+      code: "EACCES",
+    });
+    const reject = async () => {
+      controller.abort({ request: "late cancellation" });
+      throw failure;
+    };
+    const service = new ByteEntropyService({
+      stat: stage === "stat" ? reject : stat,
+      open: stage === "open" ? reject : open,
+    });
+    const result = await service.inspect(
+      { path },
+      { signal: controller.signal },
+    );
+    if (result.ok) throw new Error("Expected access failure");
+    expect(result.error).toMatchObject({ _tag: "AnalysisAccessDeniedError" });
+    expect(result.error.cause).toBe(failure);
+    expect(result.error.partialObservation).toBeUndefined();
+    await service.close();
+  },
+);
+
+it.each([false, true])(
+  "preserves read access failure through late cancellation (close fails: %s)",
+  async (closeFails) => {
+    const root = await createTestTempDirectory("rea-entropy-read-access-");
+    const path = join(root, "bytes");
+    await writeFile(path, Buffer.alloc(512));
+    const controller = new AbortController();
+    const failure = Object.assign(new Error("read access denied"), {
+      code: "EACCES",
+    });
+    let failClose = closeFails;
+    const service = new ByteEntropyService({
+      stat,
+      open: async (...args) => {
+        const file = await open(...args);
+        const close = file.close.bind(file);
+        vi.spyOn(file, "read").mockImplementation(async () => {
+          controller.abort({ request: "late cancellation" });
+          throw failure;
+        });
+        vi.spyOn(file, "close").mockImplementation(async () => {
+          if (failClose) throw new Error("close denied");
+          await close();
+        });
+        return file;
+      },
+    });
+    const result = await service.inspect(
+      { path },
+      { signal: controller.signal },
+    );
+    if (result.ok) throw new Error("Expected read failure");
+    const primary = result.error.cleanupPrimary ?? result.error;
+    expect(primary).toMatchObject({ _tag: "AnalysisAccessDeniedError" });
+    expect(primary.cause).toBe(failure);
+    expect(result.error.cleanupIncomplete).toBe(closeFails);
+    expect(result.error.partialObservation).toBeUndefined();
+    failClose = false;
+    await service.close();
+    expect(result.error.cleanupIncomplete).toBe(false);
+  },
+);

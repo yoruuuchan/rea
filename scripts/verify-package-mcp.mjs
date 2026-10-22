@@ -10,7 +10,7 @@ import { readFile, rm } from "node:fs/promises";
 
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
-import { MCP_STARTUP_POLICY } from "../dist/mcpStartupPolicy.js";
+import { resolveMcpStartupBudgets } from "../dist/config/mcpStartupBudgets.js";
 import { parseEvidence } from "../dist/domain/evidence.js";
 import * as prompts from "./verify-package-prompts.mjs";
 import { json, verifyCompleteToolCatalog } from "./lib/verify-package-core.mjs";
@@ -257,7 +257,7 @@ export async function verifyPackageMcp({
     (
       await execute(cli, ["mcp", "doctor", "--json"], {
         env: environment,
-        timeout: MCP_STARTUP_POLICY.doctorDeadlineMs,
+        timeout: resolveMcpStartupBudgets(environment).doctor.milliseconds,
       })
     ).stdout,
   );

@@ -171,7 +171,8 @@ const schemaInputError = (
     })),
   );
 
-const recordedExchange = (
+/** One capture record reduced to its request line and retained response body, or undefined without a request line. */
+export const recordedExchange = (
   record: WebNetworkCaptureRecord,
 ): RecordedExchange | undefined => {
   const line = readRecordedRequestLine(record.reported, true, () => true);
@@ -261,6 +262,10 @@ interface CaptureFacts {
   readonly records: readonly WebNetworkCaptureRecord[];
   readonly captureKind: EnvironmentCaptureKind;
   readonly captureSha256: string | null;
+  /** Whether the capture recorded response bodies: a browser scenario does only when they were selected. */
+  readonly responseBodies: boolean;
+  /** Whether the capture recorded request bodies, likewise. */
+  readonly requestBodies: boolean;
 }
 
 /** Issue paths of a capture payload refusal start here. */
@@ -271,6 +276,7 @@ const parseScenarioCapture = (
   operation: string,
   normalized: unknown,
   parameters: unknown,
+  purpose: "manifest" | "replay",
 ): Result<CaptureFacts, AnalysisError> => {
   const scenario = browserScenarioCaptureSchema.safeParse(normalized);
   if (!scenario.success)
@@ -289,9 +295,11 @@ const parseScenarioCapture = (
     .object({ scenario_sha256: z.string() })
     .safeParse(parameters);
   return ok({
-    records: scenarioCaptureRecords(scenario.data, "replay").records,
+    records: scenarioCaptureRecords(scenario.data, purpose).records,
     captureKind: "browser-scenario",
     captureSha256: definition.success ? definition.data.scenario_sha256 : null,
+    responseBodies: scenario.data.scenario.network_content.response_body,
+    requestBodies: scenario.data.scenario.network_content.request_body,
   });
 };
 
@@ -340,17 +348,21 @@ const parseHarCapture = (
     records: capture.data.records,
     captureKind: "web-network-capture",
     captureSha256: capture.data.artifact.sha256,
+    responseBodies: true,
+    requestBodies: true,
   });
 };
 
 /**
  * Authenticate the evidence file and require complete capture Evidence of
  * either kind. Only an operation no capture schema owns blames the operation;
- * a recognized operation's payload failures name the payload fields.
+ * a recognized operation's payload failures name the payload fields. A browser
+ * capture's request bodies are kept only for the manifest purpose.
  */
-const parseCaptureEvidence = (
+export const parseCaptureEvidence = (
   operation: string,
   value: unknown,
+  purpose: "manifest" | "replay" = "replay",
 ): Result<CaptureFacts & { readonly evidenceId: string }, AnalysisError> => {
   const evidence = parseEvidenceFile(operation, "evidence", value);
   if (!evidence.ok) return evidence;
@@ -360,7 +372,12 @@ const parseCaptureEvidence = (
   );
   const capture =
     evidence.value.operation === "capture_browser_scenario"
-      ? parseScenarioCapture(operation, normalized, evidence.value.parameters)
+      ? parseScenarioCapture(
+          operation,
+          normalized,
+          evidence.value.parameters,
+          purpose,
+        )
       : evidence.value.operation === "inspect_web_network_capture"
         ? parseHarCapture(operation, normalized)
         : err(

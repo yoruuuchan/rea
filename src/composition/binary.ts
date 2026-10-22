@@ -55,6 +55,7 @@ const composeDeepBinarySession = (
   const ida = new IdaProvider(config, environment);
   const kuna = new KunaProvider(environment, {
     regexMatchingDeadline: config.regexMatchingDeadline,
+    regexWorkerHeapRequest: config.regexWorkerHeapRequest,
   });
   const auxiliaryDeclarations =
     auxiliaryAnalysisProviderDeclarations(environment);

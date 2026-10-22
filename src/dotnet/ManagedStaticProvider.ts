@@ -39,7 +39,7 @@ import { err, ok, type Result } from "../domain/result.js";
 import { inspectManagedArtifactBytes } from "./ManagedArtifactInspector.js";
 import { inspectManagedMembersBytes } from "./ManagedMemberInspector.js";
 import { inspectManagedNativeBoundariesBytes } from "./ManagedNativeBoundaryInspector.js";
-import { RegularFileCleanupFailure } from "../application/RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
 import { ManagedReaderFailure } from "./ManagedReaderFailure.js";
 import {
   hashManagedSource,

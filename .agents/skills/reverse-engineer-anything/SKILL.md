@@ -2,7 +2,7 @@
 name: reverse-engineer-anything
 description: Reverse engineer native, managed, Electron/JavaScript, packaged, firmware, and browser targets with REA. Use shipped-artifact or requested runtime evidence to explain features, compare versions, decompile code, or guide a reconstruction. Skip REA for ordinary source-repository architecture analysis.
 metadata:
-  version: "44"
+  version: "45"
 ---
 
 # REA
@@ -32,6 +32,14 @@ original task after repair. Client approval, shell PATH, registration and engine
 availability have different remedies; avoid repeating setup for all of them.
 If the host times out without a REA result, do not repeat the unchanged call or
 assume work stopped. Read the recovery guide's deadline distinction before retrying.
+If the MCP connection drops, retry that call once only when it is safe to
+repeat or known not to have started. If it may already have changed the
+target, or it fails again, tell the user and ask them to restart the MCP
+client. If REA could not start its connection, retry once, then tell the user
+and ask them to restart the MCP client. Do not retry a startup failure that
+returns the same unchanged result. Run `rea doctor` when REA could not start
+or tools stay missing after that restart. Read the recovery guide before a
+second repair attempt.
 
 1. Diagnose without changing REA or client configuration. `npx` may download
    the package and write to npm's cache. For Codex, run
@@ -126,7 +134,10 @@ explicit path or endpoint and do not need it.
   connect Everywhere's separate MCP server for live traffic.
 - Retained HAR/SAZ/native mitmproxy/aioquic qlog capture: `inspect_web_network_capture`. Select
   original record ordinals when useful; inspect producer fields and byte/number
-  sidecars without fetching recorded URLs or claiming live attribution. See
+  sidecars without fetching recorded URLs or claiming live attribution. HAR/SAZ/qlog
+  old-generation heap is `REA_CAPTURE_DECODER_OLD_GENERATION_MIB` (default 192 MiB,
+  floor 8, maximum 16384), set where REA starts. Host memory and `NODE_OPTIONS` do not
+  raise it. See
   [historical captures](https://github.com/morluto/rea/blob/main/docs/web-network-captures.md) for the exact upstream
   profile and credential exclusions. Qlog support starts with aioquic 1.5.0
   JSON 0.3; stream coverage and endpoint loss declarations do not recover bodies

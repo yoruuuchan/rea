@@ -22,18 +22,26 @@ import {
   type SimulatedState,
 } from "./environmentStateWriteChecks.js";
 import {
-  conflictsWithPlan,
   explainUpdate,
-  refinedBody,
   responseShapeOf,
 } from "./environmentStateWriteExplain.js";
+import { otherFields } from "./environmentStateWriteGenerated.js";
+import {
+  contradictsEarlierCalls,
+  disagreesWithCall,
+  keptFields,
+  scalars,
+  type UpdateCall,
+  conflictsWithPlan,
+  refinedBody,
+} from "./environmentStateWriteCalls.js";
 import {
   laterObservation,
   shownBefore,
   viewFields,
   type Observed,
 } from "./environmentStateWriteObserve.js";
-import { integerOf, readClock, slugOf } from "./environmentStateWriteValues.js";
+import { readClock } from "./environmentStateWriteValues.js";
 import {
   pathValuesOf,
   type FieldRule,
@@ -55,11 +63,8 @@ export interface WriteDraft {
   contradictedBy: number | undefined;
   sideEffect: boolean;
   calls: number;
-  /** The scalar values each modelled update call showed and sent, which later rules must reproduce. */
-  readonly updates: {
-    readonly shown: ReadonlyMap<string, JsonValue>;
-    readonly sent: ReadonlyMap<string, JsonValue>;
-  }[];
+  /** The scalar values each modelled update call showed and sent, and the fields it kept, which later rules must reproduce. */
+  readonly updates: UpdateCall[];
   /** The last value each sequence took, by field and, for a collection's sequence, collection; the next call must follow it. */
   readonly sequences: Map<string, number>;
 }
@@ -305,41 +310,6 @@ export const retainFixed = (
     context.io.retain(64 + JSON.stringify(fixed).length * 2);
 };
 
-/** Whether a rule changes its field on calls that do not send it: serving applies it to every call that could. */
-const unsentChange = (rule: FieldRule): boolean =>
-  rule.rule === "increment" || rule.rule === "slug";
-
-/** A call's scalar members by name, as much of it as later rules are checked against. */
-const scalars = (object: JsonObject): Map<string, JsonValue> =>
-  new Map(
-    Object.entries(object).filter(
-      ([, value]) => value === null || typeof value !== "object",
-    ),
-  );
-
-/** Whether a rule a later call showed gives an earlier call a value other than the one it showed for a field it did not send. */
-const contradictsEarlierCalls = (
-  draft: WriteDraft,
-  rules: readonly FieldRule[],
-): boolean => {
-  const ruled = new Set(draft.plan.rules.map((rule) => rule.field));
-  return rules.some(
-    (rule) =>
-      (unsentChange(rule) || rule.rule === "clock") &&
-      !ruled.has(rule.field) &&
-      draft.updates.some(({ shown, sent }) => {
-        // An unruled field an earlier call showed is one it left as it was.
-        const value = shown.get(rule.field);
-        if (value === undefined) return false;
-        if (rule.rule === "increment") return integerOf(value) !== undefined;
-        // Serving stamps a clock on every call, so a field an earlier call kept contradicts it.
-        if (rule.rule === "clock") return true;
-        const from = rule.rule === "slug" ? sent.get(rule.from) : undefined;
-        return typeof from === "string" && slugOf(from) !== value;
-      }),
-  );
-};
-
 /** Build an update plan from its exemplar, or add what a later call showed. */
 const buildUpdate = (
   context: EffectContext,
@@ -432,6 +402,7 @@ export const applyUpdate = (
     id,
     startMs: startOf(context, step),
     ...(after.readFields === undefined ? {} : { readFields: after.readFields }),
+    others: otherFields(context.state.ofType(type), { collection, id }),
     shown: shownBefore(context.viewOf, entity, after.ordinal),
   });
   if (explained.unexplained.length > 0 && !unknown) {
@@ -454,20 +425,20 @@ export const applyUpdate = (
     { ...call, id },
     (rule) => ok(after.object[rule.field]),
   );
+  const kept = keptFields(entity.fields, after.object);
   const disagrees =
     written.ok &&
-    draft.plan.rules.some(
-      (rule) =>
-        unsentChange(rule) &&
-        Object.hasOwn(after.object, rule.field) &&
-        !same(written.value[rule.field], after.object[rule.field]),
-    );
+    disagreesWithCall(draft.plan.rules, {
+      written: written.value,
+      after: after.object,
+      kept,
+    });
   if (!written.ok || (disagrees && !unknown))
     refuse(draft, step, "unexplained-change");
   if (!written.ok || disagrees || unknown) return recorded();
-  const facts = { shown: scalars(after.object), sent: scalars(body) };
+  const facts = { shown: scalars(after.object), sent: scalars(body), kept };
   context.io.retain(
-    64 + JSON.stringify([...facts.shown, ...facts.sent]).length * 2,
+    64 + JSON.stringify([...facts.shown, ...facts.sent, kept]).length * 2,
   );
   draft.updates.push(facts);
   context.io.retain(64 + JSON.stringify(written.value).length * 2);
@@ -477,7 +448,9 @@ export const applyUpdate = (
     (member) => member !== draft.plan.body?.identity,
   );
   const derived = Object.keys(written.value).filter(
-    (field) => !same(written.value[field], entity.fields[field]),
+    (field) =>
+      !Object.hasOwn(entity.fields, field) ||
+      !same(written.value[field], entity.fields[field]),
   );
   const changed = {
     fields: [...new Set([...sent, ...derived])],

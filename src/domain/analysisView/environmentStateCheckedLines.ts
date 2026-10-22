@@ -8,7 +8,7 @@ import {
 } from "../recordedTransportUrl.js";
 import {
   allLines,
-  decodedSegment,
+  pathSegmentMatches,
   isParam,
   listsAll,
   segmentsOf,
@@ -186,7 +186,11 @@ const bestLine = (
         if (lines.params.has(index)) verbatim += 1;
         return true;
       }
-      return lines.params.has(index) && decodedSegment(segment) === read[index];
+      return (
+        lines.params.has(index) &&
+        read[index] !== undefined &&
+        pathSegmentMatches(segment, read[index])
+      );
     });
     if (!matches) continue;
     const matched = queryMatches(values, query);

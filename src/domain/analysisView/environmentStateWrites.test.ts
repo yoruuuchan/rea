@@ -6,17 +6,30 @@ import {
   type TimedCaptureRow,
 } from "../../../tests/fixtures/analysisView.js";
 import {
+  ASSET_ROWS,
   BOOK_INIT_ROWS,
   BOOK_NOT_FOUND,
   BOOK_ROWS,
   BOOK_WRITE_CLOCK,
+  DETAILED_LIST_ROWS,
   FIRST_BOOK,
+  OMITTED_FIELD_ROWS,
+  PROJECTED_ROWS,
+  RENAMED_BOOK,
+  HANDLE_ROWS,
   LIST_LINE_ROWS,
   QUERY_ROWS,
+  OFFSET_LIST_ROWS,
   SECOND_BOOK,
   THIRD_BOOK,
+  assetBook,
+  VERSIONED_ROWS,
   book,
+  numberedUuid,
+  versionedBook,
+  offsetListed,
   bookClock,
+  detailedBook,
   environmentStateViewOf,
   rawCaptureEvidence,
   renamedBook,
@@ -170,6 +183,346 @@ describe("served write plans", () => {
       "name",
       "slug",
     ]);
+  });
+});
+
+describe("wider write coverage", () => {
+  it("drops a field from an item view's required ones once a read shows the application leaves it out", () => {
+    const state = stateOf(OMITTED_FIELD_ROWS);
+    expect(planOf(state, "post_books")).toMatchObject({ served: true });
+    expect(
+      state.views.find((view) => view.tool === "get_books_by_id"),
+    ).toMatchObject({
+      shape: "item",
+      fields: expect.arrayContaining(["detail"]),
+    });
+    expect(
+      state.views.find((view) => view.tool === "get_books_by_id"),
+    ).not.toMatchObject({
+      required_fields: expect.arrayContaining(["detail"]),
+    });
+  });
+
+  it("proves an item's identity past a read that asked for some fields only, leaving that read to replay", () => {
+    expect(
+      stateOf(PROJECTED_ROWS).views.find(
+        (view) => view.tool === "get_books_by_id",
+      ),
+    ).toMatchObject({
+      shape: "item",
+      checked_record_ordinals: [1, 2],
+      projected_record_ordinals: [3],
+    });
+  });
+
+  it("serves creates whose number follows the largest held one in its digit groups", () => {
+    expect(planOf(stateOf(ASSET_ROWS), "post_books")).toMatchObject({
+      served: true,
+      rules: expect.arrayContaining([
+        { field: "asset", rule: "sequence", scope: "collection" },
+      ]),
+    });
+  });
+});
+
+describe("values the application assigns", () => {
+  it("serves updates that renew a sent version and the ids of rewritten child rows", () => {
+    expect(planOf(stateOf(VERSIONED_ROWS), "patch_books_by_id")).toMatchObject({
+      served: true,
+      body: { accepted: ["name", "version_id"], fixed: [] },
+      rules: expect.arrayContaining([
+        { field: "version_id", rule: "unique" },
+        { field: "chapters", rule: "renewed", pointers: ["/*/id"] },
+      ]),
+    });
+  });
+
+  it("serves no update whose renewed values another recorded call kept, before or after the calls that renewed them", () => {
+    const kept = renamedBook(
+      versionedBook(FIRST_BOOK, 7, 8),
+      "Kept Version",
+      7,
+    );
+    const keeping: TimedCaptureRow[] = [
+      ["PATCH", "/api/books/1", kept, 200, { name: "Kept Version" }],
+      ["GET", "/api/books/1", kept],
+    ];
+    expect(
+      planOf(stateOf([...VERSIONED_ROWS, ...keeping]), "patch_books_by_id"),
+    ).toMatchObject({ served: false, reason: "unexplained-change" });
+    const first = renamedBook(
+      versionedBook(FIRST_BOOK, 1, 2),
+      "Kept Version",
+      3,
+    );
+    const renamed = versionedBook(
+      renamedBook(FIRST_BOOK, "Renamed Book", 5),
+      5,
+      6,
+    );
+    expect(
+      planOf(
+        stateOf([
+          ...VERSIONED_ROWS.slice(0, 3),
+          ["PATCH", "/api/books/1", first, 200, { name: "Kept Version" }],
+          ["GET", "/api/books/1", first],
+          [
+            "PATCH",
+            "/api/books/1",
+            renamed,
+            200,
+            { name: "Renamed Book", version_id: numberedUuid(1) },
+          ],
+          ["GET", "/api/books/1", renamed],
+        ]),
+        "patch_books_by_id",
+      ),
+    ).toMatchObject({ served: false, reason: "unexplained-change" });
+  });
+
+  it("serves creates that store a sent member under another name and embed it in a link", () => {
+    expect(planOf(stateOf(HANDLE_ROWS), "post_books")).toMatchObject({
+      served: true,
+      body: { accepted: ["name", "handle"], fixed: [] },
+      rules: expect.arrayContaining([
+        { field: "code", rule: "copy", from: "/handle" },
+        { field: "link", rule: "template", from: "code" },
+      ]),
+    });
+  });
+});
+
+describe("write coverage limits", () => {
+  const WHOLE_BOOK = ["slug", "created_at", "updated_at"];
+  const itemView = (rows: readonly TimedCaptureRow[]) =>
+    stateOf(rows).views.find((view) => view.tool === "get_books_by_id");
+
+  it("notes no omission from a read that asked for some fields, nor from one of a book the state no longer holds", () => {
+    const projected: TimedCaptureRow[] = [
+      ...BOOK_INIT_ROWS,
+      ["PATCH", "/api/books/1", RENAMED_BOOK, 200, { name: "Renamed Book" }],
+      ["GET", "/api/books/1?fields=id,name", { id: 1, name: "Renamed Book" }],
+    ];
+    const tombstone: TimedCaptureRow[] = [
+      ...BOOK_INIT_ROWS,
+      ["POST", "/api/books", THIRD_BOOK, 201, { name: "Third Book" }],
+      ["GET", "/api/books/3", THIRD_BOOK],
+      ["DELETE", "/api/books/3", "", 204],
+      ["GET", "/api/books/3", { id: 3, deleted: true }],
+    ];
+    for (const rows of [projected, tombstone])
+      expect(itemView(rows)).toMatchObject({
+        required_fields: expect.arrayContaining(WHOLE_BOOK),
+      });
+    const partial = { id: 3, name: "Third Book" };
+    const created: TimedCaptureRow[] = [
+      ...BOOK_INIT_ROWS,
+      ["POST", "/api/books", partial, 201, { name: "Third Book" }],
+      ["GET", "/api/books/3?fields=id,name", partial],
+    ];
+    expect(planOf(stateOf(created), "post_books")).toMatchObject({
+      served: false,
+    });
+  });
+
+  it("stops requiring a field in every view of the type once a read shows it left out", () => {
+    const state = stateOf(DETAILED_LIST_ROWS);
+    expect(planOf(state, "post_books")).toMatchObject({ served: true });
+    const list = state.views.find((view) => view.tool === "get_books");
+    expect(list).toMatchObject({ fields: expect.arrayContaining(["detail"]) });
+    expect(list).not.toMatchObject({
+      required_fields: expect.arrayContaining(["detail"]),
+    });
+  });
+
+  it("leaves a read that asked for some fields only out of the gate, even where it would resynchronise a book", () => {
+    const rows: TimedCaptureRow[] = [
+      ...BOOK_INIT_ROWS,
+      ["GET", "/api/books/2?fields=name", { name: "Second Book" }],
+      [
+        "PATCH",
+        "/api/books/2",
+        renamedBook(SECOND_BOOK, "Renamed", 5),
+        200,
+        { name: "Renamed" },
+      ],
+      // A redirected write leaves book 2 unknown.
+      ["PATCH", "/api/books/2", "", 302, { name: "Renamed" }],
+      ["GET", "/api/books/2?fields=slug", { slug: "renamed" }],
+    ];
+    expect(planOf(stateOf(rows), "patch_books_by_id")).toMatchObject({
+      contradicted_by: null,
+    });
+  });
+
+  it("learns no update's effect from a read-back that asked for some fields only", () => {
+    const rows: TimedCaptureRow[] = [
+      ...BOOK_INIT_ROWS,
+      ["PATCH", "/api/books/1", "", 204, { name: "Renamed Book" }],
+      ["GET", "/api/books/1?fields=id,name", { id: 1, name: "Renamed Book" }],
+      ["GET", "/api/books/1", RENAMED_BOOK],
+      ["GET", "/api/books", [RENAMED_BOOK, SECOND_BOOK]],
+    ];
+    expect(planOf(stateOf(rows), "patch_books_by_id")).toMatchObject({
+      served: true,
+      observation: { ordinal: 5 },
+    });
+  });
+
+  it("confirms a delete from a read that asked for some fields and found no book", () => {
+    const rows: TimedCaptureRow[] = [
+      ...BOOK_INIT_ROWS,
+      ["DELETE", "/api/books/2", "", 204],
+      ["GET", "/api/books/2?fields=id,name", BOOK_NOT_FOUND, 404],
+    ];
+    expect(planOf(stateOf(rows), "delete_books_by_id")).toMatchObject({
+      served: true,
+      checked_record_ordinals: [4],
+    });
+  });
+
+  it("follows a sequence past its mask's width, as serving spells it", () => {
+    const numbered = (id: number, asset: string): Book =>
+      assetBook(book(id, `Book ${String(id)}`, bookClock(id + 2)), asset);
+    const rows: TimedCaptureRow[] = [
+      ["GET", "/api/books", [numbered(1, "99-97"), numbered(2, "99-98")]],
+      ["GET", "/api/books/1", numbered(1, "99-97")],
+      ["GET", "/api/books/2", numbered(2, "99-98")],
+    ];
+    for (const [id, asset] of [
+      [3, "99-99"],
+      [4, "100-00"],
+      [5, "100-01"],
+    ] as const)
+      rows.push(
+        [
+          "POST",
+          "/api/books",
+          numbered(id, asset),
+          201,
+          { name: `Book ${String(id)}` },
+        ],
+        ["GET", `/api/books/${String(id)}`, numbered(id, asset)],
+      );
+    expect(planOf(stateOf(rows), "post_books")).toMatchObject({
+      served: true,
+      rules: expect.arrayContaining([
+        { field: "asset", rule: "sequence", scope: "collection" },
+      ]),
+    });
+  });
+
+  it("withholds creates whose later call spells its sequence otherwise than serving would", () => {
+    const spelled = (asset: JsonValue): TimedCaptureRow[] => {
+      const fourth = { ...book(4, "Fourth Book", bookClock(5)), asset };
+      return [
+        ...ASSET_ROWS.slice(0, 5),
+        ["POST", "/api/books", fourth, 201, { name: "Fourth Book" }],
+        ["GET", "/api/books/4", fourth],
+      ];
+    };
+    for (const asset of ["00-04", 4])
+      expect(planOf(stateOf(spelled(asset)), "post_books")).toMatchObject({
+        served: false,
+      });
+    expect(planOf(stateOf(spelled("000-004")), "post_books")).toMatchObject({
+      served: true,
+    });
+  });
+});
+
+describe("omissions shown by reads the gate ignores", () => {
+  it("notes no omission from a read begun while the create still ran, nor from a page the collection outgrew", () => {
+    const first = detailedBook(FIRST_BOOK);
+    const second = detailedBook(SECOND_BOOK);
+    const running: TimedCaptureRow[] = [
+      ["GET", "/api/books", [first, second]],
+      ["GET", "/api/books/1", first],
+      ["GET", "/api/books/2", second],
+      // The create runs from second 3 to 4.5, so the read at second 4 may show the book before its detail.
+      ["POST", "/api/books", THIRD_BOOK, 201, { name: "Third Book" }, 1500],
+      ["GET", "/api/books/3", THIRD_BOOK],
+    ];
+    const outgrown: TimedCaptureRow[] = [
+      ["GET", "/api/books?_start=0&_end=2", [second, first]],
+      ["GET", "/api/books/1", first],
+      ["GET", "/api/books/2", second],
+      ["POST", "/api/books", THIRD_BOOK, 201, { name: "Third Book" }],
+      // Serving answers the range from its recording once the collection outgrows it.
+      ["GET", "/api/books?_start=0&_end=2", [THIRD_BOOK, second]],
+    ];
+    const requiresDetail = {
+      required_fields: expect.arrayContaining(["detail"]),
+    };
+    const itemView = (rows: readonly TimedCaptureRow[]) =>
+      stateOf(rows).views.find((view) => view.tool === "get_books_by_id");
+    expect([running, outgrown].map(itemView)).toMatchObject([
+      requiresDetail,
+      requiresDetail,
+    ]);
+  });
+});
+
+describe("clock spellings per view", () => {
+  it("serves a create that a list spelling clocks otherwise than item reads confirms", () => {
+    const state = stateOf(OFFSET_LIST_ROWS);
+    const offset = { ...ISO_SECONDS, zone: "+00:00" };
+    expect(state.views.find((view) => view.tool === "get_books")).toMatchObject(
+      {
+        membership: "all",
+        clock_formats: { created_at: offset, updated_at: offset },
+      },
+    );
+    expect(
+      state.views.find((view) => view.tool === "get_books_by_id"),
+    ).not.toHaveProperty("clock_formats");
+    expect(planOf(state, "post_books")).toMatchObject({
+      served: true,
+      checked_record_ordinals: [4, 5],
+    });
+  });
+
+  it("serves a create whose clock has a fraction where the list spelling was learned from whole seconds", () => {
+    const third = book(3, "Third Book", "2026-10-17T18:00:03.250Z");
+    const state = stateOf([
+      ["GET", "/api/books", [FIRST_BOOK, SECOND_BOOK].map(offsetListed)],
+      ["GET", "/api/books/1", FIRST_BOOK],
+      ["GET", "/api/books/2", SECOND_BOOK],
+      ["POST", "/api/books", third, 201, { name: "Third Book" }],
+      ["GET", "/api/books/3", third],
+      ["GET", "/api/books", [FIRST_BOOK, SECOND_BOOK, third].map(offsetListed)],
+    ]);
+    expect(planOf(state, "post_books")).toMatchObject({
+      served: true,
+      checked_record_ordinals: [4, 5],
+    });
+  });
+
+  it("learns no spelling for a field another recorded value spells as stored, at another instant", () => {
+    const moved = {
+      ...SECOND_BOOK,
+      created_at: "2026-10-01T09:30:00Z",
+      updated_at: "2026-10-01T09:30:00Z",
+    };
+    const state = stateOf([
+      ["GET", "/api/books", [offsetListed(FIRST_BOOK), moved]],
+      ["GET", "/api/books/1", FIRST_BOOK],
+      ["GET", "/api/books/2", SECOND_BOOK],
+    ]);
+    const list = state.views.find((view) => view.tool === "get_books");
+    expect(list).toMatchObject({ shape: "list" });
+    expect(list).not.toHaveProperty("clock_formats");
+  });
+
+  it("learns no spelling for a field the view spells both ways", () => {
+    const state = stateOf([
+      ["GET", "/api/books", [FIRST_BOOK, offsetListed(SECOND_BOOK)]],
+      ["GET", "/api/books/1", FIRST_BOOK],
+      ["GET", "/api/books/2", SECOND_BOOK],
+    ]);
+    expect(
+      state.views.find((view) => view.tool === "get_books"),
+    ).not.toHaveProperty("clock_formats");
   });
 });
 

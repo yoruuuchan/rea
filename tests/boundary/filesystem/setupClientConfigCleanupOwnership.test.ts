@@ -26,7 +26,7 @@ import {
   filterClientsNeedingConfigure,
   systemSetupHost,
 } from "../../../src/application/SetupHost.js";
-import { RegularFileCleanupFailure } from "../../../src/application/RegularFileRead.js";
+import { RegularFileCleanupFailure } from "../../../src/filesystem/OwnedRegularFile.js";
 import { configureDetectedClients } from "../../../src/application/SetupClients.js";
 import { configureClientConfiguration } from "../../../src/application/SetupClientConfiguration.js";
 import { systemUninstallHost } from "../../../src/application/Uninstall.js";

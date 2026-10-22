@@ -26,7 +26,8 @@ const ANDROID_NON_LOCALE_QUALIFIERS = new Set([
 // and variant has 8 bytes (BinaryResourceParser / ResConfig).
 const MAX_ANDROID_LOCALE_SUFFIX = 2 + 3 + (1 + 4) + (1 + 3) + (1 + 8);
 
-const localeQualifierSchema = z
+/** Locale language tags admitted by Android resource table selection. */
+export const androidLocaleQualifierSchema = z
   .string()
   .min(2)
   .max(MAX_ANDROID_LOCALE_SUFFIX)
@@ -39,9 +40,6 @@ const localeQualifierSchema = z
     (value) => !ANDROID_NON_LOCALE_QUALIFIERS.has(value.toLowerCase()),
     "Android resource configuration qualifiers are not locales",
   );
-
-/** Locale language tags admitted by Android resource table selection. */
-export const androidLocaleQualifierSchema = localeQualifierSchema;
 
 /** Normalize an admitted request alias at the locale-selection owner. */
 export const androidLocaleDirectorySuffix = (locale: string): string =>

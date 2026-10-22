@@ -1,6 +1,6 @@
-import { readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   runDirectAnalysis,
   runManagedProviderExecution,
@@ -21,6 +21,14 @@ import {
 } from "../../src/domain/analysisErrorProjection.js";
 import { parseEvidence } from "../../src/domain/evidence.js";
 import { ProviderCleanupError } from "../../src/domain/providerCleanupError.js";
+import { ghidraFunctionDossier } from "../../src/domain/ghidraValues.fixture.js";
+import {
+  createAnalysisProfile,
+  type AnalysisProfileCommitment,
+} from "../../src/domain/analysisProfile.js";
+import { OwnedStagedOutput } from "../../src/filesystem/OwnedStagedOutput.js";
+import { readAnalysisSnapshot } from "../../src/application/binary/AnalysisSnapshotFiles.js";
+import { EvidenceFileError } from "../../src/domain/evidenceErrors.js";
 import { err, ok } from "../../src/domain/result.js";
 import { isCliOperationFailure } from "../../src/cliLogging.js";
 import { observed } from "../fixtures/analysisExecution.js";
@@ -46,6 +54,7 @@ const primaryError = new AnalysisTimeoutError("read_bytes", 100, {
 
 const factories = (
   options: {
+    readonly profile?: AnalysisProfileCommitment;
     readonly executionError?: AnalysisError;
     readonly thrownExecution?: Error;
     readonly cleanupError?: AnalysisError;
@@ -53,22 +62,33 @@ const factories = (
     readonly onClose?: () => void;
   } = {},
 ) => {
-  const session = createTestBinarySession(() => ({
-    execute: async (operation) => {
-      if (operation === "health") return observed(null);
-      if (options.thrownExecution !== undefined) throw options.thrownExecution;
-      return options.executionError === undefined
-        ? observed({ operation, observation: "retained result" })
-        : err(options.executionError);
-    },
-    close: async () => {
-      if (options.thrownCleanup !== undefined) throw options.thrownCleanup;
-      options.onClose?.();
-      return options.cleanupError === undefined
-        ? ok(null)
-        : err(options.cleanupError);
-    },
-  }));
+  const profile = options.profile;
+  const session = createTestBinarySession(
+    () => ({
+      execute: async (operation) => {
+        if (operation === "health") return observed(null);
+        if (options.thrownExecution !== undefined)
+          throw options.thrownExecution;
+        return options.executionError === undefined
+          ? observed(
+              operation === "analyze_function"
+                ? ghidraFunctionDossier()
+                : { operation, observation: "retained result" },
+            )
+          : err(options.executionError);
+      },
+      close: async () => {
+        if (options.thrownCleanup !== undefined) throw options.thrownCleanup;
+        options.onClose?.();
+        return options.cleanupError === undefined
+          ? ok(null)
+          : err(options.cleanupError);
+      },
+    }),
+    profile === undefined
+      ? {}
+      : { resolveAnalysisProfile: async () => ok({ profile }) },
+  );
   const dependencies: DirectAnalysisDependencies = {
     readConfiguration: () => parseConfig({}),
     createBinarySession: () => session,
@@ -79,6 +99,224 @@ const factories = (
   };
   return { dependencies, session };
 };
+
+describe("one-shot finalization cancellation", () => {
+  it.each(["read_bytes", "analyze_function"] as const)(
+    "retains completed %s Evidence when cancellation arrives during final close",
+    async (tool) => {
+      const [path] = await createBinarySessionTargets();
+      const parameters =
+        tool === "analyze_function" ? { procedure: "fixture" } : {};
+      const original = parseEvidence(
+        await runDirectAnalysis(
+          factories().dependencies,
+          path,
+          tool,
+          parameters,
+        ),
+      );
+      const controller = new AbortController();
+      const reason = { request: "cancel during native close" };
+      const { dependencies, session } = factories({
+        onClose: () => controller.abort(reason),
+      });
+      const result = await runDirectAnalysis(
+        dependencies,
+        path,
+        tool,
+        parameters,
+        { signal: controller.signal },
+      );
+      expect(result).toEqual({
+        error: "Analysis failed",
+        ...projectAnalysisError(
+          new AnalysisCancelledError(tool, {
+            cause: reason,
+            partialObservation: original,
+          }),
+        ),
+      });
+      expect(session.activeTarget()).toBeUndefined();
+    },
+  );
+
+  it.each([false, true])(
+    "preserves the execution failure during close cancellation (cleanup fails: %s)",
+    async (closeFails) => {
+      const [path] = await createBinarySessionTargets();
+      const controller = new AbortController();
+      const { dependencies } = factories({
+        executionError: primaryError,
+        onClose: () => controller.abort({ later: true }),
+        ...(closeFails ? { cleanupError } : {}),
+      });
+      const result = await runDirectAnalysis(
+        dependencies,
+        path,
+        "read_bytes",
+        {},
+        { signal: controller.signal },
+      );
+      expect(result).toMatchObject({
+        code: closeFails ? "cleanup_incomplete" : "provider_timeout",
+        message: projectAnalysisError(primaryError).message,
+        details: {
+          captured_output: primaryError.capturedOutput,
+          ...(closeFails
+            ? { cleanup_error: projectAnalysisError(cleanupError) }
+            : {}),
+        },
+      });
+    },
+  );
+
+  it("retains completed Evidence and cancellation alongside unsuccessful cleanup", async () => {
+    const [path] = await createBinarySessionTargets();
+    const controller = new AbortController();
+    const { dependencies } = factories({
+      cleanupError,
+      onClose: () => controller.abort({ during: "close" }),
+    });
+    const result = await runDirectAnalysis(
+      dependencies,
+      path,
+      "read_bytes",
+      {},
+      { signal: controller.signal },
+    );
+    expect(result).toMatchObject({
+      code: "cleanup_incomplete",
+      category: "cancelled",
+      details: {
+        execution_failure: "cancelled",
+        resources: ["fixture-provider-process"],
+        partial_observation: {
+          operation: "read_bytes",
+          normalized_result: { observation: "retained result" },
+        },
+        cleanup_error: projectAnalysisError(cleanupError),
+      },
+    });
+  });
+});
+
+describe("snapshot publication finalization", () => {
+  it.each([
+    "success",
+    "cancel",
+    "recovered-write-cancel",
+    "close-failure",
+    "cancel-close-failure",
+  ] as const)(
+    "retains the actual snapshot publication through finalization: %s",
+    async (mode) => {
+      const [path] = await createBinarySessionTargets();
+      const snapshotPath = join(dirname(path), "snapshot.json");
+      const controller = new AbortController();
+      const profile = createAnalysisProfile(
+        { id: "fixture", name: "Fixture analysis provider", version: "1" },
+        { fixture: true },
+      );
+      const cancelled = mode.includes("cancel");
+      const { dependencies, session } = factories({
+        profile,
+        onClose: () => {
+          if (cancelled) controller.abort({ during: "snapshot finalization" });
+        },
+        ...(mode.includes("close-failure") ? { cleanupError } : {}),
+      });
+      const stagingCleanup =
+        mode === "recovered-write-cancel"
+          ? vi
+              .spyOn(OwnedStagedOutput.prototype, "close")
+              .mockRejectedValueOnce(
+                new Error("transient staging cleanup failure"),
+              )
+          : undefined;
+      try {
+        const result = await runDirectAnalysis(
+          dependencies,
+          path,
+          "read_bytes",
+          {},
+          { signal: controller.signal, snapshotPath },
+        );
+        const loaded = await readAnalysisSnapshot(snapshotPath);
+        if (!loaded.ok) throw loaded.error;
+        const evidence = loaded.value.evidence_bundle.records.find(
+          (record) => record.operation === "read_bytes",
+        );
+        expect(evidence).toBeDefined();
+        const receipt = {
+          path: snapshotPath,
+          bytes: (await stat(snapshotPath)).size,
+        };
+        expect((await readFile(snapshotPath)).byteLength).toBe(receipt.bytes);
+        if (mode === "success") expect(result).toEqual(evidence);
+        else {
+          const failure = analysisCliErrorEnvelopeSchema.parse(result);
+          expect(failure.code).toBe(
+            mode.includes("close-failure") ? "cleanup_incomplete" : "cancelled",
+          );
+          expect(failure.details).toMatchObject({
+            partial_observation: evidence,
+            diagnostics: { analysis_snapshot: receipt },
+          });
+        }
+        expect(session.activeTarget()).toBeUndefined();
+        expect((await readdir(dirname(path))).toSorted()).toEqual([
+          "first.hop",
+          "second.hop",
+          "snapshot.json",
+        ]);
+        if (stagingCleanup !== undefined)
+          expect(stagingCleanup).toHaveBeenCalledTimes(2);
+      } finally {
+        stagingCleanup?.mockRestore();
+      }
+    },
+  );
+
+  it("preserves a snapshot write failure over later cancellation without a publication receipt", async () => {
+    const [path] = await createBinarySessionTargets();
+    const controller = new AbortController();
+    const profile = createAnalysisProfile(
+      { id: "fixture", name: "Fixture analysis provider", version: "1" },
+      { fixture: true },
+    );
+    const { dependencies, session } = factories({
+      profile,
+      onClose: () => controller.abort({ later: true }),
+    });
+    const failure = new EvidenceFileError("write", "io", {
+      path: join(dirname(path), "failed.json"),
+    });
+    const write = vi
+      .spyOn(session, "writeAnalysisSnapshot")
+      .mockResolvedValue(err(failure));
+    try {
+      const result = analysisCliErrorEnvelopeSchema.parse(
+        await runDirectAnalysis(
+          dependencies,
+          path,
+          "read_bytes",
+          {},
+          { signal: controller.signal, snapshotPath: failure.path },
+        ),
+      );
+      expect(result.code).toBe(projectAnalysisError(failure).code);
+      expect(result.details).toMatchObject({
+        partial_observation: { operation: "read_bytes" },
+      });
+      expect(result.details).not.toHaveProperty(
+        "diagnostics.analysis_snapshot",
+      );
+      expect(await readdir(dirname(path))).not.toContain("failed.json");
+    } finally {
+      write.mockRestore();
+    }
+  });
+});
 
 describe("one-shot analysis cleanup outcomes", () => {
   it("retains successful evidence and reports CLI failure when close fails", async () => {

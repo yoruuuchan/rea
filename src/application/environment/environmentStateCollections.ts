@@ -1,6 +1,9 @@
-import { collectionPathOf } from "../../domain/analysisView/environmentStateRules.js";
+import {
+  collectionPathOf,
+  selectedCollection,
+} from "../../domain/analysisView/environmentStateRules.js";
 import type { StateServing } from "./environmentStateAnswer.js";
-import { callSegments, collectionMatch } from "./environmentStateCallLines.js";
+import { callSegments } from "./environmentStateCallLines.js";
 import type { ReplayArguments } from "./environmentReplay.js";
 import type { EnvironmentManifestTool } from "./environmentSource.js";
 
@@ -31,17 +34,5 @@ export const createdCollection = (
   if (segments === undefined || segments.some(({ text }) => text.length === 0))
     return undefined;
   // The spelling the call supplies verbatim wins, as item calls choose their entity, then the first known: held ones lead.
-  let held: string | undefined;
-  let verbatim = -1;
-  for (const collection of creatableCollectionsOf(serving, type)) {
-    const matched = collectionMatch(collection, segments);
-    if (matched !== undefined && matched > verbatim) {
-      held = collection;
-      verbatim = matched;
-    }
-  }
-  return (
-    held ??
-    `/${segments.map(({ text, supplied }) => (supplied ? encodeURIComponent(text) : text)).join("/")}`
-  );
+  return selectedCollection(segments, creatableCollectionsOf(serving, type));
 };
