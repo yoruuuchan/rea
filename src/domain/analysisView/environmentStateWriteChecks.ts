@@ -1,145 +1,32 @@
 import type { JsonValue } from "../jsonValue.js";
-import { iterateUrlQueryParameters } from "../recordedTransportUrl.js";
-import {
-  compareUnicodeCodePoints as compare,
-  compositeKey,
-} from "../unicodeCodePointOrder.js";
+import { compositeKey } from "../unicodeCodePointOrder.js";
 import {
   at,
   decodedSegment,
   isObject,
-  isParam,
   listItems,
+  listsAll,
   missingRequiredFields,
   renderStateEntity,
   renderStateList,
   replaceAt,
   same,
   scalarText,
-  segmentsOf,
   type JsonObject,
   type StateDocument,
   type StateEntity,
   type StateItemView,
   type StateListView,
   type StateRecordFacts,
-  type StateToolFacts,
   type StateView,
+  segmentsOf,
 } from "./environmentStateRules.js";
-import { pageBound, pagesOnly } from "./environmentStatePaging.js";
-
-/** A query as replay compares a call's: decoded values by name, in any order; undefined when it repeats a name with another value, which no call's arguments can carry. */
-const queryKey = (query: string | undefined): string | undefined => {
-  const values = new Map<string, string>();
-  for (const [name, value] of iterateUrlQueryParameters(query ?? "")) {
-    if (values.has(name) && values.get(name) !== value) return undefined;
-    values.set(name, value);
-  }
-  return compositeKey(
-    [...values].sort(([left], [right]) => compare(left, right)),
-  );
-};
-
-interface CheckedLine {
-  readonly ordinal: number;
-  readonly segments: readonly string[];
-}
-
-/** A list or document view's checked lines, by query, in the tool's recorded order, and which path segments are the tool's parameters. */
-export interface CheckedLines {
-  readonly params: ReadonlySet<number>;
-  readonly byQuery: ReadonlyMap<string, readonly CheckedLine[]>;
-  /** A whole list's lines that only page it, which serving answers a call supplying no query from. */
-  readonly unfiltered: readonly CheckedLine[];
-}
-
-/** The line a read's call is answered from, and the collection serving lists for it. */
-export interface ServedLine {
-  readonly ordinal: number;
-  readonly collection: string;
-}
-
-/** Each list or document view's checked lines. */
-export const checkedLines = (input: {
-  readonly tools: readonly StateToolFacts[];
-  readonly records: readonly StateRecordFacts[];
-  readonly views: ReadonlyMap<string, StateView>;
-}): Map<string, CheckedLines> => {
-  const byOrdinal = new Map(
-    input.records.map((record) => [record.ordinal, record]),
-  );
-  const tools = new Map(input.tools.map((tool) => [tool.name, tool]));
-  const byView = new Map<string, CheckedLines>();
-  for (const view of input.views.values()) {
-    const tool = tools.get(view.tool);
-    if (view.shape === "recorded" || view.shape === "item" || !tool) continue;
-    const checked = new Set(view.checked_record_ordinals);
-    const byQuery = new Map<string, CheckedLine[]>();
-    const unfiltered: CheckedLine[] = [];
-    const whole = view.shape === "list" && view.membership === "all";
-    for (const ordinal of tool.record_ordinals) {
-      const record = byOrdinal.get(ordinal);
-      const key = record === undefined ? undefined : queryKey(record.query);
-      if (!checked.has(ordinal) || key === undefined) continue;
-      const line = { ordinal, segments: segmentsOf(record!.path) };
-      byQuery.set(key, [...(byQuery.get(key) ?? []), line]);
-      if (whole && pagesOnly(record!.query)) unfiltered.push(line);
-    }
-    const params = new Set(
-      segmentsOf(tool.path_template).flatMap((segment, index) =>
-        isParam(segment) ? [index] : [],
-      ),
-    );
-    byView.set(view.tool, { params, byQuery, unfiltered });
-  }
-  return byView;
-};
-
-/**
- * The checked line serving answers a read's call from, ranked as replay ranks lines: every
- * parameter the read's value verbatim or once percent-decoded and the query the read's, then the
- * most verbatim parameters, then recorded order. A read with no query falls back, as serving does,
- * on a whole list's lines that only page it.
- */
-export const servedLine = (
-  lines: CheckedLines | undefined,
-  record: StateRecordFacts,
-): ServedLine | undefined => {
-  const key = queryKey(record.query);
-  if (lines === undefined || key === undefined) return undefined;
-  return (
-    bestLine(lines, lines.byQuery.get(key) ?? [], record) ??
-    ([...iterateUrlQueryParameters(record.query ?? "")].length === 0
-      ? bestLine(lines, lines.unfiltered, record)
-      : undefined)
-  );
-};
-
-const bestLine = (
-  lines: CheckedLines,
-  candidates: readonly CheckedLine[],
-  record: StateRecordFacts,
-): ServedLine | undefined => {
-  const read = segmentsOf(record.path);
-  let best: { line: ServedLine; verbatim: number } | undefined;
-  for (const { ordinal, segments } of candidates) {
-    if (segments.length !== read.length) continue;
-    let verbatim = 0;
-    const matches = segments.every((segment, index) => {
-      if (segment === read[index]) {
-        if (lines.params.has(index)) verbatim += 1;
-        return true;
-      }
-      return lines.params.has(index) && decodedSegment(segment) === read[index];
-    });
-    if (matches && (best === undefined || verbatim > best.verbatim))
-      best = {
-        line: { ordinal, collection: `/${segments.join("/")}` },
-        verbatim,
-      };
-  }
-  return best?.line;
-};
+import { pageBound } from "./environmentStatePaging.js";
+import { answerQuery, renderQueryList } from "./environmentStateListQuery.js";
+import { singleQueryValues } from "../recordedTransportUrl.js";
+import type { ServedLine } from "./environmentStateCheckedLines.js";
+import { insertIndex } from "./environmentStateWriteExplain.js";
+import type { InsertRule } from "./environmentStateWriteRules.js";
 
 export const entityTarget = (type: string, collection: string, id: string) =>
   `e${compositeKey([type, collection, id])}`;
@@ -234,6 +121,22 @@ export class SimulatedState {
     );
   }
 
+  /** Place created entities again as a create under another insert rule would have. */
+  reinsert(
+    type: string,
+    collection: string,
+    entities: readonly StateEntity[],
+    rule: InsertRule,
+  ): void {
+    for (const entity of entities) this.remove(entity);
+    for (const entity of entities) {
+      const order = this.members(type, collection).map(
+        (member) => member.fields,
+      );
+      this.put(entity, insertIndex(rule, order, entity.fields));
+    }
+  }
+
   document(tool: string): JsonValue | undefined {
     return this.#documents.get(tool);
   }
@@ -266,12 +169,27 @@ export const withBodies = <T>(
 /** A check's outcome and the targets it covered. */
 export interface CheckOutcome {
   readonly pass: boolean;
+  /** The entities, by target, whose place a list read shows state order decides; absent, every listed entity's. */
+  readonly positional?: ReadonlySet<string>;
   readonly targets: readonly string[];
   /** Entities the recording, or the served base of a recorded-membership list, lists that the state does not hold, by target. */
   readonly unheld: readonly string[];
   /** For a failed list read that differs only in some members' fields, those members' targets. */
   readonly differing?: readonly string[];
 }
+
+/** Whether a passing check shows where a create placed its entity: a list's does unless a sort orders that entity, leaving it tied with none, or it matched alone. */
+export const showsPlacement = (
+  view: StateView,
+  outcome: Pick<CheckOutcome, "positional">,
+  inserted: ReadonlyMap<string, string>,
+  tool: string,
+): boolean =>
+  view.shape === "list" &&
+  (outcome.positional === undefined ||
+    [...inserted].some(
+      ([target, create]) => create === tool && outcome.positional!.has(target),
+    ));
 
 /** What a check compares: the read's recorded body and the served base recording it would answer on. */
 interface ReadBodies {
@@ -423,6 +341,8 @@ const listCheck = (
   view: StateListView,
   check: ListBodies,
   members: readonly StateEntity[],
+  /** The matches a whole or query answer counts; undefined for recorded members, whose totals stay as recorded. */
+  total: number | undefined,
 ): Pick<CheckOutcome, "pass" | "differing"> => {
   if (
     members.some(
@@ -437,8 +357,16 @@ const listCheck = (
   const rendered = members.map((entity) =>
     renderStateEntity(entity, view, check.volatile, observed.get(entity.id)),
   );
-  if (same(renderStateList(view, check.base, rendered), check.body))
-    return { pass: true };
+  const render = (items: readonly JsonObject[]): JsonValue =>
+    view.query === undefined || total === undefined
+      ? renderStateList(view, check.base, items)
+      : renderQueryList(
+          { ...view, query: view.query },
+          check.base,
+          items,
+          total,
+        );
+  if (same(render(rendered), check.body)) return { pass: true };
   // When the recorded members alone account for the difference, only they differ.
   const differs = members.filter((entity, index) => {
     const item = observed.get(entity.id);
@@ -447,8 +375,7 @@ const listCheck = (
   const patched = rendered.map(
     (item, index) => observed.get(members[index]!.id) ?? item,
   );
-  return differs.length > 0 &&
-    same(renderStateList(view, check.base, patched), check.body)
+  return differs.length > 0 && same(render(patched), check.body)
     ? {
         pass: false,
         differing: differs.map((entity) =>
@@ -456,6 +383,72 @@ const listCheck = (
         ),
       }
     : { pass: false };
+};
+
+/** The base line's and the read's listed entities by target: those the state holds, and those it no longer does. */
+const listedTargets = (
+  state: SimulatedState,
+  view: StateListView,
+  check: ListBodies,
+): { readonly targets: string[]; readonly unheld: string[] } => {
+  const targets: string[] = [];
+  const unheld: string[] = [];
+  const ids = [...check.baseItems, ...check.items].map(
+    (item) => scalarText(item[check.idField]) ?? "",
+  );
+  for (const id of new Set(ids))
+    (state.entity(view.type, check.collection, id) === undefined
+      ? unheld
+      : targets
+    ).push(entityTarget(view.type, check.collection, id));
+  return { targets, unheld };
+};
+
+/**
+ * A list read on a line the query answers: the query's matches in the state, in its order and page. Only a line whose
+ * parameters all sort or page, and that shows every match, covers the collection; any other covers the entities it lists.
+ */
+const checkQueryList = (
+  state: SimulatedState,
+  view: StateListView,
+  check: ListBodies,
+  values: ReadonlyMap<string, string>,
+): CheckOutcome | undefined => {
+  const { collection } = check;
+  const result = answerQuery(
+    view.query!,
+    values,
+    state.members(view.type, collection),
+  );
+  if (result === undefined) return undefined;
+  const outcome = listCheck(view, check, result.page, result.total);
+  return {
+    ...outcome,
+    // A lone match has no neighbour whose order it shows, so it shows nothing of where a create put it.
+    ...(result.positional === "all" && result.total > 1
+      ? {}
+      : {
+          positional: new Set(
+            (result.positional === "all" ? [] : result.positional).map(
+              (entity) => entityTarget(view.type, collection, entity.id),
+            ),
+          ),
+        }),
+    targets: [
+      ...new Set([
+        ...(result.whole ? [collectionTarget(view.type, collection)] : []),
+        ...result.page.map((entity) =>
+          entityTarget(view.type, collection, entity.id),
+        ),
+        // A failed read also covers the held entities it lists, as a write may have moved them out of the answer.
+        ...(outcome.pass
+          ? []
+          : listedTargets(state, view, { ...check, baseItems: [] }).targets),
+      ]),
+    ],
+    // What the base line or the read listed that the state no longer holds: the read shows whether it went.
+    unheld: listedTargets(state, view, check).unheld,
+  };
 };
 
 /** A list read of every entity of a collection: membership, order, fields and counters must render from the state. */
@@ -468,7 +461,7 @@ const checkAllList = (
   const members = state.members(view.type, collection);
   const held = new Set(members.map((entity) => entity.id));
   return {
-    ...listCheck(view, check, members),
+    ...listCheck(view, check, members, members.length),
     targets: [
       collectionTarget(view.type, collection),
       ...members.map((entity) =>
@@ -494,24 +487,42 @@ const checkRecordedList = (
     const entity = state.entity(view.type, collection, idOf(item));
     return entity === undefined ? [] : [entity];
   });
-  const targets: string[] = [];
-  const unheld: string[] = [];
-  for (const id of new Set([...check.baseItems, ...check.items].map(idOf)))
-    (state.entity(view.type, collection, id) === undefined
-      ? unheld
-      : targets
-    ).push(entityTarget(view.type, collection, id));
-  return { ...listCheck(view, check, members), targets, unheld };
+  return {
+    ...listCheck(view, check, members, undefined),
+    ...listedTargets(state, view, check),
+  };
 };
 
-/** A list read on a checked line, compared with the answer the served environment renders on that line's base recording from the collection it names. */
+/** The read's query values when serving evaluates the query for it: on a named query line, or with query values on a line it did not name. */
+const evaluatedQuery = (
+  view: StateListView,
+  record: StateRecordFacts,
+  line: ServedLine,
+): ReadonlyMap<string, string> | undefined =>
+  (
+    line.named
+      ? view.query?.record_ordinals.includes(line.ordinal) === true
+      : line.queried === true
+  )
+    ? singleQueryValues(record.query)
+    : undefined;
+
+/** A list read on a checked line, compared with the answer the served environment renders on that line's base recording from the collection it names: every entity when that line lists them all. */
 export const checkListRead = (
   state: SimulatedState,
   view: StateListView,
   record: StateRecordFacts,
-  check: ReadBodies & { readonly idField: string; readonly collection: string },
+  check: ReadBodies & {
+    readonly idField: string;
+    readonly collection: string;
+    /** The checked line serving answers the read on. */
+    readonly line: ServedLine;
+  },
 ): CheckOutcome | undefined => {
   if (!succeeded(record)) return undefined;
+  const { line } = check;
+  const query = evaluatedQuery(view, record, line);
+  const all = query === undefined && listsAll(view, line.ordinal);
   const { body, base } = check;
   const baseItems =
     base === undefined ? undefined : listItems(base, view.pointer);
@@ -520,18 +531,30 @@ export const checkListRead = (
   // Serving answers a page too small for the collection from its recording, so such a read checks nothing.
   const size = pageBound(record.query, baseItems.length);
   if (
-    view.membership === "all" &&
+    all &&
     size !== undefined &&
     state.members(view.type, check.collection).length > size
   )
     return undefined;
   // A usable body that no longer holds the list is not what serving answers on this line.
   const items = listItems(body, view.pointer);
-  const bodies = { ...check, body, base, items: items ?? [], baseItems };
+  // A line the read did not name keeps its own call's envelope, such as a link naming that call's values, which no write changes.
+  const envelope = line.named || items === undefined ? base : body;
+  // A query answered on a line the read did not name lists none of that line's members, so only the read's show what the state no longer holds.
+  const bodies = {
+    ...check,
+    body,
+    base: envelope,
+    items: items ?? [],
+    baseItems: line.named || query === undefined ? baseItems : [],
+  };
   const outcome =
-    view.membership === "all"
-      ? checkAllList(state, view, bodies)
-      : checkRecordedList(state, view, bodies);
+    query !== undefined
+      ? checkQueryList(state, view, bodies, query)
+      : all
+        ? checkAllList(state, view, bodies)
+        : checkRecordedList(state, view, bodies);
+  if (outcome === undefined) return undefined;
   return items === undefined ? { ...outcome, pass: false } : outcome;
 };
 
@@ -550,36 +573,4 @@ export const checkDocumentRead = (
     targets: [documentTarget(tool)],
     unheld: [],
   };
-};
-
-/**
- * Check, field by field, the writes that changed an entity an unmodelled write also changed:
- * each write's own fields must show as the state holds them, but for volatile ones, which take
- * the read's value and so show nothing of a write. A create wrote every field, so it cannot be
- * told apart from the unmodelled change and is not checked.
- */
-export const writtenFieldChecks = (
-  entity: StateEntity,
-  view: StateItemView,
-  observed: JsonObject,
-  check: {
-    readonly volatile: ReadonlySet<string>;
-    readonly writes: ReadonlyMap<string, readonly string[] | null>;
-  },
-): Map<string, boolean> => {
-  const shown = renderStateEntity(entity, view, check.volatile, observed);
-  const outcomes = new Map<string, boolean>();
-  for (const [tool, fields] of check.writes) {
-    const compared = (fields ?? []).filter(
-      (field) =>
-        !check.volatile.has(field) &&
-        (Object.hasOwn(observed, field) || Object.hasOwn(shown, field)),
-    );
-    if (fields === null || compared.length === 0) continue;
-    outcomes.set(
-      tool,
-      compared.every((field) => same(shown[field], observed[field])),
-    );
-  }
-  return outcomes;
 };

@@ -978,3 +978,41 @@ cliTest(
     });
   },
 );
+
+cliTest.skipIf(process.platform === "win32")(
+  "refuses a Ghidra seed path below a regular file as caller input",
+  async ({ cli }) => {
+    const root = await createTestTempDirectory("rea-il2cpp-seeds-parent-");
+    const path = join(root, "global-metadata.dat");
+    const binaryPath = join(root, "libil2cpp.so");
+    const parent = join(root, "regular-file");
+    await writeFile(path, createIl2cppMetadataFixture().bytes);
+    await writeFile(binaryPath, createElfFixture(createIl2cppBinaryFixture()));
+    await writeFile(parent, "unchanged");
+    const result = await runFileCli(cli, {
+      arguments: [
+        "inspect-il2cpp-metadata",
+        path,
+        "--binary",
+        binaryPath,
+        "--ghidra-seeds",
+        join(parent, "seeds.tsv"),
+        "--json",
+      ],
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.json).toMatchObject({
+      code: "invalid_request",
+      category: "invalid_input",
+      details: {
+        issues: [
+          {
+            path: ["ghidra_seeds"],
+            message: expect.stringContaining("not a directory"),
+          },
+        ],
+      },
+    });
+    expect(await readFile(parent, "utf8")).toBe("unchanged");
+  },
+);

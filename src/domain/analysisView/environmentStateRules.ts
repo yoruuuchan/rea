@@ -1,3 +1,4 @@
+import type { ListQuery } from "./environmentStateListQuery.js";
 import { canonicalJson } from "../comparisonSemantics.js";
 import type { JsonValue } from "../jsonValue.js";
 import type { StateWritePlan } from "./environmentStateWriteRules.js";
@@ -108,8 +109,23 @@ export type StateItemView = EntityViewPlan & {
 export type StateListView = EntityViewPlan & {
   readonly shape: "list";
   readonly membership: "all" | "recorded";
+  /** With recorded membership, the checked lines that each list their whole collection. */
+  readonly all_record_ordinals?: number[] | undefined;
   readonly counters: string[];
+  /** The query the view's other lines follow, when one explains any of them. */
+  readonly query?: ListQuery | undefined;
 };
+
+/** Whether a list view answers on a checked line with every entity of the collection. */
+export const listsAll = (view: StateListView, ordinal: number): boolean =>
+  view.membership === "all" ||
+  (view.all_record_ordinals?.includes(ordinal) ?? false);
+
+/** The checked lines a list view answers with every entity of the collection. */
+export const allLines = (view: StateListView): readonly number[] =>
+  view.membership === "all"
+    ? view.checked_record_ordinals
+    : (view.all_record_ordinals ?? []);
 
 export type StateView =
   | StateItemView
@@ -530,13 +546,21 @@ export const missingRequiredFields = (
   return view.required_fields.filter((name) => !Object.hasOwn(shown, name));
 };
 
-/** A list response rendered from `base`: its array replaced by `items` and its counters set to their number. */
+/**
+ * A list response rendered from `base`: its array replaced by `items`, and set to their number each counter that
+ * counted the items `base` listed; one that did not, such as a partial page's total, keeps its recorded value.
+ */
 export const renderStateList = (
   view: Pick<StateListView, "pointer" | "counters">,
   base: JsonValue,
   items: readonly JsonObject[],
-): JsonValue =>
-  view.counters.reduce(
-    (body, name) => replaceAt(body, pointerTo(name), items.length),
+): JsonValue => {
+  const listed = listItems(base, view.pointer)?.length;
+  return view.counters.reduce(
+    (body, name) =>
+      at(base, pointerTo(name)) === listed
+        ? replaceAt(body, pointerTo(name), items.length)
+        : body,
     replaceAt(base, view.pointer, [...items]),
   );
+};

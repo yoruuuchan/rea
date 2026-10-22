@@ -110,24 +110,42 @@ const observeSymlink = async (
     : err({ reason: "identity_changed", system_code: null });
 };
 
-const lstatIfPresent = async (
+type PathLookup =
+  | { readonly state: "present"; readonly stats: Stats }
+  | {
+      readonly state: "absent" | "unavailable";
+      readonly system_code: string;
+      readonly cause: unknown;
+    };
+
+/**
+ * Look up one path without following its final component. ENOENT and ENOTDIR
+ * both prove that no entry exists at the path; other unavailable lookups leave
+ * it unobserved rather than absent.
+ */
+const lookupPath = async (
   path: string,
-  previouslyObservedRoot = false,
   signal?: AbortSignal,
-): Promise<Stats | undefined> => {
+): Promise<PathLookup> => {
   signal?.throwIfAborted();
+  let stats: Stats;
   try {
-    const stats = await lstat(path);
-    signal?.throwIfAborted();
-    return stats;
+    stats = await lstat(path);
   } catch (cause: unknown) {
-    const code = filesystemSystemCode(cause);
-    if (code === "ENOENT" || (previouslyObservedRoot && code === "ENOTDIR")) {
-      signal?.throwIfAborted();
-      return undefined;
-    }
-    throw cause;
+    const systemCode = fileUnavailableSystemCode(cause);
+    if (systemCode === undefined) throw cause;
+    signal?.throwIfAborted();
+    return {
+      state:
+        systemCode === "ENOENT" || systemCode === "ENOTDIR"
+          ? "absent"
+          : "unavailable",
+      system_code: systemCode,
+      cause,
+    };
   }
+  signal?.throwIfAborted();
+  return { state: "present", stats };
 };
 
 /** Reports a complete digest or an explicit per-file reason hashing was omitted. */
@@ -323,16 +341,20 @@ export const hashFile = async (
   );
 };
 
-/** Capture bounded, root-aliased filesystem state without following symlinks. */
+/**
+ * Capture bounded, root-aliased filesystem state without following symlinks.
+ *
+ * Without `admission`, every selected root must be missing or observable, so
+ * an obstructed or denied selection fails before launch. A snapshot returned
+ * from that call admitted every root for the run: later lookups record a
+ * non-directory ancestor as absence and a denied lookup as an omission.
+ */
 export const snapshotRoots = async (
   scenario: ProcessScenario,
   signal?: AbortSignal,
-  previous?: ProcessFilesystemSnapshot,
+  admission?: ProcessFilesystemSnapshot,
   retainer?: ProcessCaptureCleanupRetainer,
 ): Promise<ProcessFilesystemSnapshot> => {
-  // A prior root entry establishes same-run admission. Preserve initial
-  // obstruction errors; a later non-directory ancestor makes it absent.
-  const previousPaths = new Set(previous?.files.map(({ path }) => path));
   const entries: FileState[] = [];
   const completeRoots: string[] = [];
   let remainingBytes = scenario.limits.file_bytes;
@@ -408,11 +430,20 @@ export const snapshotRoots = async (
         enumerationReasons.add("depth_limit");
       return false;
     }
-    const stats =
-      admitted ??
-      (await lstatIfPresent(path, previousPaths.has(`${rootAlias}:.`), signal));
-    if (stats === undefined) return true;
     const relativePath = relative(root, path) || ".";
+    const lookup: PathLookup =
+      admitted === undefined
+        ? await lookupPath(path, signal)
+        : { state: "present", stats: admitted };
+    if (lookup.state !== "present")
+      return (
+        lookup.state === "absent" ||
+        omitEntry(`${rootAlias}:${relativePath}`, {
+          reason: "entry_unavailable",
+          system_code: lookup.system_code,
+        })
+      );
+    const { stats } = lookup;
     if (stats.isSymbolicLink()) {
       // Keep the target as stored: lexical resolution can merge distinct targets.
       const target = await observeSymlink(path, stats, signal);
@@ -589,16 +620,19 @@ export const snapshotRoots = async (
       root,
     ] of scenario.filesystem_observation_paths.entries()) {
       const alias = `root_${String(index)}`;
-      const admitted = await lstatIfPresent(
-        root,
-        previousPaths.has(`${alias}:.`),
-        signal,
-      );
-      if (admitted === undefined) {
-        completeRoots.push(alias);
+      const lookup = await lookupPath(root, signal);
+      if (lookup.state !== "present") {
+        if (admission === undefined && lookup.system_code !== "ENOENT")
+          throw lookup.cause;
+        if (lookup.state === "absent") completeRoots.push(alias);
+        else
+          omitEntry(`${alias}:.`, {
+            reason: "entry_unavailable",
+            system_code: lookup.system_code,
+          });
         continue;
       }
-      if (await visit(root, alias, root, 0, admitted))
+      if (await visit(root, alias, root, 0, lookup.stats))
         completeRoots.push(alias);
     }
     const snapshot = buildSnapshot();

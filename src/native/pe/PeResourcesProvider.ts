@@ -2,7 +2,7 @@ import { fixedNativeAllowance } from "../../domain/native/nativeDeadlines.js";
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
 import { readStableArtifact } from "../../artifacts/readStableArtifact.js";
 import {
-  ArtifactFileCleanupFailure,
+  artifactFilePrimaryFailure,
   bindArtifactFileCleanup,
   artifactFileCancellationCause,
 } from "../../artifacts/ArtifactFileOperation.js";
@@ -80,7 +80,7 @@ export class PeResourcesProvider implements PeResourcesPort {
         );
       });
     } catch (cause) {
-      return err(peResourcesFailure(cause, input, options?.signal));
+      return err(peResourcesFailure(cause, input));
     }
   }
 }
@@ -191,20 +191,11 @@ const peResourcesFailurePrimary = (
   );
 };
 
-const peResourcesFailure = (
-  cause: unknown,
-  input: InspectPeResourcesInput,
-  signal: AbortSignal | undefined,
-) => {
-  const primary =
-    cause instanceof ArtifactFileCleanupFailure &&
-    cause.fileCleanupFailure.outcome.kind === "failed"
-      ? peResourcesFailurePrimary(cause.fileCleanupFailure.outcome.cause, input)
-      : cause instanceof ArtifactFileCleanupFailure && signal?.aborted
-        ? new AnalysisCancelledError("inspect_pe_resources", {
-            cause: signal.reason,
-          })
-        : peResourcesFailurePrimary(cause, input);
+const peResourcesFailure = (cause: unknown, input: InspectPeResourcesInput) => {
+  const primary = peResourcesFailurePrimary(
+    artifactFilePrimaryFailure(cause),
+    input,
+  );
   if (!(cause instanceof ArtifactReaderFailure) || cause.cleanup === undefined)
     return primary;
   const cleanup = new ProviderCleanupError(

@@ -11,6 +11,8 @@ import {
   BOOK_ROWS,
   BOOK_WRITE_CLOCK,
   FIRST_BOOK,
+  LIST_LINE_ROWS,
+  QUERY_ROWS,
   SECOND_BOOK,
   THIRD_BOOK,
   book,
@@ -538,6 +540,369 @@ describe("observation from a later read", () => {
       observation: { ordinal: 4, pointer: "" },
       response: { ordinal: 3, shape: "identity", pointer: "/created_id" },
       checked_record_ordinals: [5],
+    });
+  });
+});
+
+describe("list lines", () => {
+  it("confirms the same create when a learned filter repeats identical decoded query values", () => {
+    for (const query of [
+      "shelf=a&shelf=a",
+      "shelf=%61&shelf=a",
+      "shelf=a&include=all&shelf=a",
+    ]) {
+      const rows = QUERY_ROWS.map((row, index): TimedCaptureRow => {
+        if (index !== QUERY_ROWS.length - 1) return row;
+        const [method, , ...response] = row;
+        return [method, `/api/books?${query}`, ...response];
+      });
+      expect(planOf(stateOf(rows), "post_books"), query).toMatchObject({
+        served: true,
+        contradicted_by: null,
+      });
+    }
+  });
+
+  it("lists every entity on a line that lists its whole collection, though another line of the tool is filtered", () => {
+    const state = stateOf(LIST_LINE_ROWS);
+    expect(state.views.find((view) => view.tool === "get_books")).toMatchObject(
+      {
+        shape: "list",
+        pointer: "/content",
+        membership: "recorded",
+        all_record_ordinals: [0],
+        counters: ["numberOfElements", "totalElements"],
+        checked_record_ordinals: [0, 1],
+      },
+    );
+    // The whole list after the create shows the created book, which confirms it.
+    expect(planOf(state, "post_books")).toMatchObject({
+      served: true,
+      checked_record_ordinals: [5, 6],
+    });
+  });
+
+  it("confirms no create by a whole list taken after a read showed its entity gone", () => {
+    const rows: TimedCaptureRow[] = [
+      ...BOOK_INIT_ROWS,
+      ["POST", "/api/books", THIRD_BOOK, 201, { name: "Third Book" }],
+      // A redirected delete is not modelled; the read after it shows the book gone.
+      ["DELETE", "/api/books/3", "", 302],
+      ["GET", "/api/books/3", BOOK_NOT_FOUND, 404],
+      ["GET", "/api/books", [FIRST_BOOK, SECOND_BOOK]],
+    ];
+    expect(planOf(stateOf(rows), "post_books")).toMatchObject({
+      served: false,
+      reason: "unconfirmed",
+    });
+  });
+
+  it("confirms no create by a whole list after an item read showed nothing of its entity", () => {
+    const rows: TimedCaptureRow[] = [
+      ...BOOK_INIT_ROWS,
+      ["POST", "/api/books", THIRD_BOOK, 201, { name: "Third Book" }],
+      // An unmodelled write elsewhere may explain the next read, which the state then takes.
+      ["POST", "/api/exports", { queued: true }, 202, { format: "csv" }],
+      ["GET", "/api/books/3", null],
+      ["GET", "/api/books", [FIRST_BOOK, SECOND_BOOK]],
+    ];
+    expect(planOf(stateOf(rows), "post_books")).toMatchObject({
+      served: false,
+      checked_record_ordinals: [],
+    });
+  });
+
+  it("names no line when every line lists its whole collection, or none does", () => {
+    const listOf = (rows: readonly TimedCaptureRow[]) =>
+      stateOf(rows).views.find((view) => view.tool === "get_books");
+    const whole = listOf(LIST_LINE_ROWS.filter((_, index) => index !== 1));
+    expect(whole).toMatchObject({ membership: "all" });
+    expect(whole).not.toHaveProperty("all_record_ordinals");
+    expect(listOf(LIST_LINE_ROWS.slice(1))).not.toHaveProperty(
+      "all_record_ordinals",
+    );
+  });
+});
+
+describe("list queries", () => {
+  it("learns a filter, a search, a sort and an inert flag from the lines the whole collection does not explain", () => {
+    const state = stateOf(QUERY_ROWS);
+    expect(state.views.find((view) => view.tool === "get_books")).toMatchObject(
+      {
+        shape: "list",
+        membership: "recorded",
+        all_record_ordinals: [0],
+        query: {
+          parameters: {
+            shelf: { role: "filter", field: "shelf" },
+            q: { role: "search", fields: ["name", "slug"] },
+            sort: { role: "sort" },
+            include: { role: "inert", values: ["all"] },
+          },
+          record_ordinals: [1, 2, 3, 4],
+          totals: [],
+        },
+        checked_record_ordinals: [0, 1, 2, 3, 4],
+      },
+    );
+    // The shelf filter after the create lists the created book, which confirms it.
+    expect(planOf(state, "post_books")).toMatchObject({
+      served: true,
+      checked_record_ordinals: [8],
+    });
+  });
+});
+
+describe("list reads with query values no line recorded", () => {
+  it("serves no create that a filtered read on a new value omits, as serving would list it", () => {
+    const third = { ...book(3, "Third Book", bookClock(7)), shelf: "b" };
+    const rows: TimedCaptureRow[] = [
+      ...QUERY_ROWS.slice(0, 7),
+      ["POST", "/api/books", third, 201, { name: "Third Book", shelf: "b" }],
+      ["GET", "/api/books/3", third],
+      // Serving evaluates `shelf=b` over the state, which lists the created book; the recording does not.
+      ["GET", "/api/books?shelf=b", [QUERY_ROWS[6]![2] as Book]],
+    ];
+    // The item read confirmed the book, so the failing filtered read blames the related create as a side effect.
+    expect(planOf(stateOf(rows), "post_books")).toMatchObject({
+      served: false,
+      reason: "side-effect",
+    });
+  });
+
+  it("checks what the state answers on a line the read did not name, not the envelope that line's own call recorded", () => {
+    const first = { ...FIRST_BOOK, shelf: "a" };
+    const second = { ...SECOND_BOOK, shelf: "b" };
+    const third = { ...book(3, "Third Book", bookClock(4)), shelf: "c" };
+    // Each page links the next under its own query.
+    const page = (query: string, books: readonly Book[]) => ({
+      data: [...books],
+      next: `/api/books?${query}offset=20`,
+    });
+    const rows: TimedCaptureRow[] = [
+      ["GET", "/api/books", page("", [first, second])],
+      ["GET", "/api/books?shelf=a", page("shelf=a&", [first])],
+      ["GET", "/api/books/1", first],
+      ["GET", "/api/books/2", second],
+      ["POST", "/api/books", third, 201, { name: "Third Book", shelf: "c" }],
+      // Serving lists `shelf=c` from the state in the `shelf=a` line's envelope, whose link names shelf a.
+      ["GET", "/api/books?shelf=c", page("shelf=c&", [third])],
+    ];
+    expect(planOf(stateOf(rows), "post_books")).toMatchObject({
+      served: true,
+      checked_record_ordinals: [5],
+    });
+  });
+
+  it("checks a recorded-member line with the total it recorded, as serving answers it", () => {
+    const envelope = (books: readonly Book[]) => ({
+      items: [...books],
+      total: 3,
+    });
+    const renamed = renamedBook(SECOND_BOOK, "Renamed Second", 6);
+    const rows: TimedCaptureRow[] = [
+      ["GET", "/api/books", envelope([FIRST_BOOK, SECOND_BOOK, THIRD_BOOK])],
+      ["GET", "/api/books?limit=1", envelope([FIRST_BOOK])],
+      // A cursor no role explains keeps its recorded member and total.
+      ["GET", "/api/books?cursor=abc", envelope([FIRST_BOOK])],
+      ["GET", "/api/books/1", FIRST_BOOK],
+      ["GET", "/api/books/2", SECOND_BOOK],
+      ["GET", "/api/books/3", THIRD_BOOK],
+      ["PATCH", "/api/books/2", renamed, 200, { name: "Renamed Second" }],
+      ["GET", "/api/books/2", renamed],
+      ["GET", "/api/books?cursor=abc", envelope([FIRST_BOOK])],
+      // Failing that read would taint book 1 and leave its confirmed delete unserved.
+      ["DELETE", "/api/books/1", "", 204],
+      ["GET", "/api/books/1", BOOK_NOT_FOUND, 404],
+    ];
+    const state = stateOf(rows);
+    expect(planOf(state, "patch_books_by_id")).toMatchObject({ served: true });
+    expect(planOf(state, "delete_books_by_id")).toMatchObject({
+      served: true,
+      checked_record_ordinals: [10],
+    });
+  });
+});
+
+describe("list reads on a line they did not name", () => {
+  const first = { ...FIRST_BOOK, shelf: "a" };
+  const second = { ...SECOND_BOOK, shelf: "b" };
+
+  it("checks a read with no query on a query line by that line's recorded members, as serving lists them", () => {
+    const third = { ...book(3, "Third Book", bookClock(3)), shelf: "c" };
+    const rows: TimedCaptureRow[] = [
+      ["GET", "/api/books?shelf=a", [first]],
+      ["GET", "/api/books/1", first],
+      ["GET", "/api/books/2", second],
+      ["POST", "/api/books", third, 201, { name: "Third Book", shelf: "c" }],
+      // Serving answers this call on the `shelf=a` line with its recorded book, not the created one.
+      ["GET", "/api/books", [first, second, third]],
+    ];
+    expect(planOf(stateOf(rows), "post_books")).toMatchObject({
+      served: false,
+      checked_record_ordinals: [],
+    });
+  });
+
+  it("confirms no delete by a filtered read on another value, whose answer never listed the deleted book", () => {
+    const rows: TimedCaptureRow[] = [
+      ["GET", "/api/books", [first, second]],
+      ["GET", "/api/books?shelf=a", [first]],
+      ["GET", "/api/books/1", first],
+      ["GET", "/api/books/2", second],
+      ["DELETE", "/api/books/1", "", 204],
+      ["GET", "/api/books?shelf=b", [second]],
+    ];
+    expect(planOf(stateOf(rows), "delete_books_by_id")).toMatchObject({
+      served: false,
+      reason: "unconfirmed",
+      checked_record_ordinals: [],
+    });
+  });
+
+  it("lets a sorted read whose values tie fix a create's position, as its order shows where the create put it", () => {
+    const shelved = (id: number, name: string, shelf: string, at: number) => ({
+      ...book(id, name, bookClock(at)),
+      shelf,
+    });
+    const beta = shelved(1, "Beta", "a", 0);
+    const mike = shelved(2, "Mike", "b", 1);
+    const zulu = shelved(3, "Zulu", "a", 2);
+    const alpha = shelved(4, "Alpha", "a", 6);
+    const rows: TimedCaptureRow[] = [
+      ["GET", "/api/books", [beta, mike, zulu]],
+      ["GET", "/api/books?shelf=a", [beta, zulu]],
+      ["GET", "/api/books?sort=-id", [zulu, mike, beta]],
+      ["GET", "/api/books/1", beta],
+      ["GET", "/api/books/2", mike],
+      ["GET", "/api/books/3", zulu],
+      ["POST", "/api/books", alpha, 201, { name: "Alpha", shelf: "a" }],
+      // Every match shares the shelf, so the order is the state's: the create went last.
+      ["GET", "/api/books?shelf=a&sort=shelf", [beta, zulu, alpha]],
+      // A name order would put it first, which the read before contradicts.
+      ["GET", "/api/books", [alpha, beta, mike, zulu]],
+    ];
+    expect(planOf(stateOf(rows), "post_books")).toMatchObject({
+      served: false,
+      contradicted_by: 8,
+    });
+  });
+
+  it("leaves a create's position open after a sorted read that ties other books but not the created one", () => {
+    const shelved = (id: number, name: string, shelf: string, at: number) => ({
+      ...book(id, name, bookClock(at)),
+      category: "x",
+      shelf,
+    });
+    const beta = shelved(1, "Beta", "a", 0);
+    const mike = { ...shelved(2, "Mike", "b", 1), category: "y" };
+    const zulu = shelved(3, "Zulu", "a", 2);
+    const alpha = shelved(4, "Alpha", "c", 6);
+    const rows: TimedCaptureRow[] = [
+      ["GET", "/api/books", [beta, mike, zulu]],
+      ["GET", "/api/books?category=x", [beta, zulu]],
+      ["GET", "/api/books?sort=-id", [zulu, mike, beta]],
+      ["GET", "/api/books/1", beta],
+      ["GET", "/api/books/2", mike],
+      ["GET", "/api/books/3", zulu],
+      [
+        "POST",
+        "/api/books",
+        alpha,
+        201,
+        { name: "Alpha", category: "x", shelf: "c" },
+      ],
+      // Beta and Zulu tie on shelf a, but the created book's shelf c sorts it last wherever it was put.
+      ["GET", "/api/books?category=x&sort=shelf", [beta, zulu, alpha]],
+      ["GET", "/api/books", [alpha, beta, mike, zulu]],
+    ];
+    expect(planOf(stateOf(rows), "post_books")).toMatchObject({
+      served: true,
+      checked_record_ordinals: [7, 8],
+      insert: { rule: "sorted", field: "name", direction: "ascending" },
+    });
+  });
+
+  it("leaves a create's position open after a sorted read, for a later whole list to settle", () => {
+    const shelved = (id: number, name: string, shelf: string, at: number) => ({
+      ...book(id, name, bookClock(at)),
+      shelf,
+    });
+    const beta = shelved(1, "Beta", "a", 0);
+    const mike = shelved(2, "Mike", "b", 1);
+    const zulu = shelved(3, "Zulu", "a", 2);
+    const alpha = shelved(4, "Alpha", "a", 6);
+    const rows: TimedCaptureRow[] = [
+      ["GET", "/api/books", [beta, mike, zulu]],
+      ["GET", "/api/books?shelf=a", [beta, zulu]],
+      ["GET", "/api/books?sort=-id", [zulu, mike, beta]],
+      ["GET", "/api/books/1", beta],
+      ["GET", "/api/books/2", mike],
+      ["GET", "/api/books/3", zulu],
+      ["POST", "/api/books", alpha, 201, { name: "Alpha", shelf: "a" }],
+      // The sorted shelf passes wherever the create placed its book; the whole list orders by name.
+      ["GET", "/api/books?shelf=a&sort=-id", [alpha, zulu, beta]],
+      ["GET", "/api/books", [alpha, beta, mike, zulu]],
+    ];
+    expect(planOf(stateOf(rows), "post_books")).toMatchObject({
+      served: true,
+      checked_record_ordinals: [7, 8],
+      insert: { rule: "sorted", field: "name", direction: "ascending" },
+    });
+  });
+});
+
+describe("what a list query read shows of writes", () => {
+  const shelved = (id: number, name: string, shelf: string, at: number) => ({
+    ...book(id, name, bookClock(at)),
+    shelf,
+  });
+  const beta = shelved(1, "Beta", "a", 0);
+  const mike = shelved(2, "Mike", "b", 1);
+  const zulu = shelved(3, "Zulu", "a", 2);
+  const INIT: TimedCaptureRow[] = [
+    ["GET", "/api/books", [beta, mike, zulu]],
+    ["GET", "/api/books?shelf=a", [beta, zulu]],
+    ["GET", "/api/books/1", beta],
+    ["GET", "/api/books/2", mike],
+    ["GET", "/api/books/3", zulu],
+  ];
+
+  it("blames a write that moved a book off a filter whose failed read still lists it", () => {
+    const moved = { ...beta, shelf: "b", updated_at: bookClock(5) };
+    const renamed = renamedBook(zulu, "Zulu Two", 7);
+    const rows: TimedCaptureRow[] = [
+      ...INIT,
+      ["PATCH", "/api/books/1", moved, 200, { shelf: "b" }],
+      ["PUT", "/api/books/3", renamed, 200, { name: "Zulu Two", shelf: "a" }],
+      // Serving lists Zulu alone on shelf a; the recording still lists the moved book there.
+      ["GET", "/api/books?shelf=a", [beta, renamed]],
+      ["GET", "/api/books/1", moved],
+    ];
+    const state = stateOf(rows);
+    expect(planOf(state, "patch_books_by_id")).toMatchObject({
+      served: false,
+      contradicted_by: 7,
+    });
+    expect(planOf(state, "put_books_by_id")).toMatchObject({
+      served: false,
+      contradicted_by: 7,
+    });
+  });
+
+  it("leaves a create's position open after a filter that lists only its book, for a later whole list to settle", () => {
+    const alpha = shelved(4, "Alpha", "c", 5);
+    const rows: TimedCaptureRow[] = [
+      ...INIT,
+      ["POST", "/api/books", alpha, 201, { name: "Alpha", shelf: "c" }],
+      // A lone match shows nothing of where the create put it among the other books.
+      ["GET", "/api/books?shelf=c", [alpha]],
+      ["GET", "/api/books", [alpha, beta, mike, zulu]],
+    ];
+    expect(planOf(stateOf(rows), "post_books")).toMatchObject({
+      served: true,
+      checked_record_ordinals: [6, 7],
+      insert: { rule: "sorted", field: "name", direction: "ascending" },
     });
   });
 });

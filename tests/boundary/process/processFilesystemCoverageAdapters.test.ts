@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -313,6 +313,106 @@ it.skipIf(CAPTURE_SKIP_REASON || process.platform === "win32")(
       reason: expect.any(String),
     });
     expect(compareProcessCaptures(capture, capture).filesystem).toBe("unknown");
+  },
+  20_000,
+);
+
+itWithCaptureCapability.each(["cli", "mcp"] as const)(
+  "observes absence when selected roots lose their directory ancestor through %s",
+  async (adapter) => {
+    const runCapture = adapter === "cli" ? captureViaCli : captureViaMcp;
+    // A non-directory ancestor proves that no entry exists below it, for an
+    // initially absent root and through a symlink to a regular file alike.
+    for (const replacement of [
+      "fs.writeFileSync('state','regular file');",
+      "fs.writeFileSync('target','regular file');fs.symlinkSync('target','state');",
+    ]) {
+      const root = await createTestTempDirectory("rea-fs-obstructed-root-");
+      await mkdir(join(root, "state"));
+      const evidence = await runCapture({
+        executable: process.execPath,
+        arguments: [
+          "-e",
+          `const fs=require('node:fs');fs.renameSync('state','saved-state');${replacement}`,
+        ],
+        working_directory: root,
+        filesystem_observation_paths: [
+          join(root, "state", "reports"),
+          join(root, "state"),
+        ],
+      });
+      const capture = parseProcessCapture(evidence.normalized_result);
+      expect(capture.exit).toMatchObject({ code: 0, reason: "exited" });
+      expect(capture.filesystem_effects).toEqual([
+        expect.objectContaining({
+          path: "root_1:.",
+          status: "modified",
+          before: expect.objectContaining({ type: "directory" }),
+        }),
+      ]);
+      expect(capture.truncation_details.filesystem_after).toMatchObject({
+        enumeration_truncated: false,
+        enumeration_omissions: [],
+      });
+    }
+  },
+  20_000,
+);
+
+it
+  .skipIf(
+    CAPTURE_SKIP_REASON ||
+      process.platform === "win32" ||
+      process.getuid?.() === 0,
+  )
+  .each(["cli", "mcp"] as const)(
+  "keeps roots behind a newly unsearchable ancestor unobserved through %s",
+  async (adapter) => {
+    const root = await createTestTempDirectory("rea-fs-denied-root-");
+    await mkdir(join(root, "state"));
+    await writeFile(join(root, "state", "present.json"), "payload");
+    await symlink("state", join(root, "alias"));
+    try {
+      const evidence = await (
+        adapter === "cli" ? captureViaCli : captureViaMcp
+      )({
+        executable: process.execPath,
+        arguments: ["-e", "require('node:fs').chmodSync('state',0)"],
+        working_directory: root,
+        filesystem_observation_paths: [
+          join(root, "state", "present.json"),
+          join(root, "state", "absent.json"),
+          join(root, "alias", "present.json"),
+        ],
+      });
+      const capture = parseProcessCapture(evidence.normalized_result);
+      expect(capture.exit).toMatchObject({ code: 0, reason: "exited" });
+      // A denied lookup is not absence: the observed file's fate stays
+      // unknown, and each affected root records why it is incomplete.
+      expect(capture.filesystem_effects).toEqual(
+        ["root_0:.", "root_2:."].map((path) =>
+          expect.objectContaining({
+            path,
+            status: "unknown",
+            before: expect.objectContaining({ type: "file" }),
+            after: null,
+          }),
+        ),
+      );
+      expect(capture.truncation_details.filesystem_after).toMatchObject({
+        enumeration_truncated: true,
+        enumeration_reasons: ["entry_unavailable"],
+        enumeration_omissions: ["root_0:.", "root_1:.", "root_2:."].map(
+          (path) => ({
+            path,
+            reason: "entry_unavailable",
+            system_code: "EACCES",
+          }),
+        ),
+      });
+    } finally {
+      await chmod(join(root, "state"), 0o700);
+    }
   },
   20_000,
 );

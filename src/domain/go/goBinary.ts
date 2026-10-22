@@ -158,12 +158,7 @@ export const goBinarySchema = z
       ["module_bytes_base64", info.module_location, "module"],
     ] as const) {
       const encoded = info[field];
-      const padding = encoded.endsWith("==")
-        ? 2
-        : encoded.endsWith("=")
-          ? 1
-          : 0;
-      if ((encoded.length / 4) * 3 - padding !== range.bytes)
+      if (Buffer.byteLength(encoded, "base64") !== range.bytes)
         context.addIssue({
           code: "custom",
           path: ["build_info", field],

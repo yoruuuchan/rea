@@ -134,6 +134,18 @@ export function* iterateUrlQueryParameters(
   }
 }
 
+/** A single-valued form query: identical decoded repeats agree; conflicting values remain unknown. */
+export const singleQueryValues = (
+  query: string | undefined,
+): ReadonlyMap<string, string> | undefined => {
+  const values = new Map<string, string>();
+  for (const [name, value] of iterateUrlQueryParameters(query ?? "")) {
+    if (values.has(name) && values.get(name) !== value) return undefined;
+    values.set(name, value);
+  }
+  return values;
+};
+
 /** WHATWG form-query names, preserving order, repeats and empty names without decoding values. */
 export function* parseUrlQueryParameterNames(
   query: string,

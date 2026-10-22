@@ -236,6 +236,138 @@ describe("wrapped contextBridge exposure methods", () => {
   });
 });
 
+describe("contextBridge helper invocations", () => {
+  const exposures = (source: string) => {
+    const result = analyzeJavaScriptStaticSource(`
+      const { contextBridge, ipcRenderer } = require("electron");
+      ${source}`);
+    return {
+      result,
+      apis: result.electron.context_bridge_apis.map(
+        ({
+          api_key,
+          api_key_expression,
+          world_id,
+          members,
+          unknown_members,
+        }) => ({
+          api_key,
+          api_key_expression,
+          world_id,
+          members,
+          unknown_members,
+        }),
+      ),
+    };
+  };
+  const literalKey = { api_key_expression: null, world_id: null };
+
+  it("binds a site-literal object to each invocation's key", () => {
+    const { apis } = exposures(`
+      function expose(key) { contextBridge.exposeInMainWorld(key, { ping() {} }); }
+      expose("one"); expose("two");`);
+    expect(apis).toEqual([
+      { api_key: "one", ...literalKey, members: ["ping"], unknown_members: 0 },
+      { api_key: "two", ...literalKey, members: ["ping"], unknown_members: 0 },
+    ]);
+  });
+
+  it("counts a repeated identical invocation once", () => {
+    const { apis } = exposures(`
+      function expose(key, api) { contextBridge.exposeInMainWorld(key, api); }
+      const api = { ping() {} };
+      expose("one", api); expose("one", api);`);
+    expect(apis).toEqual([
+      { api_key: "one", ...literalKey, members: ["ping"], unknown_members: 0 },
+    ]);
+  });
+
+  it("describes one key's alternative objects as one exposure", () => {
+    const { apis } = exposures(`
+      function expose(key, api) { contextBridge.exposeInMainWorld(key, api); }
+      expose("api", { a() {} });
+      expose("api", { ...globalThis.extra, b: { c() {} } });`);
+    expect(apis).toEqual([
+      {
+        api_key: "api",
+        ...literalKey,
+        members: ["a", "b", "b.c"],
+        unknown_members: 1,
+      },
+    ]);
+  });
+
+  it("keeps one key's differing world ids unknown", () => {
+    const { apis, result } = exposures(`
+      function expose(key, id, api) { contextBridge.exposeInIsolatedWorld(id, key, api); }
+      expose("api", 1, { a() {} }); expose("api", 2, { b() {} });`);
+    expect(apis).toEqual([
+      {
+        api_key: "api",
+        api_key_expression: null,
+        world_id: { status: "dynamic", value: null, expression: "id" },
+        members: ["a", "b"],
+        unknown_members: 0,
+      },
+    ]);
+    expect(result.parse_status).toBe("partial");
+  });
+
+  it("bounds nested member paths at the direct syntax depth", () => {
+    const deep = `{ a: { b: { c: { d: { e: { f: { g: { h: { i: {} } } } } } } } } }`;
+    const { apis } = exposures(`
+      function expose(key, api) { contextBridge.exposeInMainWorld(key, api); }
+      expose("helper", ${deep});
+      contextBridge.exposeInMainWorld("direct", ${deep});`);
+    const paths = ["a", "a.b", "a.b.c", "a.b.c.d", "a.b.c.d.e"];
+    const members = [
+      ...paths,
+      "a.b.c.d.e.f",
+      "a.b.c.d.e.f.g",
+      "a.b.c.d.e.f.g.h",
+    ];
+    expect(apis).toEqual([
+      { api_key: "helper", ...literalKey, members, unknown_members: 1 },
+      { api_key: "direct", ...literalKey, members, unknown_members: 1 },
+    ]);
+  });
+
+  it("keeps the site observation for a guarded invocation", () => {
+    const { apis } = exposures(`
+      function expose(key, api) { contextBridge.exposeInMainWorld(key, api); }
+      expose("one", { ping() {} });
+      if (globalThis.flag) expose("two", { pong() {} });`);
+    expect(apis).toEqual([
+      {
+        api_key: null,
+        api_key_expression: "key",
+        world_id: null,
+        members: [],
+        unknown_members: 1,
+      },
+      { api_key: "one", ...literalKey, members: ["ping"], unknown_members: 0 },
+    ]);
+  });
+
+  it("keeps a site-literal key singular beside a guarded invocation", () => {
+    const { apis } = exposures(`
+      function expose(api) { contextBridge.exposeInMainWorld("fixed", api); }
+      function relay(label, api) { expose(api); }
+      relay("label", { ping() {} });
+      if (globalThis.flag) relay("label", { pong() {} });`);
+    // The site's own scope leaves the API unknown; the guarded object is not
+    // recorded as an unconditional member.
+    expect(apis).toEqual([
+      {
+        api_key: "fixed",
+        ...literalKey,
+        members: ["ping"],
+        unknown_members: 1,
+      },
+    ]);
+  });
+});
+
 it("connects exposed closures to IPC sends and text clipboard calls", () => {
   const result = analyzeJavaScriptStaticSource(
     bundle(`

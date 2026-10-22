@@ -40,9 +40,8 @@ import {
   type ReplayArguments,
 } from "./environmentReplay.js";
 import type { EnvironmentManifestTool } from "./environmentSource.js";
+import { callSegments, collectionMatch } from "./environmentStateCallLines.js";
 import {
-  callSegments,
-  collectionMatch,
   itemCall,
   missingAnswer,
   namedEntity,

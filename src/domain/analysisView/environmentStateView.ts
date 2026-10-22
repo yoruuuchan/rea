@@ -21,6 +21,70 @@ export const environmentStateViewRequestSchema = z.strictObject({
 });
 
 const jsonObjectFieldsSchema = z.record(z.string(), jsonValueSchema);
+const queryParameterSchema = z.discriminatedUnion("role", [
+  z.strictObject({
+    role: z.literal("filter"),
+    field: z
+      .string()
+      .describe(
+        "Entities whose field equals the value as text, or whose array field holds it directly or as an object's id, slug or name.",
+      ),
+  }),
+  z.strictObject({
+    role: z.literal("search"),
+    fields: z
+      .array(z.string())
+      .describe(
+        "Entities with a string field containing a plain substring value, ignoring case; an empty value matches every entity. Syntax-like operators replay instead.",
+      ),
+  }),
+  z
+    .strictObject({ role: z.literal("sort") })
+    .describe(
+      "Orders by the field the value names (`name`, `-name`, `name:desc`, `name-ASC`): numbers by value, text ignoring case, null last ascending.",
+    ),
+  z
+    .strictObject({ role: z.literal("direction") })
+    .describe("asc or desc for the sort parameter."),
+  z
+    .strictObject({ role: z.literal("limit") })
+    .describe("Page size; zero or a negative value lists every match."),
+  z
+    .strictObject({ role: z.literal("offset") })
+    .describe("Matches skipped before the page."),
+  z.strictObject({
+    role: z.literal("page"),
+    first: z
+      .number()
+      .int()
+      .describe(
+        "The first page, 0 or 1, when recordings distinguish the convention.",
+      ),
+  }),
+  z.strictObject({
+    role: z.literal("inert"),
+    values: z
+      .array(z.string())
+      .describe(
+        "Recorded values that change nothing the view lists; other values are not computed.",
+      ),
+  }),
+]);
+const listQuerySchema = z.strictObject({
+  parameters: z
+    .record(z.string(), queryParameterSchema)
+    .describe(
+      "What each query parameter does. A call whose every parameter has a role is answered by evaluating them over the state.",
+    ),
+  record_ordinals: z
+    .array(z.number().int().nonnegative())
+    .describe("Checked lines the query reproduces, answered by evaluating it."),
+  totals: z
+    .array(z.string())
+    .describe(
+      "Observed envelope members with reproducible counts of every match before paging; absent or unknown representations stay recorded.",
+    ),
+});
 const checkedSchema = z
   .array(z.number().int().nonnegative())
   .describe(
@@ -58,11 +122,22 @@ const viewSchema = z.discriminatedUnion("shape", [
     membership: z
       .enum(["all", "recorded"])
       .describe(
-        "all: every entity of the collection in state order; recorded: the entities each recorded response listed.",
+        "all: every entity of the collection in state order; recorded: the entities each recorded response listed, except on the lines all_record_ordinals names.",
+      ),
+    all_record_ordinals: z
+      .array(z.number().int().nonnegative())
+      .optional()
+      .describe(
+        "With recorded membership, the checked lines that each listed every entity of their collection in state order, with only paging parameters starting at zero; a call answered on one lists the whole collection. Absent when none does.",
       ),
     counters: z
       .array(z.string())
       .describe("Envelope members that count the listed entities."),
+    query: listQuerySchema
+      .optional()
+      .describe(
+        "How the view's other checked lines select and order entities, when filters, a search, a sort or paging explain them; absent when none does.",
+      ),
   }),
   z.strictObject({
     tool: z.string(),

@@ -5,6 +5,22 @@ import * as t from "@babel/types";
 import { parseJavaScriptSource } from "./javascriptSourceParser.js";
 import { indexJavaScriptBindingsWithReceiversSteps } from "./javascriptSemanticAnalysis.js";
 import { semanticProjectedSourcesAtRead } from "./javascriptSemanticProjectedSources.js";
+import { analyzeJavaScriptSemantics } from "./javascriptSemanticAnalysis.js";
+import { onlyBinding } from "./javascriptSemanticAnalysis.fixture.js";
+
+it("excludes overwritten unknown-key sources from member mutations", () => {
+  const result = analyzeJavaScriptSemantics(`
+    const independent={child:{tag:'retained'}};
+    const selected={child:{tag:'separate'}};
+    const registry={[key]:independent,query:selected};
+    registry.query.child.tag='changed';
+    const observed=independent.child.tag;
+  `);
+  expect(onlyBinding(result, "observed").value).toEqual({
+    status: "literal",
+    value: "retained",
+  });
+});
 
 const shapes = [
   {

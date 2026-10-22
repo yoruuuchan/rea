@@ -5,6 +5,11 @@ import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
+import {
+  DEFAULT_REGEX_MATCHING_DEADLINE_MS,
+  MAXIMUM_REGEX_MATCHING_DEADLINE_MS,
+  REGEX_MATCHING_DEADLINE_SETTING,
+} from "../../../src/config/regexMatchingDeadline.js";
 import { ok } from "../../../src/domain/result.js";
 import { HopperRegexSearch } from "../../../src/hopper/HopperRegexSearch.js";
 import { OFFICIAL_TOOL_CONTRACTS } from "../../../src/contracts/officialToolContracts.js";
@@ -63,16 +68,19 @@ const probeWorkerHeap = (
   };
 };
 
-it("names the fixed regex deadline and the effective worker heap", () => {
+it("names the configurable regex deadline and the effective worker heap", () => {
   const heap = resolveLaunchRegexWorkerHeap(
     readLaunchExecArgv(),
     readLaunchNodeOptions(),
   );
   expect(REGEX_MATCHING_LIMITATION).toBe(regexMatchingLimitation(heap));
-  expect(REGEX_MATCHING_LIMITATION).toContain("5-second matching deadline");
   expect(REGEX_MATCHING_LIMITATION).toContain(
-    "This release has no runtime override for the deadline.",
+    "5000 ms matching deadline (source default)",
   );
+  expect(REGEX_MATCHING_LIMITATION).toContain("REA_REGEX_MATCHING_DEADLINE_MS");
+  expect(REGEX_MATCHING_LIMITATION).toContain("floor 1 ms");
+  expect(REGEX_MATCHING_LIMITATION).toContain("maximum 2147483647 ms");
+  expect(REGEX_MATCHING_LIMITATION).not.toContain("no runtime override");
   expect(REGEX_MATCHING_LIMITATION).not.toContain("either cap");
   expect(REGEX_MATCHING_LIMITATION).not.toContain("or heap");
   if (heap.kind === "unknown") {
@@ -86,9 +94,14 @@ it("names the fixed regex deadline and the effective worker heap", () => {
     regexMatchingDeadlineError("search_procedures"),
   );
   expect(deadline.message).toContain("5000 ms");
+  expect(deadline.message).toContain("source default");
+  expect(deadline.message).toContain("REA_REGEX_MATCHING_DEADLINE_MS");
+  expect(deadline.message).toContain("maximum 2147483647 ms");
   expect(deadline.remediation.action).toContain(
-    "this release has no runtime override",
+    "REA_REGEX_MATCHING_DEADLINE_MS",
   );
+  expect(deadline.remediation.action).toContain("source default");
+  expect(deadline.remediation.action).not.toContain("no runtime override");
   const failure = projectAnalysisError(
     regexWorkerHeapError("search_procedures", new Error("heap")),
   );
@@ -112,8 +125,13 @@ it("names the fixed regex deadline and the effective worker heap", () => {
     const description = OFFICIAL_TOOL_CONTRACTS.find(
       (tool) => tool.name === name,
     )?.description;
-    expect(description).toContain("5000 ms");
-    expect(description).toContain("no runtime override");
+    expect(description).toContain(REGEX_MATCHING_DEADLINE_SETTING);
+    expect(description).toContain(
+      `default ${String(DEFAULT_REGEX_MATCHING_DEADLINE_MS)}`,
+    );
+    expect(description).toContain(String(MAXIMUM_REGEX_MATCHING_DEADLINE_MS));
+    expect(description).toContain("source (default or setting)");
+    expect(description).not.toContain("no runtime override");
   }
 });
 
@@ -411,6 +429,59 @@ it("leaves the heap unknown when --title overwrites the command line", () => {
   }
 });
 
+it("arms the worker timer with an overridden matching deadline", async () => {
+  const delays: number[] = [];
+  const original = global.setTimeout;
+  global.setTimeout = ((handler, timeout, ...args) => {
+    if (typeof timeout === "number") delays.push(timeout);
+    return original(handler, timeout, ...args);
+  }) as typeof setTimeout;
+  try {
+    expect(
+      await matchRegexValues({
+        operation: "search_procedures",
+        pattern: "^a",
+        caseSensitive: true,
+        values: ["a"],
+        deadline: { deadlineMs: 10_000, source: "setting" },
+      }),
+    ).toEqual(ok([0]));
+    expect(delays).toContain(10_000);
+    expect(delays).not.toContain(5_000);
+  } finally {
+    global.setTimeout = original;
+  }
+});
+
+it("stops a slow match at the configured deadline and names the setting", async () => {
+  const started = performance.now();
+  const matched = await matchRegexValues({
+    operation: "search_procedures",
+    pattern: "^(a+)+$",
+    caseSensitive: true,
+    values: [`${"a".repeat(30)}!`],
+    deadline: { deadlineMs: 100, source: "setting" },
+  });
+  expect(performance.now() - started).toBeLessThan(4_000);
+  expect(matched.ok).toBe(false);
+  if (matched.ok) return;
+  const projected = projectAnalysisError(matched.error);
+  expect(projected.message).toContain("100 ms (source setting)");
+  expect(projected.message).toContain("REA_REGEX_MATCHING_DEADLINE_MS");
+  expect(projected.message).toContain("default 5000 ms");
+  expect(projected.message).toContain("maximum 2147483647 ms");
+  expect(projected.remediation.action).toContain(
+    "Set REA_REGEX_MATCHING_DEADLINE_MS in the environment that starts REA",
+  );
+  expect(projected.remediation.action).not.toContain("no runtime override");
+  expect(matched.error).toMatchObject({
+    reportedLimits: {
+      matching_deadline_ms: 100,
+      matching_deadline_source: "setting",
+    },
+  });
+});
+
 it("preserves Unicode matching order and refuses a pre-cancelled match", async () => {
   expect(
     await matchRegexValues({
@@ -429,6 +500,35 @@ it("preserves Unicode matching order and refuses a pre-cancelled match", async (
       signal: AbortSignal.abort(),
     }),
   ).toMatchObject({ ok: false, error: { _tag: "AnalysisCancelledError" } });
+});
+
+it("names the rejected pattern field for a default invalid-pattern refusal", async () => {
+  const matched = await matchRegexValues({
+    operation: "search_procedures",
+    pattern: "[",
+    caseSensitive: false,
+    values: ["value"],
+  });
+  expect(matched.ok).toBe(false);
+  if (matched.ok) return;
+  expect(projectAnalysisError(matched.error)).toMatchObject({
+    code: "invalid_request",
+    category: "invalid_input",
+    recovery: {
+      kind: "inspect_input_contract",
+      operation: "search_procedures",
+    },
+    details: {
+      operation: "search_procedures",
+      issues: [
+        {
+          path: ["pattern"],
+          reason: "invalid_format",
+          message: "Supply a valid regular expression.",
+        },
+      ],
+    },
+  });
 });
 
 it("keeps Hopper's result projection and invalid-pattern contract with the shared worker", async () => {

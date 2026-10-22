@@ -104,7 +104,7 @@ export const deliverCliAnalysisEvidence = async (
 export const publishCliAnalysisEvidence = async (
   value: JsonValue,
   input: CliEvidenceDelivery,
-) => {
+): Promise<JsonValue> => {
   const { operation, signal, detail, evidenceOutput } = input;
   if (!isEvidence(value)) return value;
   const complete = parseEvidence(value);
@@ -146,7 +146,10 @@ export const publishCliAnalysisEvidence = async (
   return detail === "summary"
     ? {
         summary: published.value.delivered,
-        evidence_bundle: published.value.evidenceBundle,
+        evidence_bundle: {
+          path: published.value.evidenceBundle.path,
+          bytes: published.value.evidenceBundle.bytes,
+        },
       }
     : published.value.delivered;
 };

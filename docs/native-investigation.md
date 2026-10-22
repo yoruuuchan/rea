@@ -202,9 +202,17 @@ Function dossiers retain this same string evidence. Native call edges retain
 Hopper's partial `CallReference` classification and exact endpoints; detailed
 reference flags remain unavailable rather than being invented.
 Regex searches use ECMAScript Unicode syntax in a cancellable worker with a
-five-second matching deadline and a worker old-generation heap. Deadline or
-cancellation stops matching while leaving the Hopper API available. This
-release has no runtime override for that deadline. The worker requests 128
+matching deadline and a worker old-generation heap. Deadline or cancellation
+stops matching while leaving the Hopper API available. The deadline is
+`REA_REGEX_MATCHING_DEADLINE_MS`, a positive decimal integer from 1 to
+2147483647 ms. Unset uses 5000 ms. A larger value is refused because Node
+schedules a delay past that signed 32-bit bound as 1 ms. Invalid values are
+configuration errors and do not fall back to the default. The setting is read
+from the environment that starts REA, so a change needs a restart. A deadline
+failure names the effective milliseconds, whether they came from the default
+or the setting, the default, and the maximum. The worker old-generation heap
+does not raise it. Kuna regex search uses the same deadline. The worker
+requests 128
 MiB. A positive Node.js `--max-old-space-size` on the process that starts
 REA, including `NODE_OPTIONS`, overrides that request and sets the effective
 heap. `--max-old-space-size-percentage` takes precedence over that flag in

@@ -7,6 +7,7 @@ import { createJavaScriptAnalysisAccumulator } from "./javascriptStaticAnalysisS
 import { indexJavaScriptBindingsWithReceiversSteps } from "./javascriptSemanticAnalysis.js";
 import { parseJavaScriptSource } from "./javascriptSourceParser.js";
 import { createJavaScriptRpcScan } from "./javascriptRpcEndpoints.js";
+import { createSemanticExpressionShapeResolver } from "./javascriptSemanticExpressionShapes.js";
 import {
   completeSemanticSteps,
   traverseJavaScriptAst,
@@ -181,6 +182,7 @@ it.each([
         index.receivers.rpcClientRoots,
         index,
       ),
+      expressionShapes: createSemanticExpressionShapeResolver(index.bindings),
     };
     traverseJavaScriptAst(file.program, {
       enter(node) {

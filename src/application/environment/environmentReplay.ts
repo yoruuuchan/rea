@@ -1,3 +1,4 @@
+import { decodedSegment } from "../../domain/analysisView/environmentStateRules.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { AnalysisInputError } from "../../domain/analysisErrorCore.js";
 import type { JsonValue } from "../../domain/jsonValue.js";
@@ -47,18 +48,9 @@ interface MatchScore {
   readonly exact: boolean;
 }
 
-/** A path segment percent-decoded, or as written when it is not valid percent-encoding. */
-export const decodedPathSegment = (segment: string): string => {
-  try {
-    return decodeURIComponent(segment);
-  } catch {
-    return segment;
-  }
-};
-
 /** Replay's path rule: a supplied value matches a recorded segment equal to it verbatim or after percent-decoding. */
 export const pathValueMatches = (segment: string, value: string): boolean =>
-  segment === value || decodedPathSegment(segment) === value;
+  segment === value || decodedSegment(segment) === value;
 
 /** Count how many supplied path and query values the recorded request line satisfies. */
 const scoreExchange = (

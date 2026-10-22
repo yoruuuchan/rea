@@ -79,6 +79,12 @@ export function handlerKind(
   return "dynamic-expression";
 }
 
+/**
+ * Nesting bound for dotted contextBridge member paths. Deeper objects count as
+ * one unknown member rather than being enumerated.
+ */
+export const contextBridgeMemberPathDepth = 8;
+
 /** Collect statically visible dotted keys from one literal contextBridge API object. */
 export const collectContextBridgeMembers = (
   node: t.Node | null | undefined,
@@ -117,7 +123,7 @@ const collectMembersAt = (
   prefix: readonly string[],
   state: { members: string[]; unknown: number },
 ): void => {
-  if (prefix.length >= 8) {
+  if (prefix.length >= contextBridgeMemberPathDepth) {
     state.unknown += 1;
     return;
   }

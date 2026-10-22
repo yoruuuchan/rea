@@ -5,6 +5,10 @@ import {
 } from "../domain/analysisErrorCore.js";
 import { err, type Result } from "../domain/result.js";
 import { SharedStartupAttempt } from "../process/SharedStartupAttempt.js";
+import {
+  DEFAULT_REGEX_MATCHING_DEADLINE,
+  type RegexMatchingDeadline,
+} from "../config/regexMatchingDeadline.js";
 import { matchRegexValues } from "../process/RegexMatcher.js";
 import type { KunaJsonDocumentReader } from "./KunaJsonStream.js";
 import { KUNA_DIAGNOSTIC_BYTES } from "./KunaLimits.js";
@@ -36,6 +40,7 @@ export class KunaQueryWork {
       readonly own: <T>(work: Promise<T>) => Promise<T>;
       readonly runSlots: KunaRunSlots;
     },
+    private readonly deadline: RegexMatchingDeadline = DEFAULT_REGEX_MATCHING_DEADLINE,
   ) {}
 
   /** Unproven process cleanup retains both leases in the native command owner. */
@@ -132,6 +137,7 @@ export class KunaQueryWork {
         ...input,
         values: input.values(),
         signal,
+        deadline: this.deadline,
       });
     } finally {
       release();

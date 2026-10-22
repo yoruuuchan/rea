@@ -104,7 +104,7 @@ export const readElfImage = (bytes: Buffer): BinaryContainer => {
 };
 
 /** Map ELF machine identifiers to stable architecture names. */
-const architectureForElfMachine = (machine: number): string => {
+export const architectureForElfMachine = (machine: number): string => {
   const names = new Map([
     [3, "386"],
     [8, "mips"],

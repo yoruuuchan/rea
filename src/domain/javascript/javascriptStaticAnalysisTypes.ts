@@ -1,4 +1,5 @@
 import type { ElectronStaticFindings } from "./electronStaticAnalysisTypes.js";
+import type { JavaScriptRouteSourceFacts } from "./javascriptRouteFacts.js";
 
 /** Token semantics shared by bundle producers and worker admission. */
 export const JAVASCRIPT_AST_FINGERPRINT_ALGORITHM = "babel-ast-v3";
@@ -121,6 +122,8 @@ export interface JavaScriptStaticAnalysis {
   readonly visited_ast_nodes: number;
   readonly references: readonly JavaScriptStaticReference[];
   readonly endpoints: readonly JavaScriptStaticEndpoint[];
+  /** Missing in historical analyses; absence means unmeasured route coverage. */
+  readonly routes?: JavaScriptRouteSourceFacts;
   readonly storage: readonly JavaScriptStaticStorage[];
   readonly bundler_registrations: readonly JavaScriptBundlerRegistration[];
   readonly role_paths: readonly JavaScriptRolePath[];

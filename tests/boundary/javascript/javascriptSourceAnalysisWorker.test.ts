@@ -742,3 +742,69 @@ require("node:readline").createInterface({ input: process.stdin }).once("line", 
     }
   },
 );
+
+it("retains legacy routes and a bounded route-fact prefix inside one checkpoint budget", async () => {
+  const count = 12000;
+  const text = Array.from(
+    { length: count },
+    (_, index) => `route('/reports/${index}/${"x".repeat(96)}');`,
+  ).join("\n");
+  const worker = new JavaScriptAnalysisWorker({
+    heapMb: 512,
+    timeoutMs: 30000,
+  });
+  try {
+    const analyzed = await worker.analyze(source("routes.js", text), {
+      nodes: 1,
+      unknowns: 8,
+    });
+    const facts = analyzed.ok
+      ? analyzed.value.javascript
+      : analyzed.error.javascript;
+    expect(
+      facts,
+      analyzed.ok ? undefined : analyzed.error.error.message,
+    ).not.toBeNull();
+    expect(facts!.endpoints).toHaveLength(count);
+    expect(facts!.routes!.candidates.length).toBeGreaterThan(0);
+    expect(facts!.routes!.candidates.length).toBeLessThan(count);
+    expect(facts!.routes!.capacity).toMatchObject({ kind: "result-bytes" });
+    expect(Buffer.byteLength(JSON.stringify(facts))).toBeLessThanOrEqual(
+      8 * 1024 * 1024,
+    );
+  } finally {
+    await worker.close();
+  }
+}, 60000);
+
+it("keeps wrapped route ancestry, navigation and unknown named parents in the real worker", async () => {
+  const worker = new JavaScriptAnalysisWorker({
+    heapMb: 128,
+    timeoutMs: 30000,
+  });
+  try {
+    const analyzed = await worker.analyze(
+      source(
+        "routes.ts",
+        "const detail={_$:'detail'};defineRoutes({reports:{_$:'reports',detail:(detail as typeof detail)}});router.push(({pathname:'/users'} as const));router.push(({pathname:'/settings'} satisfies {pathname:string}));router.addRoute('admin',({path:'settings',component:View} as const));router.addRoute('admin',{path:'relative',children:[{path:'/public',component:View},{path:'relative'}]});defineRoutes({generated:buildRoutes()});",
+      ),
+      { nodes: 1, unknowns: 8 },
+    );
+    if (!analyzed.ok) throw analyzed.error.error;
+    expect(
+      analyzed.value.javascript.routes!.candidates.map(({ path }) => path),
+    ).toEqual([
+      "/users",
+      "/settings",
+      "/reports",
+      "/reports/detail",
+      "/public",
+    ]);
+    expect(analyzed.value.javascript.routes!.unresolved).toHaveLength(3);
+    expect(analyzed.value.javascript.routes!.unresolved[0]!.reason).toContain(
+      "parent",
+    );
+  } finally {
+    await worker.close();
+  }
+});

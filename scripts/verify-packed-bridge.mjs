@@ -18,7 +18,11 @@ export async function verifyPackedBridge({ tarball, packedFiles }) {
     if (!packedFiles.includes(path)) throw new Error(`package omitted ${path}`);
   }
   // Read the packed source without extracting into the caller's leased root.
+  // Only the interpreter's standard library is needed; caller-local modules
+  // and site startup hooks must not replace the parser or execute here.
   await exec("python3", [
+    "-I",
+    "-S",
     "-c",
     [
       "import ast, sys, tarfile",

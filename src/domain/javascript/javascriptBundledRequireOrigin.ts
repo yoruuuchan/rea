@@ -3,13 +3,13 @@ import * as t from "@babel/types";
 import { javascriptBootstrapAt } from "./javascriptBootstrap.js";
 import { proveJavaScriptBootstrapIntegrity } from "./javascriptBootstrapIntegrity.js";
 import {
+  semanticMemberChain,
   semanticStaticPropertyKey,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
 import { collectJavaScriptIdentityWritesSteps } from "./javascriptElectronMemberWrites.js";
 import { createSemanticModuleInterop } from "./javascriptModuleInterop.js";
 import {
-  semanticMemberChain,
   semanticRequireOrigin,
   type JavaScriptRequireOrigin,
 } from "./javascriptSemanticRequireOrigin.js";

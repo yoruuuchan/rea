@@ -5,6 +5,7 @@ import {
   parseUrlQueryParameterNames,
   iterateUrlQueryParameters,
   recordedPathSegments,
+  singleQueryValues,
 } from "./recordedTransportUrl.js";
 
 it("recognizes an empty userinfo marker at the authority start", () => {
@@ -51,6 +52,22 @@ it.each([
   expect([...iterateUrlQueryParameters(query, selected)]).toEqual(
     [...expected].filter(([name]) => selected.has(name)),
   );
+});
+
+it.each([
+  "?shelf=a&shelf=%61",
+  "?shelf=%61&include=all&shelf=a",
+  "?q=two+words&q=two%20words",
+  "?%73helf=a&shelf=a",
+  "?=a&=a",
+])("normalizes identical decoded query constraints: %s", (query) => {
+  expect(singleQueryValues(query)).toEqual(new Map(new URLSearchParams(query)));
+});
+
+it("retains conflicting duplicate constraints as unknown, including empty values", () => {
+  expect(singleQueryValues("?shelf=a&shelf=b")).toBeUndefined();
+  expect(singleQueryValues("?flag&flag=false")).toBeUndefined();
+  expect(singleQueryValues(undefined)).toEqual(new Map());
 });
 
 it("reads only requested path coordinates, retaining empty and raw segments", () => {

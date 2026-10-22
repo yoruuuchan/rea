@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { javaScriptRouteInventorySchema } from "./javascriptRouteInventory.js";
 import { canBorrowParsedJsonSnapshot } from "../immutableJson.js";
 
 import {
@@ -87,6 +88,7 @@ const applicationAnalysisResultShape = z.strictObject({
   statistics: reconstructionStatisticsSchema,
   limitations: z.array(z.string().min(1)),
   semantic_graph: javaScriptSemanticGraphSchema,
+  route_inventory: javaScriptRouteInventorySchema.exactOptional(),
 });
 
 type BindingIssue = {

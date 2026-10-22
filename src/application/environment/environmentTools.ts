@@ -408,7 +408,7 @@ export const environmentToolDefinitions = (
     return refused();
   const answers =
     dataPlane === "state"
-      ? "answers from the served environment state where the state backs this tool, otherwise replays retained records"
+      ? "answers from the served environment state where the state backs this tool; state.source, not replay.exact_match, identifies state vs recording"
       : "replays retained records";
   const definitions: EnvironmentToolDefinition[] = [];
   for (const tool of source.manifest.tools) {

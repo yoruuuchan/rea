@@ -11,8 +11,12 @@ import {
   AnalysisResourceConstraintError,
 } from "../domain/analysisErrorCore.js";
 import { err, ok, type Result } from "../domain/result.js";
+import {
+  DEFAULT_REGEX_MATCHING_DEADLINE,
+  regexMatchingDeadlineRecovery,
+  type RegexMatchingDeadline,
+} from "../config/regexMatchingDeadline.js";
 
-const MATCHING_DEADLINE_MS = 5_000;
 const WORKER_HEAP_MIB = 128;
 /**
  * Node's Worker `resourceLimits.maxOldGenerationSizeMb` request. A positive
@@ -393,30 +397,45 @@ const heapBound = (heap: RegexWorkerHeapLimit): string => {
 };
 
 /** Capability text for the supervised ECMAScript matching boundary. */
-export const regexMatchingLimitation = (heap: RegexWorkerHeapLimit): string => {
+export const regexMatchingLimitation = (
+  heap: RegexWorkerHeapLimit,
+  deadline: RegexMatchingDeadline = DEFAULT_REGEX_MATCHING_DEADLINE,
+): string => {
+  const deadlineText = `${String(deadline.deadlineMs)} ms matching deadline (source ${deadline.source})`;
   const preface =
     heap.kind === "effective"
-      ? `Regex mode uses ECMAScript Unicode semantics in a cancellable worker with a ${String(MATCHING_DEADLINE_MS / 1000)}-second matching deadline and an effective ${String(heap.mib)} MiB old-generation heap.`
-      : `Regex mode uses ECMAScript Unicode semantics in a cancellable worker with a ${String(MATCHING_DEADLINE_MS / 1000)}-second matching deadline.`;
-  return `${preface} This release has no runtime override for the deadline. ${heapBound(heap)} Matching failure leaves the service available.`;
+      ? `Regex mode uses ECMAScript Unicode semantics in a cancellable worker with a ${deadlineText} and an effective ${String(heap.mib)} MiB old-generation heap.`
+      : `Regex mode uses ECMAScript Unicode semantics in a cancellable worker with a ${deadlineText}.`;
+  return `${preface} ${regexMatchingDeadlineRecovery(deadline)} ${heapBound(heap)} Matching failure leaves the service available.`;
 };
 
-/** Shared capability text for the supervised ECMAScript matching boundary. */
-export const REGEX_MATCHING_LIMITATION = regexMatchingLimitation(
-  launchRegexWorkerHeap,
-);
+/** Capability text for this process's launch heap and one resolved deadline. */
+export const launchRegexMatchingLimitation = (
+  deadline: RegexMatchingDeadline = DEFAULT_REGEX_MATCHING_DEADLINE,
+): string => regexMatchingLimitation(launchRegexWorkerHeap, deadline);
 
-/** Fixed regex deadline. The worker heap is a separate, launch-flag-sensitive cap. */
+/**
+ * Capability text for the default deadline on this process's launch heap.
+ * Providers that resolved `REA_REGEX_MATCHING_DEADLINE_MS` pass that value to
+ * `launchRegexMatchingLimitation` instead of this constant.
+ */
+export const REGEX_MATCHING_LIMITATION = launchRegexMatchingLimitation();
+
+/** Supervised regex deadline. The worker heap is a separate, launch-flag-sensitive cap. */
 export const regexMatchingDeadlineError = (
   operation: string,
+  deadline: RegexMatchingDeadline = DEFAULT_REGEX_MATCHING_DEADLINE,
 ): AnalysisResourceConstraintError =>
   new AnalysisResourceConstraintError(
     operation,
     "cpu",
-    `Regex matching exceeded its supervised deadline of ${String(MATCHING_DEADLINE_MS)} ms. This release has no runtime override. The service remains available.`,
-    { matching_deadline_ms: MATCHING_DEADLINE_MS },
+    `Regex matching exceeded its supervised deadline of ${String(deadline.deadlineMs)} ms (source ${deadline.source}). ${regexMatchingDeadlineRecovery(deadline)} The service remains available.`,
     {
-      remediationAction: `The regex matching deadline is ${String(MATCHING_DEADLINE_MS)} ms and this release has no runtime override. Simplify the ECMAScript Unicode regex or use literal mode, then retry in the same session.`,
+      matching_deadline_ms: deadline.deadlineMs,
+      matching_deadline_source: deadline.source,
+    },
+    {
+      remediationAction: `${regexMatchingDeadlineRecovery(deadline)} Simplify the ECMAScript Unicode regex or use literal mode, then retry in the same session.`,
     },
   );
 
@@ -478,7 +497,10 @@ export const matchRegexValues = async (input: {
   readonly values: readonly string[];
   readonly signal?: AbortSignal | undefined;
   readonly invalidPattern?: (reason: string) => AnalysisError;
+  /** Resolved deadline. Omitted means the 5000 ms default, not ambient `process.env`. */
+  readonly deadline?: RegexMatchingDeadline | undefined;
 }): Promise<Result<readonly number[], AnalysisError>> => {
+  const deadline = input.deadline ?? DEFAULT_REGEX_MATCHING_DEADLINE;
   if (input.signal?.aborted)
     return err(new AnalysisCancelledError(input.operation));
   let worker: Worker;
@@ -512,8 +534,9 @@ export const matchRegexValues = async (input: {
       const onAbort = () =>
         finish(err(new AnalysisCancelledError(input.operation)));
       const timer = setTimeout(
-        () => finish(err(regexMatchingDeadlineError(input.operation))),
-        MATCHING_DEADLINE_MS,
+        () =>
+          finish(err(regexMatchingDeadlineError(input.operation, deadline))),
+        deadline.deadlineMs,
       );
       input.signal?.addEventListener("abort", onAbort, { once: true });
       if (input.signal?.aborted) onAbort();
@@ -532,9 +555,19 @@ export const matchRegexValues = async (input: {
           return finish(
             err(
               input.invalidPattern?.(reply.data.reason) ??
-                new AnalysisInputError(input.operation, {
-                  userMessage: `Invalid regex pattern: ${reply.data.reason}`,
-                }),
+                new AnalysisInputError(
+                  input.operation,
+                  {
+                    userMessage: `Invalid regex pattern: ${reply.data.reason}`,
+                  },
+                  [
+                    {
+                      path: ["pattern"],
+                      reason: "invalid_format",
+                      message: "Supply a valid regular expression.",
+                    },
+                  ],
+                ),
             ),
           );
         if (

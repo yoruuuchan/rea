@@ -1,3 +1,9 @@
+import {
+  parseJavaScriptRouteDelivery,
+  javascriptRouteDeliveryOptions,
+} from "./javascriptRouteDelivery.js";
+import { deliverCliAnalysisEvidence } from "./analysisEvidenceDelivery.js";
+import { projectAnalysisError } from "../domain/analysisErrorProjection.js";
 import { Cli, z } from "incur";
 
 import { browserContext, browserCliError } from "../cliBrowserContext.js";
@@ -157,6 +163,7 @@ const registerBundleAnalysis = (
     }),
     options: z.object({
       ...browserScopeOptions,
+      ...javascriptRouteDeliveryOptions,
       observationMs: observationDuration(500),
       fetchSourceMaps: z
         .boolean()
@@ -172,6 +179,11 @@ const registerBundleAnalysis = (
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
         logCliCommand(logger, "analyze-web-bundle", async () => {
+          const delivery = parseJavaScriptRouteDelivery(
+            "analyze_web_bundle",
+            options,
+          );
+          if (!delivery.ok) return projectAnalysisError(delivery.error);
           const context = browserContext();
           const input = {
             cdp_endpoint: args.endpoint,
@@ -205,17 +217,19 @@ const registerBundleAnalysis = (
                 input,
               ),
             );
-          return await finishAnalysisCommand(
-            () => analyzeWebBundle(context.provider, parsed.data, { signal }),
-            {
+          return deliverCliAnalysisEvidence({
+            ...delivery.value,
+            run: () =>
+              analyzeWebBundle(context.provider, parsed.data, { signal }),
+            service: {
               close: async () => {
                 await context.provider.close?.();
               },
             },
-            context.provider.identity().id,
-            "analyze_web_bundle",
+            providerId: context.provider.identity().id,
+            operation: "analyze_web_bundle",
             signal,
-          );
+          });
         }),
       ),
   });

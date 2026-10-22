@@ -393,3 +393,116 @@ it("preserves creation when the selected root was observed missing before captur
     },
   ]);
 });
+
+it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "rejects only selected roots that cannot be admitted before launch",
+  async () => {
+    const root = await createTestTempDirectory("rea-fs-root-admission-");
+    await writeFile(join(root, "file"), "regular file");
+    await mkdir(join(root, "denied"));
+    await chmod(join(root, "denied"), 0);
+    const scenarioFor = (path: string) =>
+      parseProcessScenario({
+        executable: process.execPath,
+        working_directory: root,
+        filesystem_observation_paths: [path],
+      });
+    try {
+      await expect(
+        snapshotRoots(scenarioFor(join(root, "file", "child"))),
+      ).rejects.toMatchObject({ message: expect.stringContaining("ENOTDIR") });
+      await expect(
+        snapshotRoots(scenarioFor(join(root, "denied", "child"))),
+      ).rejects.toMatchObject({ message: expect.stringContaining("EACCES") });
+      // The same lookups after admission are absence and an omission.
+      const admission = await snapshotRoots(scenarioFor(join(root, "missing")));
+      expect(admission.completeRoots).toEqual(["root_0"]);
+      const obstructed = await snapshotRoots(
+        scenarioFor(join(root, "file", "child")),
+        undefined,
+        admission,
+      );
+      expect(obstructed).toMatchObject({
+        files: [],
+        completeRoots: ["root_0"],
+        truncated: false,
+      });
+      const denied = await snapshotRoots(
+        scenarioFor(join(root, "denied", "child")),
+        undefined,
+        admission,
+      );
+      expect(denied).toMatchObject({
+        files: [],
+        completeRoots: [],
+        truncated: true,
+        coverage: {
+          enumeration_truncated: true,
+          enumeration_reasons: ["entry_unavailable"],
+          enumeration_omissions: [
+            {
+              path: "root_0:.",
+              reason: "entry_unavailable",
+              system_code: "EACCES",
+            },
+          ],
+        },
+      });
+    } finally {
+      await chmod(join(root, "denied"), 0o700);
+    }
+  },
+);
+
+it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "records an unsearchable directory's children as omitted rather than failing",
+  async () => {
+    const root = await createTestTempDirectory("rea-fs-unsearchable-");
+    const listed = join(root, "listed");
+    await mkdir(listed);
+    await writeFile(join(listed, "child.txt"), "child");
+    // Read without search permission: names enumerate, lookups are denied.
+    await chmod(listed, 0o444);
+    const scenario = parseProcessScenario({
+      executable: process.execPath,
+      working_directory: root,
+      filesystem_observation_paths: [root],
+    });
+    try {
+      const snapshot = await snapshotRoots(scenario);
+      expect(snapshot.files.map(({ path }) => path)).toEqual([
+        "root_0:.",
+        "root_0:listed",
+      ]);
+      expect(snapshot.completeRoots).toEqual([]);
+      expect(snapshot.coverage.enumeration_omissions).toEqual([
+        {
+          path: "root_0:listed/child.txt",
+          reason: "entry_unavailable",
+          system_code: "EACCES",
+        },
+      ]);
+    } finally {
+      await chmod(listed, 0o700);
+    }
+  },
+);
+
+it.skipIf(process.platform === "win32")(
+  "keeps an admitted root behind a symlink loop unobserved",
+  async () => {
+    const root = await createTestTempDirectory("rea-fs-root-loop-");
+    const scenario = parseProcessScenario({
+      executable: process.execPath,
+      working_directory: root,
+      filesystem_observation_paths: [join(root, "loop", "child")],
+    });
+    const before = await snapshotRoots(scenario);
+    await symlink("loop", join(root, "loop"));
+    const after = await snapshotRoots(scenario, undefined, before);
+    expect(after.completeRoots).toEqual([]);
+    expect(after.coverage.enumeration_omissions).toEqual([
+      { path: "root_0:.", reason: "entry_unavailable", system_code: "ELOOP" },
+    ]);
+  },
+);

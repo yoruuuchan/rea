@@ -1,6 +1,7 @@
 import { readStableArtifact } from "../artifacts/readStableArtifact.js";
 import {
-  ArtifactFileCleanupFailure,
+  artifactFilePrimaryFailure,
+  artifactFileCancellationCause,
   assertArtifactReadActive,
   bindArtifactFileCleanup,
 } from "../artifacts/ArtifactFileOperation.js";
@@ -126,7 +127,7 @@ export class RustBinaryProvider implements RustBinaryPort {
         return ok(parsed.data);
       });
     } catch (cause: unknown) {
-      return err(failureFor(cause, input.path, options?.signal));
+      return err(failureFor(cause, input.path));
     }
   }
 }
@@ -260,18 +261,8 @@ const failureForPrimary = (cause: unknown, path: string): AnalysisError => {
   return artifactFailure(cause, path);
 };
 
-const failureFor = (
-  cause: unknown,
-  path: string,
-  signal?: AbortSignal,
-): AnalysisError => {
-  const primary =
-    cause instanceof ArtifactFileCleanupFailure &&
-    cause.fileCleanupFailure.outcome.kind === "failed"
-      ? failureForPrimary(cause.fileCleanupFailure.outcome.cause, path)
-      : cause instanceof ArtifactFileCleanupFailure && signal?.aborted
-        ? new AnalysisCancelledError(OPERATION, { cause: signal.reason })
-        : failureForPrimary(cause, path);
+const failureFor = (cause: unknown, path: string): AnalysisError => {
+  const primary = failureForPrimary(artifactFilePrimaryFailure(cause), path);
   if (!(cause instanceof ArtifactReaderFailure) || cause.cleanup === undefined)
     return primary;
   const cleanup = new ProviderCleanupError(
@@ -324,7 +315,9 @@ const artifactReaderFailure = (
       cause,
     });
   if (cause.reason === "cancelled")
-    return new AnalysisCancelledError(OPERATION, { cause: cause.cause });
+    return new AnalysisCancelledError(OPERATION, {
+      cause: artifactFileCancellationCause(cause),
+    });
   if (cause.reason === "limit")
     return new AnalysisResourceConstraintError(
       OPERATION,

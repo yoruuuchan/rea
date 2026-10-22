@@ -1040,6 +1040,51 @@ describe("Ghidra configuration paths", () => {
     },
   );
 
+  it.each([
+    ["linux", undefined],
+    ["linux", "/opt/jdk-21"],
+    ["darwin", undefined],
+    ["win32", "C:\\Java\\jdk-21"],
+  ] as const)(
+    "does not run Java without a Ghidra installation (%s %o)",
+    async (platform, javaHome) => {
+      const probed: string[] = [];
+      const result = await inspectGhidraInstallation(
+        {
+          resourceOwner: inspectionResources.owner,
+          environment: { PATH: "/usr/bin" },
+          ...(javaHome === undefined ? {} : { javaHome }),
+          platform,
+          architecture: "x64",
+        },
+        host({
+          discoverInstallDirOnPath: () => undefined,
+          probeJava: (command) => {
+            probed.push(command);
+            return javaProbeOk<GhidraJavaObservation>(JAVA);
+          },
+        }),
+      );
+      expect(probed).toEqual([]);
+      expect(result).toMatchObject({
+        status: "unavailable",
+        installDir: null,
+        javaVersion: null,
+        rejection: { code: "not_configured" },
+      });
+      expect(projectGhidraDoctorInspection(result)).toMatchObject({
+        available: false,
+        registrationEnvironment: {},
+        checks: [
+          expect.objectContaining({
+            name: "configuration",
+            code: "not_configured",
+          }),
+        ],
+      });
+    },
+  );
+
   it("judges absolute paths by the inspected platform", async () => {
     const result = await inspectGhidraInstallation(
       {

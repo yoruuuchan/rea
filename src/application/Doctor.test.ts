@@ -164,6 +164,7 @@ describe("doctor native analysis configuration", () => {
 
   it.each([
     ["REA_ANALYSIS_PROVIDER", "Hopper"],
+    ["REA_REGEX_MATCHING_DEADLINE_MS", "0"],
     ["REA_GHIDRA_STARTUP_TIMEOUT_MS", "abc"],
     ["REA_SWIFTC_COMPILE_TIMEOUT_MS", "0"],
     ["REA_LOG_LEVEL", "verbose"],

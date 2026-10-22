@@ -426,17 +426,11 @@ const validatePackedRelativeTables = (
       tableIndex,
       "location",
     ]);
-    const encodedBytes =
-      (table.encoded_bytes_base64.length * 3) / 4 -
-      (table.encoded_bytes_base64.endsWith("==")
-        ? 2
-        : table.encoded_bytes_base64.endsWith("=")
-          ? 1
-          : 0);
-    if (
-      !Number.isInteger(encodedBytes) ||
-      BigInt(encodedBytes) !== BigInt(table.location.bytes)
-    )
+    const encodedBytes = Buffer.byteLength(
+      table.encoded_bytes_base64,
+      "base64",
+    );
+    if (BigInt(encodedBytes) !== BigInt(table.location.bytes))
       context.addIssue({
         code: "custom",
         path: ["packed_relative_relocations", tableIndex],

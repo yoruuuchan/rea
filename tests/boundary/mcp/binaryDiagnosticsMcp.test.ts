@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
@@ -20,6 +20,8 @@ import {
   binaryLayoutFixture,
   BINARY_LAYOUT_TEST_PROVIDER,
 } from "../../fixtures/binaryDiagnostics/layout.js";
+import { elfExportImage } from "../../fixtures/binaryDiagnostics/nativeExports.js";
+import { parseNativeExports } from "../../../src/native/exports/NativeExportParser.js";
 
 it("advertises exact valid schemas and records inline layout without a binary target", async () => {
   const value = binaryLayoutFixture();
@@ -180,4 +182,51 @@ it("profiles real bytes with exact offsets, valid advertised schemas and read-on
       })
     ).isError,
   ).toBe(true);
+});
+
+it("records a portable export inventory through MCP without a binary target", async () => {
+  const root = await createTestTempDirectory("rea-native-exports-mcp-");
+  const path = join(root, "libfixture.so");
+  const bytes = elfExportImage({
+    symbols: [{ name: "exported_fn" }, { name: "hidden_fn", visibility: 2 }],
+  });
+  await writeFile(path, bytes);
+  const session = createTestBinarySession(() => {
+    throw new Error("deep provider must not start");
+  });
+  const server = createServer({ kind: "session", session });
+  const client = new Client({ name: "native-exports-contract", version: "1" });
+  onTestFinished(async () => {
+    await client.close();
+    await server.close();
+    await session.close();
+  });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  const schemas = await advertisedMcpToolSchemas(
+    client,
+    "inspect_native_exports",
+  );
+  expect(schemas.ajv.validate(schemas.inputSchema, { path })).toBe(true);
+  expect(
+    schemas.ajv.validate(schemas.inputSchema, { path: "relative.so" }),
+  ).toBe(false);
+  const response = await client.callTool({
+    name: "inspect_native_exports",
+    arguments: { path },
+  });
+  assertRecordedMcpEvidence(
+    response,
+    "inspect_native_exports",
+    schemas,
+    session,
+    parseNativeExports(bytes, {
+      path,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      bytes: bytes.length,
+    }),
+    "observed",
+  );
 });

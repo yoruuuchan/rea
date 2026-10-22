@@ -96,6 +96,20 @@ dependencies. An omitted package kind stays null. A rustc commit hash is
 inferred from a read-only `/rustc/<40-hex>/` path and does not by itself
 identify the compiler. See [Rust binaries](https://github.com/morluto/rea/blob/main/docs/rust-binaries.md).
 
+## PE Authenticode certificate tables
+
+Use `inspect_pe_certificates` for an explicit local PE32/PE32+ image when the
+question concerns the Authenticode certificate table, WIN_CERTIFICATE types, or
+embedded PKCS#7 signer and X.509 identity fields. No `open_binary`, Windows SDK,
+or target execution is required. The CLI equivalent is
+`inspect-pe-certificates PATH`. Preserve artifact SHA-256, table file ranges,
+payload hashes, original validity-time spellings, and
+`subject_key_identifier_hex` when the signer uses that form. A missing
+`IMAGE_DIRECTORY_ENTRY_SECURITY` directory is observed absence of that table,
+not proof the image is unsigned in every catalog or overlay sense. Signatures,
+chains, timestamps, and Authenticode digest coverage remain unobserved. See
+[PE Authenticode certificate tables](https://github.com/morluto/rea/blob/main/docs/pe-certificates.md).
+
 ## ELF note tables
 
 Use `inspect_elf_notes` for an explicit local ELF32/ELF64 image when the
@@ -106,6 +120,26 @@ descriptor hashes, and original owner spellings. A missing table is observed
 absence of those declarations, not proof the image never carried notes in
 another container. See
 [ELF note tables](https://github.com/morluto/rea/blob/main/docs/elf-notes.md).
+
+## CPython pyc files
+
+Use `inspect_python_pyc` for an explicit local CPython 3.7–3.13 `.pyc` when the
+question concerns the header magic, PEP 552 source hash or timestamp, nested
+code-object names, or bytecode identity. No `open_binary`, Python installation,
+or target execution is required. The CLI equivalent is `inspect-python-pyc PATH`.
+Preserve artifact SHA-256, the 16-byte header fields, nested code names, and
+bytecode SHA-256. Bytecode is not decompiled. A decoded header does not prove
+the matching `.py` is present. See [CPython pyc inspection](https://github.com/morluto/rea/blob/main/docs/python-pyc.md).
+
+## Erlang BEAM files
+
+Use `inspect_erlang_beam` for an explicit local `FOR1`/`BEAM` file when the
+question concerns IFF chunks, atom names, exports, imports, lambdas, or the
+Code header. No `open_binary`, Erlang installation, or bytecode execution is
+required. The CLI equivalent is `inspect-erlang-beam PATH`. Preserve artifact
+SHA-256, chunk file ranges, 1-based atom indices, and original atom spellings.
+Missing optional tables stay null. See
+[Erlang BEAM files](https://github.com/morluto/rea/blob/main/docs/erlang-beam.md).
 
 ## SQLite snapshots
 
@@ -160,6 +194,30 @@ Facets also include sections, imports, candidates, glue, WAT, headers, details
 and tool profile. Text offsets count UTF-16 code units; follow `next_offset`.
 The complete source remains retained after an oversized MCP reply. No target
 execution or network acquisition is implied, and WAT is decoded representation.
+
+## Offline APK signatures
+
+Use `inspect_apk_signature` for a selected local APK/ZIP/AAB. Default MCP summaries
+retain complete Evidence. Select `view.collection: signers/digests/lineage`,
+with scheme or ID batches, fields and paging; use `inspect_analysis_view` kind
+`apk-signature` for retained reads after deletion. IDs retain artifact/scheme
+scope and signer links; `fields: []` keeps identity links. Empty pages preserve
+partial decoding reasons and unknown authenticity. CLI compact delivery needs
+`--evidence_output` to preserve the complete parent.
+It reads the APK
+Signing Block (v2/v3/v3.1) and v1 `META-INF` signing without executing anything,
+and reports each signer's certificate facts (for v1, the certificate the PKCS#7
+block's SignerInfo names), the declared v3 rotation lineage,
+the declared source-stamp certificate and, for SHA-256/SHA-512 digests, whether
+the declared content digest matches the current bytes. That match is not a
+signature verification: anyone who changes the bytes can recompute the digest.
+`posture` summarises v1-only signing (which cannot tell a v1-only APK from one
+whose v2/v3 block was removed), observed signer agreement across schemes,
+whether the v1 signer equals the block-scheme signer (`false` is notable),
+whether every differing signer appears in a declared (unverified) rotation
+lineage, and the strongest scheme.
+It never claims authenticity: no signature or lineage is cryptographically
+verified.
 
 ## Native targets
 
@@ -407,6 +465,16 @@ code pages, payload hashes and static icon-group references. Same-language icon
 resolution is explicit; missing references and size mismatch remain visible.
 Other payloads are opaque, and this operation does not decode images or simulate
 Windows resource loading. Consult the budgets and supported tree profile in
+[offline binary diagnostics](https://github.com/morluto/rea/blob/main/docs/binary-diagnostics.md).
+
+## Offline PE and ELF export tables
+
+Use `inspect_native_exports` with an absolute `path`, or
+`rea inspect-native-exports ./libexample.so --json`, to read a PE export
+directory or ELF dynamic symbol table on any host without opening a native
+target. Ordinal-only, forwarded and hidden-version exports stay distinct;
+partial or unsupported coverage means the inventory is incomplete, not that
+exports are absent. Use `inspect_macho` for Mach-O. See
 [offline binary diagnostics](https://github.com/morluto/rea/blob/main/docs/binary-diagnostics.md).
 
 For exact core-module import/export differences, use `compare_wasm_interfaces`

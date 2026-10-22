@@ -1,3 +1,4 @@
+import { Ajv } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 
@@ -351,4 +352,211 @@ describe("compact input schema budget and reduction", () => {
     expect(presentation).toBe("inline");
     expect(serializedBytes(schema)).toBeLessThanOrEqual(13312);
   });
+});
+
+it.each([
+  ["draft-2020-12", "https://example.test/nested"],
+  ["draft-2020-12", "nested.json"],
+  ["draft-07", "https://example.test/nested"],
+  ["draft-07", "nested.json"],
+] as const)(
+  "keeps embedded resource references scoped when inlining twice in %s with %s",
+  (dialect, id) => {
+    const source = {
+      $schema:
+        dialect === "draft-07"
+          ? "http://json-schema.org/draft-07/schema#"
+          : "https://json-schema.org/draft/2020-12/schema",
+      $id: "https://example.test/root.json",
+      type: "object",
+      definitions: {
+        target: { type: "string" },
+        nested: {
+          $id: id,
+          type: "object",
+          definitions: { target: { type: "number" } },
+          properties: { value: { $ref: "#/definitions/target" } },
+          required: ["value"],
+        },
+      },
+      properties: {
+        before: { $ref: "#/definitions/nested" },
+        after: { $ref: "#/definitions/nested" },
+      },
+      required: ["before", "after"],
+    };
+    const compact = compactAdvertisedInputSchema(source, 13312);
+    expect(compact.presentation).toBe("inline");
+    expect(JSON.stringify(compact.schema)).not.toContain('"$ref":');
+    const createAjv = () =>
+      dialect === "draft-07"
+        ? new Ajv({ strict: false })
+        : new Ajv2020({ strict: false });
+    const canonical = createAjv().compile(source);
+    const advertised = createAjv().compile(compact.schema);
+    for (const value of [7, "seven", null]) {
+      const input = { before: { value }, after: { value } };
+      expect(advertised(input)).toBe(canonical(input));
+    }
+  },
+);
+
+it("decodes URI fragments and JSON Pointer escapes through schema arrays", () => {
+  const source = {
+    type: "object",
+    definitions: { "a/b~": { prefixItems: [{ type: "number" }] } },
+    properties: { value: { $ref: "#/definitions/a%7E1b%7E0/prefixItems/0" } },
+  };
+  const result = compactAdvertisedInputSchema(source, 13312);
+  expect(result.presentation).toBe("inline");
+  const canonical = new Ajv2020({ strict: false }).compile(source);
+  const advertised = new Ajv2020({ strict: false }).compile(result.schema);
+  for (const value of [7, "seven", null])
+    expect(advertised({ value })).toBe(canonical({ value }));
+});
+
+it.each(["$dynamicRef", "$recursiveRef"])(
+  "does not strip resource identities from a partially expanded %s closure",
+  (keyword) => {
+    const result = compactAdvertisedInputSchema(
+      {
+        type: "object",
+        definitions: {
+          nested: {
+            $id: "https://example.test/nested",
+            type: "object",
+            properties: { next: { [keyword]: "#" } },
+          },
+        },
+        properties: { child: { $ref: "#/definitions/nested" } },
+      },
+      13312,
+    );
+    expect(result.presentation).toBe("reduced");
+    expect(JSON.stringify(result.schema)).not.toContain('"$ref":');
+    expect(result.schema.description).toContain("canonical");
+  },
+);
+
+it.each(["", "#legacy", "https://example.test/root.json"])(
+  "does not invent a pointer resource for an aliased or ambiguous nested ID %j",
+  (id) => {
+    const result = compactAdvertisedInputSchema(
+      {
+        $id: "https://example.test/root.json",
+        type: "object",
+        definitions: {
+          target: { type: "string" },
+          nested: {
+            $id: id,
+            type: "object",
+            definitions: { target: { type: "number" } },
+            properties: { value: { $ref: "#/definitions/target" } },
+          },
+        },
+        properties: { child: { $ref: "#/definitions/nested" } },
+      },
+      13312,
+    );
+    expect(result.presentation).toBe("reduced");
+    expect(result.schema.properties).toEqual({ child: {} });
+  },
+);
+
+it("uses explicit reduction for Draft 7 reference siblings with conflicting client semantics", () => {
+  const result = compactAdvertisedInputSchema(
+    {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      definitions: { value: { type: "number" } },
+      properties: { value: { $ref: "#/definitions/value", maximum: 5 } },
+    },
+    13312,
+  );
+  expect(result.presentation).toBe("reduced");
+  expect(result.schema.properties).toEqual({ value: { type: "number" } });
+});
+
+it.each(["draft-2020-12", "draft-07"] as const)(
+  "removes embedded dialect declarations only after static expansion in %s",
+  (dialect) => {
+    const $schema =
+      dialect === "draft-07"
+        ? "http://json-schema.org/draft-07/schema#"
+        : "https://json-schema.org/draft/2020-12/schema";
+    const shared = { $ref: "#/definitions/value" };
+    const source = {
+      $schema,
+      $id: "https://example.test/root",
+      type: "object",
+      properties: Object.fromEntries(
+        ["string", "number"].map((type) => [
+          type,
+          {
+            $schema,
+            $id: `${type}.json#`,
+            type: "object",
+            definitions: { value: { type } },
+            properties: { value: shared },
+            required: ["value"],
+          },
+        ]),
+      ),
+      required: ["string", "number"],
+    };
+    const result = compactAdvertisedInputSchema(source, 13312);
+    expect(result.presentation).toBe("inline");
+    expect(result.schema.$schema).toBe($schema);
+    expect(JSON.stringify(result.schema).match(/"\$schema"/gu)).toHaveLength(1);
+    const createAjv = () =>
+      dialect === "draft-07"
+        ? new Ajv({ strict: false })
+        : new Ajv2020({ strict: false });
+    const canonical = createAjv().compile(source);
+    const advertised = createAjv().compile(result.schema);
+    for (const value of [
+      { string: { value: "a" }, number: { value: 7 } },
+      { string: { value: 7 }, number: { value: "a" } },
+    ])
+      expect(advertised(value)).toBe(canonical(value));
+  },
+);
+
+it.each(["child.json", "https://example.test/child.json"])(
+  "does not expand ambiguous sibling resources with ID %s",
+  ($id) => {
+    const result = compactAdvertisedInputSchema(
+      {
+        type: "object",
+        properties: Object.fromEntries(
+          ["string", "number"].map((type) => [
+            type,
+            {
+              $id,
+              type: "object",
+              definitions: { value: { type } },
+              properties: { value: { $ref: "#/definitions/value" } },
+            },
+          ]),
+        ),
+      },
+      13312,
+    );
+    expect(result.presentation).toBe("reduced");
+    expect(result.schema.properties).toEqual({ string: {}, number: {} });
+  },
+);
+
+it("includes restored root identity in the compact byte budget", () => {
+  const result = compactAdvertisedInputSchema(
+    {
+      $id: `https://example.test/${"a".repeat(1024)}`,
+      type: "object",
+      properties: { value: { type: "number" } },
+    },
+    512,
+  );
+  expect(result.presentation).toBe("reduced");
+  expect(serializedBytes(result.schema)).toBeLessThanOrEqual(512);
+  expect(result.schema.properties).toEqual({ value: { type: "number" } });
 });

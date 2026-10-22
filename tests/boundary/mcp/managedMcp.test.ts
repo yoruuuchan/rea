@@ -20,6 +20,7 @@ import { toolContract } from "../../../src/contracts/toolContracts.js";
 import { ManagedStaticProvider } from "../../../src/dotnet/ManagedStaticProvider.js";
 import { createServer } from "../../../src/server/createServer.js";
 import { buildManagedPeFixture } from "../../../src/dotnet/ManagedPe.fixture.js";
+import { elf } from "../../../src/domain/binaryTarget.fixture.js";
 
 type ManagedOutputAssertion = Awaited<ReturnType<typeof createOutputAssertion>>;
 
@@ -89,6 +90,20 @@ it("runs every managed static inspection independently of an active native targe
       arguments: { path: join(directory, "missing.dll") },
     });
     expect(invalidSelection.isError).toBe(true);
+    const nativePath = join(directory, "native.elf");
+    await writeFile(nativePath, elf(2, 1, 0x3e));
+    expect(
+      parseMcpToolError(
+        await client.callTool({
+          name: "inspect_managed_artifact",
+          arguments: { path: nativePath },
+        }),
+      ).error,
+    ).toMatchObject({
+      code: "unsupported_target",
+      category: "unsupported_target",
+      details: { operation: "inspect_managed_artifact", path: nativePath },
+    });
     const members = structured(
       await client.callTool({ name: "inspect_managed_members", arguments: {} }),
     );

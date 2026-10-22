@@ -58,64 +58,18 @@ const textValue = (value: unknown): string | undefined =>
 const numberValue = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? value : 0;
 
-const toolResultError = (
-  item: Record<string, unknown>,
-): Record<string, unknown> | undefined => {
-  const result = record(item.result ?? item.output);
-  const structured = record(
-    result?.structured_content ?? result?.structuredContent,
-  );
-  const direct = record(structured?.error ?? result?.error ?? item.error);
-  if (direct !== undefined || structured !== undefined) return direct;
-  // Codex preserves some REA failures only as one complete JSON text block.
-  // A client-truncated preview or SDK prose is not a structured error record.
-  const content = result?.content;
-  if (!Array.isArray(content) || content.length !== 1) return undefined;
-  const block = record(content[0]);
-  if (block?.type !== "text" || typeof block.text !== "string")
-    return undefined;
-  try {
-    return record(record(JSON.parse(block.text))?.error);
-  } catch (cause) {
-    if (cause instanceof SyntaxError || cause instanceof RangeError)
-      return undefined;
-    throw cause;
-  }
-};
-
-const toolResultFailed = (
-  item: Record<string, unknown>,
-  error: Record<string, unknown> | undefined,
-): boolean => {
-  if (
-    item.status === "failed" ||
-    (item.error !== undefined && item.error !== null)
-  )
-    return true;
-  const result = record(item.result ?? item.output);
-  const structured = record(
-    result?.structured_content ?? result?.structuredContent,
-  );
-  return (
-    result?.isError === true ||
-    structured?.error !== undefined ||
-    error !== undefined
-  );
-};
-
 const callFromParsed = (
   parsed: ParsedCodexToolCall | undefined,
 ): CodexMcpCall | undefined => {
   if (parsed === undefined) return undefined;
-  const error = toolResultError(parsed.item);
   return {
     id: parsed.id,
     server: parsed.server,
     tool: parsed.tool,
     arguments: parsed.arguments,
     evidenceIds: parsed.evidence.map(({ evidence_id }) => evidence_id),
-    error: toolResultFailed(parsed.item, error),
-    errorCode: textValue(error?.code) ?? null,
+    error: parsed.error,
+    errorCode: parsed.errorCode,
   };
 };
 

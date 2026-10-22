@@ -59,6 +59,20 @@ in the same session. A returned `error.details.partial_observation` reference
 can be supplied directly to `inspect_analysis_view`. If the SDK cancels locally, retrieve its recorded ID from
 the Evidence bundle before inspecting the partial analysis.
 
+## Inventory route candidates without returning the application graph
+
+When the advertised schema supports `view`, use `detail: "summary"` with
+`view: {kind: "javascript-routes", collection: "routes", fields: ["path", "confidence"], limit: 20}`.
+The same view works with `analyze_web_bundle` on already selected captured sources.
+The complete source Evidence is retained; use its `parent_evidence_id` with
+`inspect_analysis_view` for `summary`, `routes`, `occurrences`, `sources`, or
+`unknowns`. Filter and batch IDs before requesting more fields, and follow
+`coverage.next_offset`. CLI selections require `--evidence_output` to keep the
+complete record. Static patterns, inferred deployment bases, heuristic system
+classification, and unavailable sources never establish route reachability or
+the complete application route denominator. See the
+[route inventory guide](https://github.com/morluto/rea/blob/main/docs/javascript-route-inventory.md).
+
 ## Read a module without repeating analysis
 
 Use the actual returned parent ID, on the same connection, as `source.evidence_id`.

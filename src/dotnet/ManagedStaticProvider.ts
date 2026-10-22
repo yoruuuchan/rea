@@ -23,6 +23,7 @@ import {
   AnalysisCancelledError,
   AnalysisCapabilityUnavailableError,
   AnalysisInputError,
+  AnalysisUnsupportedTargetError,
 } from "../domain/analysisErrorCore.js";
 import { EvidenceIntegrityError } from "../domain/evidenceErrors.js";
 import { ProviderAdapterError } from "../domain/providerAdapterError.js";
@@ -85,11 +86,13 @@ class ManagedStaticClient implements AnalysisClient {
           "Operation is not implemented by the managed static provider.",
         ),
       );
+    // A non-PE target is outside this operation's formats, not a missing
+    // provider capability; the unimplemented-operation refusal above is.
     if (this.target.format !== "pe")
       return err(
-        new AnalysisCapabilityUnavailableError(
-          MANAGED_STATIC_PROVIDER.id,
+        new AnalysisUnsupportedTargetError(
           operation,
+          this.target.path,
           `Managed static triage requires a PE target; observed ${this.target.format}.`,
         ),
       );

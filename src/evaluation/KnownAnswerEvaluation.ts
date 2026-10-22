@@ -1,7 +1,12 @@
 import { visit } from "jsonc-parser";
 import { z } from "zod";
 
-import { parseEvidence, type Evidence } from "../domain/evidence.js";
+import {
+  parseEvidence,
+  evidenceAuthoritySchema,
+  evidenceSchema,
+  type Evidence,
+} from "../domain/evidence.js";
 import { jsonValueSchema, type JsonValue } from "../domain/jsonValue.js";
 import { canonicalJson } from "../domain/comparisonSemantics.js";
 
@@ -65,14 +70,6 @@ export interface KnownAnswerAssessment {
   readonly claims: readonly FixtureClaimAssessment[];
 }
 
-const authoritySchema = z.enum([
-  "shipped-artifact",
-  "controlled-replay",
-  "historical-reference",
-  "external-service",
-  "analyst-inference",
-]);
-const confidenceSchema = z.enum(["observed", "derived", "inferred"]);
 const subjectSchema = z.strictObject({
   path: z.string().min(1),
   sha256: z
@@ -85,8 +82,8 @@ const expectationSchema = z.strictObject({
   expectedValue: jsonValueSchema,
   source: z.strictObject({
     operation: z.string().min(1),
-    authority: authoritySchema,
-    confidence: confidenceSchema,
+    authority: evidenceAuthoritySchema,
+    confidence: evidenceSchema.shape.confidence,
     subject: subjectSchema.optional(),
     parameters: z.record(z.string(), jsonValueSchema).optional(),
     linkedSubjects: z
@@ -103,8 +100,8 @@ const finalAnswerSchema = z.strictObject({
       id: z.string().min(1),
       value: jsonValueSchema,
       evidence_id: z.string().regex(/^ev_[a-f0-9]{64}$/u),
-      confidence: confidenceSchema,
-      authority: authoritySchema,
+      confidence: evidenceSchema.shape.confidence,
+      authority: evidenceAuthoritySchema,
     }),
   ),
 });
@@ -123,9 +120,15 @@ const sameJson = (left: unknown, right: unknown): boolean => {
   );
 };
 
-const parseClosedJson = (text: string): unknown => {
+interface TranscriptJson {
+  readonly value: unknown;
+  readonly hasDuplicateMembers: boolean;
+}
+
+const parseTranscriptJson = (text: string): TranscriptJson | undefined => {
   const objects: Set<string>[] = [];
   let invalid = false;
+  let hasDuplicateMembers = false;
   try {
     visit(
       text,
@@ -135,7 +138,8 @@ const parseClosedJson = (text: string): unknown => {
         },
         onObjectProperty: (key) => {
           const keys = objects.at(-1);
-          if (keys === undefined || keys.has(key)) invalid = true;
+          if (keys === undefined) invalid = true;
+          else if (keys.has(key)) hasDuplicateMembers = true;
           keys?.add(key);
         },
         onObjectEnd: () => {
@@ -152,8 +156,9 @@ const parseClosedJson = (text: string): unknown => {
       },
     );
     if (invalid) return undefined;
-    // The JSON visitor checked syntax and duplicate members before JSON.parse can fold them.
-    return JSON.parse(text);
+    // Keep ambiguity separate from syntax: a failure can be observed without
+    // choosing one contradictory code or authenticating ambiguous Evidence.
+    return { value: JSON.parse(text) as unknown, hasDuplicateMembers };
   } catch (error) {
     // Syntax and nesting failures are malformed transcript input, not an evaluation crash.
     if (error instanceof SyntaxError || error instanceof RangeError)
@@ -169,7 +174,8 @@ interface DeliveredEvidence {
 
 /** One completed tool call, with aliases normalized and successful Evidence authenticated. */
 export interface ParsedCodexToolCall {
-  readonly item: Record<string, unknown>;
+  readonly error: boolean;
+  readonly errorCode: string | null;
   readonly id: string | null;
   readonly server: string | null;
   readonly tool: string;
@@ -206,35 +212,66 @@ const consistentJsonAliases = (
   value[right] === null ||
   sameJson(value[left], value[right]);
 
-const evidenceFromCall = (
+/** Parse result representations once; authentication and diagnostic certainty stay distinct. */
+const parseToolResult = (
   item: Record<string, unknown>,
+  server: string | null,
+): {
+  readonly failed: boolean;
+  readonly errorCode: string | null;
+  readonly evidenceValue: unknown;
+} => {
+  const result = record(item.result ?? item.output);
+  const structured = record(
+    result?.structured_content ?? result?.structuredContent,
+  );
+  const direct = record(structured?.error ?? result?.error ?? item.error);
+  let text: TranscriptJson | undefined;
+  if (direct === undefined && structured === undefined) {
+    // Only a complete single JSON block can supply a missing structured result.
+    const content = result?.content;
+    const block =
+      Array.isArray(content) && content.length === 1
+        ? record(content[0])
+        : undefined;
+    if (block?.type === "text" && typeof block.text === "string")
+      text = parseTranscriptJson(block.text);
+  }
+  const error = direct ?? record(record(text?.value)?.error);
+  const failed =
+    item.status === "failed" ||
+    (item.error !== undefined && item.error !== null) ||
+    result?.isError === true ||
+    structured?.error !== undefined ||
+    error !== undefined;
+  const errorCode =
+    (direct !== undefined || text?.hasDuplicateMembers === false) &&
+    typeof error?.code === "string" &&
+    error.code.length > 0
+      ? error.code
+      : null;
+  const evidenceValue =
+    server?.toLowerCase() === "rea" &&
+    item.status !== "failed" &&
+    (item.error === undefined || item.error === null) &&
+    consistentJsonAliases(item, "result", "output") &&
+    result !== undefined &&
+    result.isError !== true &&
+    (result.error === undefined || result.error === null) &&
+    (result.structuredContent === undefined ||
+      result.structured_content === undefined ||
+      sameJson(result.structuredContent, result.structured_content))
+      ? (result.structuredContent ??
+        result.structured_content ??
+        (text?.hasDuplicateMembers === false ? text.value : undefined))
+      : undefined;
+  return { failed, errorCode, evidenceValue };
+};
+
+const evidenceFromCall = (
+  value: unknown,
   tool: string,
 ): Evidence | undefined => {
-  if (!consistentJsonAliases(item, "result", "output")) return undefined;
-  const result = record(item.result ?? item.output);
-  if (
-    result === undefined ||
-    result.isError === true ||
-    (result.error !== undefined && result.error !== null)
-  )
-    return undefined;
-  if (
-    result.structuredContent !== undefined &&
-    result.structured_content !== undefined &&
-    !sameJson(result.structuredContent, result.structured_content)
-  )
-    return undefined;
-  let value = result.structuredContent ?? result.structured_content;
-  if (value === undefined || value === null) {
-    // Some Codex transcripts retain only the complete MCP JSON text block.
-    // Prose, multiple blocks, and truncated previews cannot establish delivery.
-    if (!Array.isArray(result.content) || result.content.length !== 1)
-      return undefined;
-    const block = record(result.content[0]);
-    if (block?.type !== "text" || typeof block.text !== "string")
-      return undefined;
-    value = parseClosedJson(block.text);
-  }
   const structured = record(value);
   if (
     structured === undefined ||
@@ -313,7 +350,6 @@ export const parseCodexToolCall = (
 ): ParsedCodexToolCall | undefined => {
   const item = completedToolItem(event);
   if (item === undefined) return undefined;
-  const status = item.status;
   const server = item.server ?? item.server_name;
   const tool = item.tool ?? item.name;
   if (
@@ -331,21 +367,18 @@ export const parseCodexToolCall = (
         : {};
   const parsedArguments = jsonValueSchema.safeParse(argumentsValue);
   if (!parsedArguments.success) return undefined;
+  const serverName = typeof server === "string" ? server : null;
+  const result = parseToolResult(item, serverName);
   const parsed: ParsedCodexToolCall = {
-    item,
+    error: result.failed,
+    errorCode: result.errorCode,
     id: typeof item.id === "string" && item.id.length > 0 ? item.id : null,
-    server: typeof server === "string" ? server : null,
+    server: serverName,
     tool,
     arguments: parsedArguments.data,
     evidence: [],
   };
-  if (
-    parsed.server?.toLowerCase() !== "rea" ||
-    status === "failed" ||
-    (item.error !== undefined && item.error !== null)
-  )
-    return parsed;
-  const evidence = evidenceFromCall(item, tool);
+  const evidence = evidenceFromCall(result.evidenceValue, tool);
   if (evidence === undefined) return parsed;
   return { ...parsed, evidence: artifactDelivery(evidence) };
 };
@@ -486,7 +519,10 @@ export const evaluateKnownAnswers = (
       manifestFailures: ["duplicate_fixture_claim_ids"],
       claims: [],
     };
-  const manifest = finalAnswerSchema.safeParse(parseClosedJson(finalMessage));
+  const answer = parseTranscriptJson(finalMessage);
+  const manifest = finalAnswerSchema.safeParse(
+    answer?.hasDuplicateMembers === false ? answer.value : undefined,
+  );
   if (!manifest.success)
     return {
       scope,

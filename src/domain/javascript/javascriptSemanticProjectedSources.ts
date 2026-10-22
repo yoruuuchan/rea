@@ -234,6 +234,7 @@ const projectedSourceFactsAtRead = (
       return (
         capture !== undefined &&
         receiverAt !== undefined &&
+        replacement.receiverIdentity === "definite" &&
         t.isAssignmentExpression(replacement.node, { operator: "=" }) &&
         samePrefix(replacement, effect) &&
         semanticTopLevelEffectFollowsCapture(
@@ -290,6 +291,7 @@ const projectedSourceFactsAtRead = (
     | undefined;
   for (const effect of writes) {
     if (
+      effect.receiverIdentity === "definite" &&
       t.isAssignmentExpression(effect.node, { operator: "=" }) &&
       effect.path.every(
         (key, index) =>

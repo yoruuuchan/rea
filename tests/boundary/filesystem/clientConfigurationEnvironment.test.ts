@@ -492,6 +492,11 @@ it.each([
     "REA_ASAR_MAX_HEADER_BYTES",
   ],
   [
+    "regex matching deadline of zero",
+    { REA_REGEX_MATCHING_DEADLINE_MS: "0" },
+    "REA_REGEX_MATCHING_DEADLINE_MS",
+  ],
+  [
     "malformed loader JSON",
     { HOPPER_LOADER_ARGS_JSON: "{" },
     "HOPPER_LOADER_ARGS_JSON",

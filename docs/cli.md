@@ -155,6 +155,18 @@ dependency edges, and the section's file range. A missing `.dep-v0` section is
 null metadata, not proof that the binary has no dependencies. See
 [Rust binaries](rust-binaries.md).
 
+Inspect a PE Authenticode certificate table without executing the image or
+verifying signatures:
+
+```bash
+rea inspect-pe-certificates /absolute/path/to/application.exe --json
+```
+
+The workflow reports `WIN_CERTIFICATE` entries and, for PKCS#7 signedData,
+embedded X.509 serial, issuer, subject, and validity fields. A missing security
+directory is observed absence of that table. See
+[PE Authenticode certificate tables](pe-certificates.md).
+
 Inspect ELF PT_NOTE and SHT_NOTE tables without executing the image:
 
 ```bash
@@ -164,6 +176,27 @@ rea inspect-elf-notes /absolute/path/to/program --json
 The workflow reports note owners, types, descriptor hashes, and GNU build-id
 or ABI-tag fields when those descriptors match. A missing note table is
 observed absence of those declarations. See [ELF note tables](elf-notes.md).
+
+Inspect a CPython 3.7–3.13 `.pyc` header and nested marshal code objects
+without executing bytecode or installing Python:
+
+```bash
+rea inspect-python-pyc /absolute/path/to/module.pyc --json
+```
+
+The workflow reports the pinned CPython version for the magic, PEP 552 hash or
+mtime/size fields, nested function names, and bytecode SHA-256. Bytecode is
+not decompiled. See [CPython pyc inspection](python-pyc.md).
+
+Inspect an Erlang BEAM file without executing bytecode:
+
+```bash
+rea inspect-erlang-beam /absolute/path/to/app.beam --json
+```
+
+The workflow reports IFF chunk names, atom tables, exports, imports, lambdas,
+and the Code chunk header. Missing optional tables stay null. See
+[Erlang BEAM files](erlang-beam.md).
 
 Configure [Hopper or Ghidra](installation.md#hopper), the
 [IDA adapter](ida-provider.md), or [Kuna](kuna-provider.md) before analyzing a

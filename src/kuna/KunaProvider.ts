@@ -16,6 +16,10 @@ import {
 import type { BinaryTarget } from "../domain/binaryTargetTypes.js";
 import { err, ok } from "../domain/result.js";
 import { RegularFileCleanupFailure } from "../filesystem/OwnedRegularFile.js";
+import {
+  resolveRegexMatchingDeadline,
+  type RegexMatchingDeadline,
+} from "../config/regexMatchingDeadline.js";
 import { snapshotEnvironment } from "../process/snapshotEnvironment.js";
 import {
   kunaFileCleanupError,
@@ -53,6 +57,7 @@ const VERIFIED_ARCHITECTURES: ReadonlySet<string> = new Set([
  */
 export class KunaProvider implements AnalysisProviderCandidate {
   readonly #environment: Readonly<NodeJS.ProcessEnv>;
+  readonly #deadline: RegexMatchingDeadline;
   readonly #platform: NodeJS.Platform;
   readonly #launcher: KunaProcessLauncher | undefined;
   readonly #probeTimeoutMs: number | undefined;
@@ -69,10 +74,18 @@ export class KunaProvider implements AnalysisProviderCandidate {
       readonly probeTimeoutMs?: number;
       /** Test seam for foreground native runs; production derives it from the host. */
       readonly singleFunctionRuns?: number;
+      /**
+       * Deadline already resolved at startup. Omitted means resolve the
+       * selected environment; an invalid setting is refused.
+       */
+      readonly regexMatchingDeadline?: RegexMatchingDeadline;
     } = {},
   ) {
     this.#platform = options.platform ?? process.platform;
     this.#environment = snapshotEnvironment(environment, this.#platform);
+    this.#deadline =
+      options.regexMatchingDeadline ??
+      resolveRegexMatchingDeadline(this.#environment);
     this.#launcher = options.launcher;
     this.#probeTimeoutMs = options.probeTimeoutMs;
     this.#singleFunctionRuns = options.singleFunctionRuns;
@@ -92,6 +105,7 @@ export class KunaProvider implements AnalysisProviderCandidate {
             reason: availability.reason,
             code: availability.code,
           },
+      this.#deadline,
     );
   }
 
@@ -290,6 +304,7 @@ export class KunaProvider implements AnalysisProviderCandidate {
       cache: this.#projectCache(configuration.value),
       runSlots: this.#foregroundSlots(configuration.value),
       environment: this.#environment,
+      deadline: this.#deadline,
       ...(this.#launcher === undefined ? {} : { launcher: this.#launcher }),
     });
   }

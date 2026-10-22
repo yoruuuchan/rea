@@ -690,6 +690,19 @@ class ObjectReferenceWalk {
     property: t.ObjectMethod | t.ObjectProperty,
     name: string | null,
   ): void {
+    // An earlier unknown computed key cannot replace a later definite slot.
+    // Spreads obey the same overwrite proof; paired named accessors below
+    // retain their separate getter/setter semantics.
+    if (
+      name === null &&
+      this.#key != null &&
+      typeof this.#key !== "object" &&
+      (t.isObjectMethod(property, { kind: "get" })
+        ? this.#data.has(String(this.#key)) ||
+          this.#getters.has(String(this.#key))
+        : this.#overwritten.has(String(this.#key)))
+    )
+      return;
     if (
       name !== null &&
       !semanticPropertyPathKeyMatches(this.#key ?? null, name)

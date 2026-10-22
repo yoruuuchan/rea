@@ -2,6 +2,7 @@ import type * as t from "@babel/types";
 import type { JavaScriptOpenReceiverFact } from "./javascriptSemanticAnalysis.js";
 import type { JavaScriptRpcScan } from "./javascriptRpcEndpoints.js";
 import type { JavaScriptStaticPathIntrinsicQuery } from "./javascriptStaticAnalysisHelpers.js";
+import type { JavaScriptExpressionShapeResolver } from "./javascriptSemanticExpressionShapes.js";
 
 import type {
   JavaScriptBundlerRegistration,
@@ -91,6 +92,8 @@ export interface JavaScriptFindingContext {
   /** Node path.resolve identity established by shared callee and mutation owners. */
   readonly nodePathResolve?: JavaScriptStaticPathIntrinsicQuery;
   readonly rpcScan: JavaScriptRpcScan;
+  /** Shared bounded argv/nullish argument shapes for optional-slot signatures. */
+  readonly expressionShapes: JavaScriptExpressionShapeResolver;
   readonly source: string;
   readonly accumulator: JavaScriptAnalysisAccumulator;
   readonly vitePreloadDependencyTable: readonly (string | undefined)[] | null;

@@ -317,15 +317,10 @@ export const recordedCrashSchema = recordedCrashObjectSchema.superRefine(
         fail("Invalid original note identity or segment reference.");
         continue;
       }
-      const decodedLength = (raw: string) =>
-        BigInt(
-          (raw.length / 4) * 3 -
-            (raw.endsWith("==") ? 2 : raw.endsWith("=") ? 1 : 0),
-        );
       if (
-        decodedLength(note.owner_bytes_base64) !==
+        BigInt(Buffer.byteLength(note.owner_bytes_base64, "base64")) !==
           BigInt(note.owner_location.bytes) ||
-        decodedLength(note.descriptor_bytes_base64) !==
+        BigInt(Buffer.byteLength(note.descriptor_bytes_base64, "base64")) !==
           BigInt(note.descriptor_location.bytes)
       )
         fail("Raw note lengths differ from their source ranges.");

@@ -22,6 +22,13 @@ Inspect native SAZ or HAR 1.2 offline with REA, or connect Everywhere's separate
 
 - `compare_web_captures` / `rea compare-web-captures` compares passive captures or exact-step-aligned browser scenarios. Scenario results commit reproducible literal normalization and expose alignment failures plus artifact-level action, screenshot, DOM, accessibility, URL, history, storage, and event differences. Missing or truncated evidence is never treated as equivalence.
 
+For a compact route query, select `detail: "summary"` and a
+`view: {kind: "javascript-routes", collection: "routes", limit: 20}`. The
+shared [route inventory](javascript-route-inventory.md) preserves source IDs,
+precise locations, partial coverage, and the complete parent Evidence for
+subsequent filtered pages. Static candidates never establish complete application
+coverage or reachability.
+
 For `analyze_web_bundle`, each `webmcp_declarations` entry's
 `schema_property_names` is a source-derived projection of statically known own
 property keys, not schema validation. `schema_property_names_coverage` reports

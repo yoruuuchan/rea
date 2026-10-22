@@ -1,13 +1,15 @@
 import { stateBodyJson } from "../../domain/analysisView/EnvironmentStateAccumulator.js";
 import {
   collectionPathOf,
+  decodedSegment,
+  allLines,
   listItems,
+  listsAll,
   missingRequiredFields,
   renderStateEntity,
   renderStateList,
   replaceAt,
   scalarText,
-  segmentsOf,
   type JsonObject,
   type RecordedViewReason,
   type StateEntity,
@@ -15,11 +17,12 @@ import {
   type StateListView,
   type StateView,
 } from "../../domain/analysisView/environmentStateRules.js";
-import {
-  pageBound,
-  pagesOnly,
-} from "../../domain/analysisView/environmentStatePaging.js";
+import { pageBound } from "../../domain/analysisView/environmentStatePaging.js";
 import { isAbsence } from "../../domain/analysisView/environmentStateWriteChecks.js";
+import {
+  evaluateQuery,
+  renderQueryList,
+} from "../../domain/analysisView/environmentStateListQuery.js";
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
 import {
   AnalysisInputError,
@@ -28,12 +31,9 @@ import {
 import type { JsonValue } from "../../domain/jsonValue.js";
 import { err, ok, type Result } from "../../domain/result.js";
 import {
-  decodedPathSegment,
-  pathValueMatches,
   replayAnswer,
   replayEnvironmentTool,
   selectReplayExchange,
-  selectsRecordedLine,
   type ReplayArguments,
   type ReplayResult,
 } from "./environmentReplay.js";
@@ -44,8 +44,16 @@ import {
   type EnvironmentSource,
   type RecordedExchange,
 } from "./environmentSource.js";
+import {
+  callQuery,
+  callSegments,
+  checkedLine,
+  collectionMatch,
+  queryLine,
+  unfilteredLine,
+  type CallSegment,
+} from "./environmentStateCallLines.js";
 import type { EnvironmentStateStore } from "./environmentStateStore.js";
-import { environmentToolArguments } from "./environmentTools.js";
 
 /** Where a served answer came from: the live state, or a recording and why. */
 export type StateProvenance =
@@ -69,7 +77,7 @@ export type StateProvenance =
       readonly view: "list";
       readonly type: string;
       readonly collection: string;
-      readonly membership: "all" | "recorded";
+      readonly membership: "all" | "query" | "recorded";
       readonly listed: number;
     }
   | {
@@ -172,41 +180,11 @@ export const stateAnswer = (
   });
 };
 
-/** One collection segment an item call names: a template literal, or a supplied path value. */
-export interface CallSegment {
-  readonly text: string;
-  readonly supplied: boolean;
-}
-
 /** An item call's collection segments and identity value, kept as supplied rather than joined and re-split. */
 export interface ItemCall {
   readonly segments: readonly CallSegment[];
   readonly id: string;
 }
-
-/** A call's path segments: template literals and supplied values, or undefined when a path argument is missing. */
-export const callSegments = (
-  tool: EnvironmentManifestTool,
-  args: ReplayArguments,
-): CallSegment[] | undefined => {
-  const names = environmentToolArguments(tool).path;
-  const params = new Map(tool.params.map((param) => [param.index, param]));
-  const segments: CallSegment[] = [];
-  const template = tool.path_template
-    .slice(tool.path_template.indexOf("/") + 1)
-    .split("/");
-  for (const [index, text] of template.entries()) {
-    const param = params.get(index);
-    if (param === undefined) {
-      if (text !== "") segments.push({ text, supplied: false });
-      continue;
-    }
-    const value = args[names.get(param.name) ?? param.name];
-    if (typeof value !== "string") return undefined;
-    segments.push({ text: value, supplied: true });
-  }
-  return segments;
-};
 
 /** What an item call names, or undefined when a path argument is missing. */
 export const itemCall = (
@@ -220,30 +198,13 @@ export const itemCall = (
     : undefined;
 };
 
-/** How many supplied segments a held collection matches verbatim, when it matches the call under replay's path rule. */
-export const collectionMatch = (
-  collection: string,
-  segments: readonly CallSegment[],
-): number | undefined => {
-  const held = segmentsOf(collection);
-  if (held.length !== segments.length) return undefined;
-  let verbatim = 0;
-  for (const [index, { text, supplied }] of segments.entries()) {
-    const segment = held[index]!;
-    if (supplied ? !pathValueMatches(segment, text) : segment !== text)
-      return undefined;
-    if (supplied && segment === text) verbatim += 1;
-  }
-  return verbatim;
-};
-
 /** The entity an item call names, preferring verbatim collection spellings as replay does; the id is tried percent-decoded, then as written. */
 export const namedEntity = (
   store: EnvironmentStateStore,
   type: string,
   call: ItemCall,
 ): StateEntity | undefined => {
-  const ids = [...new Set([decodedPathSegment(call.id), call.id])];
+  const ids = [...new Set([decodedSegment(call.id), call.id])];
   const candidates = store
     .collectionsOf(type)
     .flatMap((collection) => {
@@ -360,49 +321,6 @@ const answerItem = (
   );
 };
 
-/** The checked recorded line a list or document call names exactly, chosen among them as replay chooses; later or filtered recordings never qualify. */
-const checkedLine = (
-  source: EnvironmentSource,
-  tool: EnvironmentManifestTool,
-  checked: readonly number[],
-  args: ReplayArguments,
-): RecordedExchange | undefined => {
-  const lines = new Map<number, RecordedExchange>();
-  for (const ordinal of checked) {
-    const exchange = source.exchanges.get(ordinal);
-    if (exchange !== undefined && selectsRecordedLine(tool, exchange, args))
-      lines.set(ordinal, exchange);
-  }
-  return selectReplayExchange(tool, lines, args)?.exchange;
-};
-
-/** For a list of a whole collection, a call that supplies no query argument answers from a checked line of the collection its path arguments name that only pages it, chosen as replay chooses; a requested page answers from its recording. */
-const unfilteredLine = (
-  source: EnvironmentSource,
-  tool: EnvironmentManifestTool,
-  checked: readonly number[],
-  args: ReplayArguments,
-): RecordedExchange | undefined => {
-  const query = environmentToolArguments(tool).query;
-  const segments = callSegments(tool, args);
-  if (
-    segments === undefined ||
-    [...query.values()].some((argument) => args[argument] !== undefined)
-  )
-    return undefined;
-  const lines = new Map<number, RecordedExchange>();
-  for (const ordinal of checked) {
-    const exchange = source.exchanges.get(ordinal);
-    if (
-      exchange !== undefined &&
-      pagesOnly(exchange.query ?? undefined) &&
-      collectionMatch(collectionPathOf(exchange, false), segments) !== undefined
-    )
-      lines.set(ordinal, exchange);
-  }
-  return selectReplayExchange(tool, lines, args)?.exchange;
-};
-
 type StateDocumentView = Extract<StateView, { shape: "document" }>;
 
 /** One tool call: the tool, the arguments it was called with, and whether they name the answering line exactly. */
@@ -412,62 +330,109 @@ interface ToolCall {
   readonly exact: boolean;
 }
 
-/** A list call renders the members of the checked line it names from the state. */
+/**
+ * The entities a list call shows on its line: every entity of the collection on a whole line, the query's matches on
+ * a line the query answers or for a call it computes, else the line's recorded members still held; undefined when the
+ * query cannot apply the call's values.
+ */
+const listSelection = (
+  store: EnvironmentStateStore,
+  { tool, args, exact }: ToolCall,
+  view: StateListView,
+  line: {
+    readonly base: RecordedExchange;
+    readonly recorded: readonly JsonObject[];
+  },
+):
+  | {
+      readonly members: readonly StateEntity[];
+      readonly membership: "all" | "query" | "recorded";
+      readonly total: number;
+    }
+  | undefined => {
+  const collection = collectionPathOf(line.base, false);
+  const values = callQuery(tool, args);
+  // A named query line, or a call with query arguments answered on a line it did not name, evaluates the query.
+  const queried =
+    view.query !== undefined &&
+    (exact
+      ? view.query.record_ordinals.includes(line.base.ordinal)
+      : values.size > 0);
+  if (queried) {
+    const computed = evaluateQuery(
+      view.query!.parameters,
+      values,
+      store.inCollection(view.type, collection),
+    );
+    return computed === undefined
+      ? undefined
+      : { members: computed.page, membership: "query", total: computed.total };
+  }
+  if (listsAll(view, line.base.ordinal)) {
+    const members = store.inCollection(view.type, collection);
+    return { members, membership: "all", total: members.length };
+  }
+  const idField = store.type(view.type)?.id_field ?? "";
+  const members = line.recorded.flatMap((item) => {
+    const id = scalarText(item[idField]);
+    const entity =
+      id === undefined ? undefined : store.entity(view.type, collection, id);
+    return entity === undefined ? [] : [entity];
+  });
+  return { members, membership: "recorded", total: members.length };
+};
+
+/** A list call renders the entities its line selects from the state into that line's recorded envelope. */
 const answerList = (
   serving: StateServing,
-  { tool, args, exact }: ToolCall,
+  call: ToolCall,
   view: StateListView,
   base: RecordedExchange,
 ): Result<StateAnswer, AnalysisError> => {
   const { source, store } = serving;
+  const { tool, args, exact } = call;
   const envelope = recordedJson(base);
   const recorded =
     envelope === undefined ? undefined : listItems(envelope, view.pointer);
   if (envelope === undefined || recorded === undefined)
     return fromRecording(source, tool, args, "body-unusable");
-  const collection = collectionPathOf(base, false);
-  const type = store.type(view.type);
   // A requested page the collection has outgrown is answered as recorded, never with more items than it asked for.
   const size = exact
     ? pageBound(base.query ?? undefined, recorded.length)
     : undefined;
   if (
-    view.membership === "all" &&
+    listsAll(view, base.ordinal) &&
     size !== undefined &&
-    store.inCollection(view.type, collection).length > size
+    store.inCollection(view.type, collectionPathOf(base, false)).length > size
   )
     return fromRecording(source, tool, args, "page-exceeded");
-  const members: readonly StateEntity[] =
-    view.membership === "all"
-      ? store.inCollection(view.type, collection)
-      : recorded.flatMap((item) => {
-          const id = scalarText(item[type?.id_field ?? ""]);
-          const entity =
-            id === undefined
-              ? undefined
-              : store.entity(view.type, collection, id);
-          return entity === undefined ? [] : [entity];
-        });
-  const volatile = new Set(type?.volatile_fields);
+  const selection = listSelection(store, call, view, { base, recorded });
+  if (selection === undefined)
+    return fromRecording(source, tool, args, "unrecorded-request");
+  const volatile = new Set(store.type(view.type)?.volatile_fields);
   const items: JsonObject[] = [];
-  for (const entity of members) {
+  for (const entity of selection.members) {
     const shown = shownEntity(tool, view, entity, volatile);
     if (!shown.ok) return shown;
     items.push(shown.value);
   }
-  return stateAnswer(
-    serving,
-    { exchange: base, exact },
-    renderStateList(view, envelope, items),
-    {
-      source: "state",
-      view: "list",
-      type: view.type,
-      collection,
-      membership: view.membership,
-      listed: items.length,
-    },
-  );
+  const body =
+    view.query === undefined || selection.membership === "recorded"
+      ? renderStateList(view, envelope, items)
+      : renderQueryList(
+          { ...view, query: view.query },
+          envelope,
+          items,
+          selection.total,
+        );
+  return stateAnswer(serving, { exchange: base, exact }, body, {
+    source: "state",
+    view: "list",
+    type: view.type,
+    collection: collectionPathOf(base, false),
+    membership: selection.membership,
+    listed: items.length,
+  });
 };
 
 /** A document call answers the state's value for the document on its checked line's status and provenance. */
@@ -501,8 +466,9 @@ const answerCheckedLine = (
   );
   const base =
     named ??
-    (view.shape === "list" && view.membership === "all"
-      ? unfilteredLine(serving.source, tool, view.checked_record_ordinals, args)
+    (view.shape === "list"
+      ? (unfilteredLine(serving.source, tool, allLines(view), args) ??
+        queryLine(serving.source, tool, view, args))
       : undefined);
   if (base === undefined)
     return fromRecording(serving.source, tool, args, "unrecorded-request");

@@ -133,7 +133,7 @@ cliTest(
       "--dry-run",
       "--json",
     ]);
-    expect(planned.exitCode).toBe(0);
+    expect(planned.exitCode, planned.stdout).toBe(0);
     expect(planned.json).toMatchObject({
       status: "planned",
       plannedActions: expect.arrayContaining([
@@ -152,7 +152,7 @@ cliTest(
       "--yes",
       "--json",
     ]);
-    expect(applied.exitCode).toBe(0);
+    expect(applied.exitCode, applied.stdout).toBe(0);
     expect(applied.json).toMatchObject({ status: "ready" });
     expect(parse(await readFile(config, "utf8"))).toMatchObject({
       model: "custom",
@@ -175,7 +175,7 @@ cliTest(
       "--skill",
       "--json",
     ]);
-    expect(doctor.exitCode).toBe(0);
+    expect(doctor.exitCode, doctor.stdout).toBe(0);
     expect(doctor.json).toMatchObject({
       healthy: true,
       identity: { skill: { state: "aligned" } },
@@ -189,7 +189,7 @@ cliTest(
     ]);
     expect(repeat.json).toMatchObject({ status: "ready", appliedActions: [] });
     const uninstall = await run(["uninstall", "--json"]);
-    expect(uninstall.exitCode).toBe(0);
+    expect(uninstall.exitCode, uninstall.stdout).toBe(0);
     expect(parse(await readFile(config, "utf8"))).toEqual(parse(original));
     await expect(access(skill)).rejects.toMatchObject({ code: "ENOENT" });
   },
@@ -243,7 +243,7 @@ for (const selection of ["default", "custom", "suffix", "explicit"] as const) {
         "--dry-run",
         "--json",
       ]);
-      expect(plan.exitCode).toBe(0);
+      expect(plan.exitCode, plan.stdout).toBe(0);
       expect(plan.json).toMatchObject({
         status: "planned",
         plannedActions: expect.arrayContaining([
@@ -253,10 +253,14 @@ for (const selection of ["default", "custom", "suffix", "explicit"] as const) {
           }),
         ]),
       });
-      expect(
-        (await run(["setup", "--client", "hermes", "--yes", "--json"]))
-          .exitCode,
-      ).toBe(0);
+      const applied = await run([
+        "setup",
+        "--client",
+        "hermes",
+        "--yes",
+        "--json",
+      ]);
+      expect(applied.exitCode, applied.stdout).toBe(0);
       expect(parse(await readFile(config, "utf8"))).toMatchObject({
         mcp_servers: {
           rea: { enabled: true },
@@ -281,7 +285,7 @@ for (const selection of ["default", "custom", "suffix", "explicit"] as const) {
           "--skill",
           "--json",
         ]);
-        expect(doctor.exitCode).toBe(0);
+        expect(doctor.exitCode, doctor.stdout).toBe(0);
         expect(doctor.json).toMatchObject({
           healthy: true,
           identity: {
@@ -382,7 +386,7 @@ for (const name of ["missing", "deleted", "ghost", "../escape", "root"]) {
         "--yes",
         "--json",
       ]);
-      expect(unrelated.exitCode).toBe(0);
+      expect(unrelated.exitCode, unrelated.stdout).toBe(0);
     },
   );
 }
@@ -418,7 +422,7 @@ cliTest.skipIf(process.platform === "win32")(
       "--dry-run",
       "--json",
     ]);
-    expect(planned.exitCode).toBe(0);
+    expect(planned.exitCode, planned.stdout).toBe(0);
     expect(planned.json).toMatchObject({
       status: "planned",
       plannedActions: expect.arrayContaining([

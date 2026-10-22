@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { ToolContract } from "../toolContractTypes.js";
 import { toolContractMetadata } from "../toolEffects.js";
 import { electronFuseOutputSchemas } from "../toolOutputSchemaGroups.js";
@@ -13,11 +14,15 @@ import {
   electronActiveObservationInputSchema,
   electronActiveObservationResultSchema,
 } from "../../domain/javascript/electronActiveObservation.js";
-import { javascriptApplicationSummaryViewResultSchema } from "../../domain/analysisView/analysisView.js";
 import {
-  analysisDetailOutputSchemaOf,
-  analysisDetailSchema,
-} from "../analysisDetail.js";
+  javaScriptRoutesCompleteDeliveryShape,
+  javaScriptRoutesSummaryDeliveryShape,
+} from "../../domain/analysisView/javascriptRoutesView.js";
+import {
+  javaScriptRoutesViewResultSchema,
+  javascriptApplicationSummaryViewResultSchema,
+} from "../../domain/analysisView/analysisView.js";
+import { analysisDetailOutputSchemaOf } from "../analysisDetail.js";
 import {
   analyzeJavaScriptApplicationInputSchema,
   javascriptApplicationAnalysisResultSchema,
@@ -31,13 +36,22 @@ import { JAVASCRIPT_RUNTIME_RECONCILIATION_EXAMPLE } from "./javascriptRuntimeRe
 const listOutputSchema = evidenceResultOf(electronTargetListSchema);
 const inspectionOutputSchema = evidenceResultOf(electronPageInspectionSchema);
 /** Caller-selected delivery of a completed JavaScript application analysis. */
-export const analyzeJavaScriptApplicationRequestSchema =
-  analyzeJavaScriptApplicationInputSchema.extend({
-    detail: analysisDetailSchema,
-  });
+export const analyzeJavaScriptApplicationRequestSchema = z
+  .discriminatedUnion("detail", [
+    analyzeJavaScriptApplicationInputSchema.extend(
+      javaScriptRoutesCompleteDeliveryShape,
+    ),
+    analyzeJavaScriptApplicationInputSchema.extend(
+      javaScriptRoutesSummaryDeliveryShape,
+    ),
+  ])
+  .meta({ "x-rea-root-discriminator": "detail" });
 const applicationOutputSchema = analysisDetailOutputSchemaOf(
   javascriptApplicationAnalysisResultSchema,
-  javascriptApplicationSummaryViewResultSchema,
+  z.union([
+    javascriptApplicationSummaryViewResultSchema,
+    javaScriptRoutesViewResultSchema,
+  ]),
 );
 const reconciliationOutputSchema = evidenceResultOf(
   javascriptRuntimeReconciliationResultSchema,
@@ -92,7 +106,7 @@ export const ELECTRON_TOOL_CONTRACTS = [
     name: "analyze_javascript_application",
     ...toolContractMetadata("analyze_javascript_application"),
     description:
-      "Reconstruct one local ASAR or extracted JavaScript application as an inline application graph without executing it. Returns recovered graph nodes, edges, semantic relations, integrity contradictions, limitations, and coverage. Select source_paths to acquire and analyze only exact inventoried file paths; the complete artifact inventory and identity remain intact, and unselected sources remain explicit unknowns. Dependencies are not implicitly analyzed. Select detail summary to retain the complete analysis Evidence in this session and receive only its summary view, then inspect selected modules or pages with inspect_analysis_view. Summary detail reduces delivery, whereas source_paths bounds source analysis. Integrity mismatches fail by default; record-and-continue retains observed bytes as untrusted and marks graph coverage partial. Timeout recovery: returned provider_timeout uses the per-source analysis_timeout_ms budget. A host-only 'timed out awaiting tools/call' needs a longer client tool deadline, not a larger analysis_timeout_ms. Never repeat the unchanged call to test whether that timeout persists; report the host setting if configuration is not editable (Codex: mcp_servers.<server>.tool_timeout_sec, seconds).",
+      "Reconstruct one local ASAR or extracted JavaScript application as an inline application graph without executing it. Returns recovered graph nodes, edges, semantic relations, integrity contradictions, limitations, and coverage. Select source_paths to acquire and analyze only exact inventoried file paths; the complete artifact inventory and identity remain intact, and unselected sources remain explicit unknowns. Dependencies are not implicitly analyzed. Select detail summary to retain the complete analysis Evidence in this session and receive only its summary view, then inspect selected modules or pages with inspect_analysis_view. Select a javascript-routes view with summary detail to query deduplicated static patterns, source-linked occurrences, source status or interpretation gaps with filters, fields and paging. Static routes do not establish reachability or the full application route set. Summary detail reduces delivery, whereas source_paths bounds source analysis. Integrity mismatches fail by default; record-and-continue retains observed bytes as untrusted and marks graph coverage partial. Timeout recovery: returned provider_timeout uses the per-source analysis_timeout_ms budget. A host-only 'timed out awaiting tools/call' needs a longer client tool deadline, not a larger analysis_timeout_ms. Never repeat the unchanged call to test whether that timeout persists; report the host setting if configuration is not editable (Codex: mcp_servers.<server>.tool_timeout_sec, seconds).",
     kind: "electron-provider",
     inputSchema: analyzeJavaScriptApplicationRequestSchema,
     outputSchema: applicationOutputSchema,

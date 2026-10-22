@@ -1042,9 +1042,22 @@ it("keeps unrelated test script changes off the SQLite runtime matrix", async ()
 });
 
 it.each([
+  "src/apkSignature/ApkSignatureProvider.ts",
+  "src/domain/apkSignature/apkSignatureSchemes.ts",
+  "scripts/verify-apk-signature.mjs",
+])("selects the real APK signing lane for %s", async (path) => {
+  const { directory, base } = await fixture();
+  const head = await change(directory, [path]);
+  expect(await classify(directory, base, head)).toMatchObject({
+    apk_signature: true,
+  });
+});
+
+it.each([
   ["browser", "real-browser"],
   ["binary_layout", "real-binary-layout"],
   ["evm", "real-evm-interface"],
+  ["apk_signature", "real-apk-signature"],
   ["javascript_recovery", "real-javascript-recovery"],
   ["recorded_crash", "real-recorded-crash"],
   ["web_network", "real-web-network-captures"],

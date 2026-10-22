@@ -1,5 +1,6 @@
 import type { JsonValue } from "../jsonValue.js";
 import {
+  decodedSegment,
   isParam,
   normalizedPath,
   segmentsOf,
@@ -187,13 +188,7 @@ export const pathValuesOf = (
       if (segment !== value) return undefined;
       continue;
     }
-    let decoded = value;
-    try {
-      decoded = decodeURIComponent(value);
-    } catch {
-      decoded = value;
-    }
-    values.set(segment.slice(1, -1), decoded);
+    values.set(segment.slice(1, -1), decodedSegment(value));
   }
   return values;
 };

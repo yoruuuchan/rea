@@ -275,7 +275,12 @@ describe("managed static provider path boundary", () => {
       nativeClient.execute("inspect_managed_artifact", {}),
     ).resolves.toMatchObject({
       ok: false,
-      error: { _tag: "AnalysisCapabilityUnavailableError" },
+      error: {
+        _tag: "AnalysisUnsupportedTargetError",
+        operation: "inspect_managed_artifact",
+        path: parsed.value.path,
+        reason: "Managed static triage requires a PE target; observed elf.",
+      },
     });
   });
 

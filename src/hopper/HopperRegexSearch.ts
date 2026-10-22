@@ -12,6 +12,10 @@ import type { JsonValue } from "../domain/jsonValue.js";
 import { err, ok, type Result } from "../domain/result.js";
 import { analysisSearchInput } from "../contracts/analysisSearchContract.js";
 import type { HopperClient } from "./HopperClient.js";
+import {
+  DEFAULT_REGEX_MATCHING_DEADLINE,
+  type RegexMatchingDeadline,
+} from "../config/regexMatchingDeadline.js";
 import { matchRegexValues } from "../process/RegexMatcher.js";
 import { analysisClientFailureForOperation } from "../providers/AnalysisClientFailure.js";
 
@@ -26,7 +30,10 @@ export class HopperRegexSearch {
     Promise<Result<JsonValue, AnalysisError>>
   >();
 
-  constructor(private readonly client: Pick<HopperClient, "callTool">) {}
+  constructor(
+    private readonly client: Pick<HopperClient, "callTool">,
+    private readonly deadline: RegexMatchingDeadline = DEFAULT_REGEX_MATCHING_DEADLINE,
+  ) {}
 
   execute(
     operation: "search_strings" | "search_procedures",
@@ -129,6 +136,7 @@ export class HopperRegexSearch {
       caseSensitive: input.data.case_sensitive,
       values: parsed.data.map((item) => item.value),
       signal: options.signal,
+      deadline: this.deadline,
       invalidPattern: (reason) =>
         new HopperRemoteError(-32000, `Invalid regex pattern: ${reason}`, {
           diagnosticType: "invalid_request",

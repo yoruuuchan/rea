@@ -39,6 +39,19 @@ const tool = (name: string): EnvironmentManifestTool => {
 };
 
 describe("environmentToolDefinitions", () => {
+  it("distinguishes computed answers from their retained envelope's match metadata", () => {
+    const definitions = environmentToolDefinitions(source, "query-provenance", {
+      dataPlane: "state",
+    });
+    for (const definition of definitions)
+      expect(definition.description).toContain(
+        "state.source, not replay.exact_match, identifies state vs recording",
+      );
+    expect(environmentToolDefinitions(source)[0]?.description).not.toContain(
+      "state.source",
+    );
+  });
+
   it("maps every manifest tool in order with a replay description naming its records and evidence", () => {
     expect(definitions.map(({ name }) => name)).toEqual(
       source.manifest.tools.map(({ name }) => name),

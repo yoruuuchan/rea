@@ -1,7 +1,7 @@
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
 import { readStableArtifact } from "../../artifacts/readStableArtifact.js";
 import {
-  ArtifactFileCleanupFailure,
+  artifactFilePrimaryFailure,
   bindArtifactFileCleanup,
   artifactFileCancellationCause,
 } from "../../artifacts/ArtifactFileOperation.js";
@@ -78,7 +78,7 @@ export class ElfNotesProvider implements ElfNotesPort {
         );
       });
     } catch (cause) {
-      return err(elfNotesFailure(cause, input, options?.signal));
+      return err(elfNotesFailure(cause, input));
     }
   }
 }
@@ -181,18 +181,11 @@ const elfNotesFailurePrimary = (
   );
 };
 
-const elfNotesFailure = (
-  cause: unknown,
-  input: InspectElfNotesInput,
-  signal: AbortSignal | undefined,
-) => {
-  const primary =
-    cause instanceof ArtifactFileCleanupFailure &&
-    cause.fileCleanupFailure.outcome.kind === "failed"
-      ? elfNotesFailurePrimary(cause.fileCleanupFailure.outcome.cause, input)
-      : cause instanceof ArtifactFileCleanupFailure && signal?.aborted
-        ? new AnalysisCancelledError(OPERATION, { cause: signal.reason })
-        : elfNotesFailurePrimary(cause, input);
+const elfNotesFailure = (cause: unknown, input: InspectElfNotesInput) => {
+  const primary = elfNotesFailurePrimary(
+    artifactFilePrimaryFailure(cause),
+    input,
+  );
   if (!(cause instanceof ArtifactReaderFailure) || cause.cleanup === undefined)
     return primary;
   const cleanup = new ProviderCleanupError(

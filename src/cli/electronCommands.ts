@@ -1,3 +1,4 @@
+import { parseJavaScriptRouteDelivery } from "./javascriptRouteDelivery.js";
 import { isAbsolute, resolve, sep } from "node:path";
 
 import { Cli, z } from "incur";
@@ -312,45 +313,55 @@ const registerJavaScriptApplicationCommand = (
     options: javascriptApplicationOptions,
     run: ({ args, options }) =>
       withCommandCancellation((signal) =>
-        logCliCommand(logger, CLI_COMMANDS.analyzeJavaScriptApplication, () =>
-          runCliJavaScriptApplicationAnalysis(
-            {
-              // An empty path names no file; leave it for input validation.
-              input_path:
-                args.path === "" ? args.path : absoluteCallerPath(args.path),
-              format: options.artifactFormat,
-              integrity_policy: options.integrityPolicy,
-              ...(options.maxSemanticNodes === undefined
-                ? {}
-                : { max_semantic_nodes: options.maxSemanticNodes }),
-              ...(options.maxSemanticNodesPerFile === undefined
-                ? {}
-                : {
-                    max_semantic_nodes_per_file:
-                      options.maxSemanticNodesPerFile,
-                  }),
-              ...(options.maxSemanticUnknowns === undefined
-                ? {}
-                : { max_semantic_unknowns: options.maxSemanticUnknowns }),
-              ...(options.maxSemanticUnknownsPerFile === undefined
-                ? {}
-                : {
-                    max_semantic_unknowns_per_file:
-                      options.maxSemanticUnknownsPerFile,
-                  }),
-              ...(options.sourcePath === undefined
-                ? {}
-                : { source_paths: options.sourcePath }),
-              ...(options.maxHeapMb === undefined
-                ? {}
-                : { max_heap_mb: options.maxHeapMb }),
-              ...(options.analysisTimeoutMs === undefined
-                ? {}
-                : { analysis_timeout_ms: options.analysisTimeoutMs }),
-            },
-            environment,
-            signal,
-          ),
+        logCliCommand(
+          logger,
+          CLI_COMMANDS.analyzeJavaScriptApplication,
+          async () => {
+            const delivery = parseJavaScriptRouteDelivery(
+              "analyze_javascript_application",
+              options,
+            );
+            if (!delivery.ok) return projectAnalysisError(delivery.error);
+            return runCliJavaScriptApplicationAnalysis(
+              {
+                // An empty path names no file; leave it for input validation.
+                input_path:
+                  args.path === "" ? args.path : absoluteCallerPath(args.path),
+                format: options.artifactFormat,
+                integrity_policy: options.integrityPolicy,
+                ...(options.maxSemanticNodes === undefined
+                  ? {}
+                  : { max_semantic_nodes: options.maxSemanticNodes }),
+                ...(options.maxSemanticNodesPerFile === undefined
+                  ? {}
+                  : {
+                      max_semantic_nodes_per_file:
+                        options.maxSemanticNodesPerFile,
+                    }),
+                ...(options.maxSemanticUnknowns === undefined
+                  ? {}
+                  : { max_semantic_unknowns: options.maxSemanticUnknowns }),
+                ...(options.maxSemanticUnknownsPerFile === undefined
+                  ? {}
+                  : {
+                      max_semantic_unknowns_per_file:
+                        options.maxSemanticUnknownsPerFile,
+                    }),
+                ...(options.sourcePath === undefined
+                  ? {}
+                  : { source_paths: options.sourcePath }),
+                ...(options.maxHeapMb === undefined
+                  ? {}
+                  : { max_heap_mb: options.maxHeapMb }),
+                ...(options.analysisTimeoutMs === undefined
+                  ? {}
+                  : { analysis_timeout_ms: options.analysisTimeoutMs }),
+              },
+              environment,
+              signal,
+              delivery.value,
+            );
+          },
         ),
       ),
   });

@@ -35,7 +35,8 @@ export const assertRecordedMcpEvidence = (
   name:
     | "inspect_wasm_artifact"
     | "inspect_binary_layout"
-    | "inspect_evm_interface",
+    | "inspect_evm_interface"
+    | "inspect_native_exports",
   schemas: Awaited<ReturnType<typeof advertisedMcpToolSchemas>>,
   session: BinarySession,
   expected: { readonly artifact: { readonly sha256: string } },

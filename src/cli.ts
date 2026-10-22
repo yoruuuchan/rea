@@ -3,6 +3,7 @@ import { registerNativeFunctionMatchingCommands } from "./cli/nativeFunctionMatc
 import { registerCaptureCommands } from "./cli/captureCommands.js";
 import { registerSignalCommands } from "./cli/signalCommands.js";
 import { registerWasmCommands } from "./cli/wasmCommands.js";
+import { registerApkSignatureCommands } from "./cli/apkSignatureCommands.js";
 import { snapshotEnvironment } from "./process/snapshotEnvironment.js";
 import { createDirectAnalysis } from "./composition/directAnalysis.js";
 import { registerEvmCommands } from "./cli/evmCommands.js";
@@ -11,6 +12,8 @@ import { registerGoCommands } from "./cli/goCommands.js";
 import { registerModelCommands } from "./cli/modelCommands.js";
 import { registerIl2cppCommands } from "./cli/il2cppCommands.js";
 import { registerRustCommands } from "./cli/rustCommands.js";
+import { registerPythonPycCommands } from "./cli/pythonPycCommands.js";
+import { registerErlangCommands } from "./cli/erlangCommands.js";
 import { registerSqliteCommands } from "./cli/sqliteCommands.js";
 import { registerAnalysisViewCommands } from "./cli/analysisViewCommands.js";
 import { registerBinaryDiagnosticsCommands } from "./cli/binaryDiagnosticsCommands.js";
@@ -130,6 +133,7 @@ export const createCli = (
   );
   registerUtilityCommands(cli, logger, environment, analysis);
   registerWasmCommands(cli, logger, environment);
+  registerApkSignatureCommands(cli, logger, environment);
   registerCaptureCommands(cli, logger, environment);
   registerSignalCommands(cli, logger, environment);
   registerEvmCommands(cli, logger, environment);
@@ -139,6 +143,8 @@ export const createCli = (
   registerModelCommands(cli, logger);
   registerGpuCommands(cli, logger);
   registerRustCommands(cli, logger);
+  registerPythonPycCommands(cli, logger);
+  registerErlangCommands(cli, logger);
   registerSqliteCommands(cli, logger, environment);
   registerArtifactCommands(cli, logger, analysis.runProviderAnalysis);
   registerManagedCommands(cli, logger, analysis.runProviderAnalysis);

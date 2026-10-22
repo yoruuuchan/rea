@@ -1,3 +1,4 @@
+import { analyzeCapturedWebScript } from "../domain/webBundleAnalyzer.js";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
@@ -216,6 +217,43 @@ it("bounds and binds per-script worker jobs, then reuses one worker for the next
       status: "analyzed",
       script_key: nextScript.script_key,
     });
+
+    // The legacy result fits, but the additional route facet does not. Actual
+    // worker admission must retain the legacy facts and a partial route prefix.
+    const routesScript = makeScript(
+      "createBrowserRouter([{path:'/reports',children:[{path:'settings'},{path:'history'}]}]);",
+    );
+    const full = analyzeCapturedWebScript(routesScript);
+    if (full.status !== "analyzed") throw new Error("Expected analysis");
+    const { route_facts: _routeFacts, ...existing } = full;
+    const offered =
+      Buffer.byteLength(JSON.stringify(existing)) +
+      Buffer.byteLength(',"route_facts":') +
+      700;
+    expect(Buffer.byteLength(JSON.stringify(full))).toBeGreaterThan(offered);
+    const routesId = randomUUID(),
+      routesInput = sourceDescriptor(routesScript);
+    await writeSource(root, routesId, routesInput.bytes);
+    await send(worker, {
+      kind: "analyze",
+      id: routesId,
+      source: routesInput.descriptor,
+      result_budget_bytes: offered,
+    });
+    expect(await server.next()).toMatchObject({ kind: "phase", id: routesId });
+    const routesComplete = await server.next();
+    if (routesComplete.kind !== "complete")
+      throw new Error(JSON.stringify(routesComplete));
+    const selectedBytes = await readFile(join(root, `${routesId}.result`));
+    expect(selectedBytes.length).toBeLessThanOrEqual(offered);
+    const selected = JSON.parse(selectedBytes.toString("utf8"));
+    expect(selected.observations).toEqual(full.observations);
+    expect(selected.route_facts.capacity).toMatchObject({
+      kind: "result-bytes",
+      limit_bytes: 700,
+    });
+    expect(selected.route_facts.candidates.length).toBeGreaterThan(0);
+    expect(selected.route_facts.candidates.length).toBeLessThan(3);
   } finally {
     if (worker !== undefined) {
       worker.stdin.end();

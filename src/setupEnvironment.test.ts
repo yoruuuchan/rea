@@ -185,6 +185,7 @@ it.each([
       REA_GHIDRA_STARTUP_TIMEOUT_MS: "2700000",
       REA_HOPPER_STARTUP_TIMEOUT_MS: "120000",
       REA_MCP_INPUT_SCHEMA_PROFILE: "full",
+      REA_REGEX_MATCHING_DEADLINE_MS: "10000",
     },
     providerConfigured: false,
     installHopper: true,
@@ -217,7 +218,12 @@ it.each([
           REA_GHIDRA_STARTUP_TIMEOUT_MS: "2700000",
           REA_HOPPER_STARTUP_TIMEOUT_MS: "120000",
           REA_MCP_INPUT_SCHEMA_PROFILE: "full",
+          REA_REGEX_MATCHING_DEADLINE_MS: "10000",
         });
+      } else {
+        expect(initial.providerEnvironment).not.toHaveProperty(
+          "REA_REGEX_MATCHING_DEADLINE_MS",
+        );
       }
       const discovery = await discoverSetupState({
         host: setupHost,

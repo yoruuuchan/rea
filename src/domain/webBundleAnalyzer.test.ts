@@ -1,3 +1,7 @@
+import {
+  projectAnalysisView,
+  analysisViewRequestSchema,
+} from "./analysisView/analysisView.js";
 import { describe, expect, it } from "vitest";
 import { createWebPageInspection } from "../../tests/support/browser/webPageInspection.js";
 
@@ -1981,4 +1985,54 @@ it("retains distinct WebMCP descriptions and names while deduplicating equivalen
       ({ trust }) => trust === "page-declared-untrusted",
     ),
   ).toBe(true);
+});
+
+it("keeps known capture omissions in compact route summaries and queryable gap facts", () => {
+  const captured = inspection("createBrowserRouter([{path:'/reports'}]);");
+  captured.completeness.excluded.push(
+    { section: "scripts", reason: "resource_budget_exhausted", count: 3 },
+    {
+      section: "script_sources",
+      reason: "resource_budget_exhausted",
+      count: null,
+    },
+  );
+  const report = analyzeCapturedWebBundle(captured),
+    parent = {
+      evidenceId: `ev_${"a".repeat(64)}`,
+      operation: "analyze_web_bundle",
+      normalizedResult: report,
+      limitations: report.limitations,
+      subject: null,
+    };
+  const summary = projectAnalysisView(
+    parent,
+    analysisViewRequestSchema.parse({
+      kind: "javascript-routes",
+      collection: "summary",
+    }),
+  );
+  if (!summary.ok) throw summary.error;
+  if (summary.value.kind !== "javascript-routes") throw new Error("Wrong view");
+  expect(summary.value.source_coverage.candidate_enumeration).toBe("partial");
+  expect(summary.value.summary!.reported_capture_omissions).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ unit: "script-records", count: 3 }),
+      expect.objectContaining({ unit: "script-sources", count: null }),
+    ]),
+  );
+  const gaps = projectAnalysisView(
+    parent,
+    analysisViewRequestSchema.parse({
+      kind: "javascript-routes",
+      collection: "unknowns",
+      where: { kinds: ["capture-omission"] },
+      fields: ["capture_omission", "reason"],
+    }),
+  );
+  if (!gaps.ok) throw gaps.error;
+  if (gaps.value.kind !== "javascript-routes") throw new Error("Wrong view");
+  expect(gaps.value.items).toHaveLength(2);
+  for (const row of gaps.value.items)
+    expect(row).toMatchObject({ source_id: null, provenance: null });
 });

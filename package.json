@@ -301,6 +301,7 @@
     "verify:wasm:package": "npm run build:cached && node scripts/verify-packaged-wasm-artifact.mjs",
     "verify:wasm-interface-comparison": "npm run build:cached && node scripts/verify-wasm-interface-comparison.mjs",
     "verify:wasm:artifact": "npm run build:cached && node scripts/verify-wasm-artifact.mjs",
+    "verify:apk-signature": "npm run build:cached && node scripts/verify-apk-signature.mjs",
     "verify:evm:interface": "npm run build:cached && node scripts/verify-evm-interface.mjs",
     "verify:solidity:metadata": "npm run build:cached && node scripts/verify-solidity-metadata.mjs",
     "verify:recorded:crash": "npm run build:cached && node scripts/verify-recorded-crash.mjs",
@@ -321,8 +322,8 @@
   },
   "lint-staged": {
     "*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}": [
-      "oxfmt",
-      "oxlint --fix"
+      "oxlint --fix",
+      "oxfmt"
     ],
     "*.{json,md,yml,yaml}": "oxfmt --no-error-on-unmatched-pattern"
   },

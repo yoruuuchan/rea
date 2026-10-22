@@ -4,7 +4,7 @@ import { Readable } from "node:stream";
 
 import { ArtifactReaderFailure } from "../../artifacts/ArtifactReader.js";
 import { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
-import { DESTINATION_CASE_COLLISION_PREFIX } from "../../artifacts/ArtifactPaths.js";
+import { DestinationCaseCollisionFailure } from "../../artifacts/ArtifactPaths.js";
 import { SafeOutputTree } from "../../artifacts/SafeOutputTree.js";
 import { SafeOutputTreeCreationFailure } from "../../artifacts/SafeOutputTreeCreationFailure.js";
 import { PLAYWRIGHT_RESPONSE_BODY_PROVENANCE_LIMITATION } from "../../domain/browserNetworkEvidence.js";
@@ -185,8 +185,10 @@ const publishPlannedScript = async (
     await write(record.content.relative_path);
     return record;
   } catch (cause: unknown) {
-    const collision = destinationCollisionReason(cause);
-    if (collision === undefined || record.content.layout !== "url-path")
+    if (
+      !(cause instanceof DestinationCaseCollisionFailure) ||
+      record.content.layout !== "url-path"
+    )
       throw cause;
     const relativePath = isolatedScriptPath(script, index);
     await write(relativePath);
@@ -196,7 +198,7 @@ const publishPlannedScript = async (
         ...record.content,
         relative_path: relativePath,
         layout: "isolated",
-        layout_reason: collision,
+        layout_reason: cause.message,
       },
     };
   }
@@ -207,13 +209,6 @@ const isolatedScriptPath = (
   index: number,
 ): string =>
   `isolated/source-${index + 1}-${createHash("sha256").update(JSON.stringify(script.source)).digest("hex")}.js`;
-
-const destinationCollisionReason = (cause: unknown): string | undefined =>
-  cause instanceof ArtifactReaderFailure &&
-  cause.reason === "path" &&
-  cause.message.startsWith(DESTINATION_CASE_COLLISION_PREFIX)
-    ? cause.message
-    : undefined;
 
 const message = (cause: unknown): string =>
   cause instanceof Error ? cause.message : "Unknown publication failure";

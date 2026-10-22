@@ -459,3 +459,77 @@ describe("MCP compact input schema canonical enforcement", () => {
     expect(ajv.validateSchema(advertised.inputSchema)).toBe(true);
   });
 });
+
+it.each(["full", "compact"] as const)(
+  "preserves nested resource validation through the %s SDK catalog and canonical handler",
+  async (profile) => {
+    const source = {
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      $id: "https://example.test/root.json",
+      type: "object",
+      definitions: {
+        value: { type: "string" },
+        child: {
+          $id: "child.json",
+          type: "object",
+          definitions: { value: { type: "number" } },
+          properties: { value: { $ref: "#/definitions/value" } },
+          required: ["value"],
+          additionalProperties: false,
+        },
+      },
+      properties: { child: { $ref: "#/definitions/child" } },
+      required: ["child"],
+      additionalProperties: false,
+    };
+    const canonical = new Ajv2020({ strict: false }).compile(source);
+    const registration = toolRegistrationOptions(
+      toolContract("binary_session"),
+    );
+    const inputSchema = {
+      "~standard": {
+        ...registration.inputSchema["~standard"],
+        vendor: "rea-resource-fixture",
+        jsonSchema: {
+          ...registration.inputSchema["~standard"].jsonSchema,
+          input: () => source,
+        },
+        validate: (value: unknown) =>
+          canonical(value)
+            ? { value }
+            : { issues: [{ message: "Invalid resource value" }] },
+      },
+    };
+    const server = profile === "compact" ? compactServer() : fullServer();
+    let calls = 0;
+    server.registerTool("resource_fixture", { inputSchema }, async () => {
+      calls++;
+      return { content: [{ type: "text", text: "accepted" }] };
+    });
+    const client = new Client({ name: "resource-scope", version: "1" });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(st);
+      await client.connect(ct);
+      const definition = (await client.listTools()).tools.find(
+        ({ name }) => name === "resource_fixture",
+      );
+      if (definition === undefined) throw new Error("Missing resource fixture");
+      const advertised = new Ajv2020({ strict: false }).compile(
+        definition.inputSchema,
+      );
+      for (const value of [7, "seven"]) {
+        const args = { child: { value } };
+        expect(advertised(args)).toBe(canonical(args));
+        const result = await client.callTool({
+          name: "resource_fixture",
+          arguments: args,
+        });
+        expect(result.isError === true).toBe(!canonical(args));
+      }
+      expect(calls).toBe(1);
+    } finally {
+      await Promise.allSettled([client.close(), server.close()]);
+    }
+  },
+);

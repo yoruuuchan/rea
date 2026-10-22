@@ -22,6 +22,7 @@ import {
 } from "./javascriptSemanticState.js";
 import {
   semanticStaticPropertyKey,
+  semanticMemberChain,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
 import { semanticPropertyPathKeyMatches } from "./javascriptSemanticPropertyPaths.js";
@@ -1352,32 +1353,6 @@ export const semanticGlobalProcessPathOrigin = (
     importedPath: members.slice(1),
     resolutionMode: "require",
   };
-};
-
-/** Strip a static member chain, returning its root expression and member path. */
-export const semanticMemberChain = (
-  node: t.Node | null | undefined,
-):
-  | { readonly root: t.Node | null | undefined; readonly members: string[] }
-  | undefined => {
-  const members: string[] = [];
-  let current = node;
-  while (current !== null && current !== undefined) {
-    current = unwrapJavaScriptExpression(current).node;
-    if (
-      !t.isMemberExpression(current) &&
-      !t.isOptionalMemberExpression(current)
-    )
-      break;
-    const member = semanticStaticPropertyKey(
-      current.property,
-      current.computed,
-    );
-    if (member === null || !t.isNode(current.object)) return undefined;
-    members.push(member);
-    current = current.object;
-  }
-  return { root: current, members: members.reverse() };
 };
 
 /** Recover an unshadowed literal require origin and its exact member path. */

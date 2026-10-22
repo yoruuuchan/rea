@@ -299,3 +299,52 @@ arm64 host and Node version. Cold disk I/O, token counts and an agent
 investigation were not measured; there was no previous equivalent tool to
 benchmark. These figures do not establish a portable peak-memory bound,
 constant memory for retained Evidence or faster agent task completion.
+
+## Portable native exports
+
+`inspect_native_exports` / `inspect-native-exports` reads the export table of an
+explicit PE or ELF image on any supported host, without an active target,
+native engine, `objdump` or Windows SDK:
+
+```sh
+rea inspect-native-exports ./runtimes/linux-x64/native/libexample.so --json
+```
+
+```json
+{
+  "name": "inspect_native_exports",
+  "arguments": { "path": "/artifacts/native/example.dll" }
+}
+```
+
+The complete Evidence identifies the stable artifact snapshot by path, byte
+count and SHA-256.
+
+- PE rows reproduce the export directory: each used export-address-table slot
+  with its `ordinal`, one row per name (aliases share an ordinal), `address`
+  as the preferred-base virtual address, or `forwarder` text when the slot
+  forwards to another DLL. Ordinal-only exports have a null `name`. The
+  directory's DLL name, ordinal base and timestamp are reported, and an image
+  without an export directory is a complete empty inventory.
+- ELF rows list defined `.dynsym` symbols with global, weak or GNU-unique
+  binding and default or protected visibility. Each row keeps `value`
+  (`st_value` as stored; bit 0 marks Thumb code on 32-bit ARM), `size`, `type`
+  and `binding`. `version` is null for an unversioned symbol, the
+  `.gnu.version_d` index, name and `hidden` flag for a versioned one, or
+  `"unknown"` when the version table cannot be read. A hidden version is not
+  the default version that a by-name `dlsym` lookup selects.
+
+Unreadable names, out-of-range name ordinals and unreadable forwarders are
+listed in `issues`, their entries are not reported, and coverage is `partial`.
+Unresolved symbol versions keep their rows: the version name is null for an
+index no definition names, and `version` is `"unknown"` when the version table
+cannot be read; coverage is likewise `partial`. A dynamic symbol table without
+its null entry is malformed. An ELF without section headers is `unsupported`:
+enumerating dynamic symbols from the dynamic segment is not
+implemented. Mach-O exports are reported by `inspect_macho`.
+
+`max_file_bytes` defaults to 256 MiB (maximum 512 MiB; CLI `--max-file-bytes`).
+Export directories in PE headers are read like those in sections. An export or
+dynamic symbol table above 262144 entries, more than 262144 rows, or more than
+16 MiB of retained names fails without partial success. Export rows do not establish that a symbol is reachable, safe to call
+or loaded at runtime.

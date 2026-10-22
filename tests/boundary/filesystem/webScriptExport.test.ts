@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { constants } from "node:fs";
 import { createHash } from "node:crypto";
 import {
   access,
@@ -28,6 +29,8 @@ import { exportWebScripts } from "../../../src/application/WebScriptExportServic
 import { AnalysisCancelledError } from "../../../src/domain/analysisErrorCore.js";
 import { ArtifactResourceScope } from "../../../src/artifacts/ArtifactResourceScope.js";
 import { publishWebScripts } from "../../../src/browser/assets/PublishWebScripts.js";
+import { DestinationCaseCollisionFailure } from "../../../src/artifacts/ArtifactPaths.js";
+import { ArtifactReaderFailure } from "../../../src/artifacts/ArtifactReader.js";
 import { SafeOutputTree } from "../../../src/artifacts/SafeOutputTree.js";
 import { SafeOutputTreeCreationFailure } from "../../../src/artifacts/SafeOutputTreeCreationFailure.js";
 import { selectScriptCapture } from "../../../src/browser/assets/ScriptCaptureAdapters.js";
@@ -1096,4 +1099,139 @@ describe("capture handle ownership", () => {
       await resources.close().catch(() => undefined);
     }
   });
+});
+
+it("does not isolate a permission refusal just because a differently cased peer exists", async () => {
+  const { input, resources } = await setup(
+    scriptScenarioFixture([
+      {
+        url: "https://fixture.test/App.js",
+        bytes: Buffer.from("export const upper = 1;"),
+      },
+      {
+        url: "https://fixture.test/app.js",
+        bytes: Buffer.from("export const lower = 2;"),
+      },
+    ]),
+  );
+  const denied = Object.assign(new Error("controlled selected-path denial"), {
+    code: "EACCES",
+  });
+  let refusals = 0;
+  openMock.mockImplementation(async (...args) => {
+    if (
+      String(args[0]).endsWith("/app.js") &&
+      typeof args[1] === "number" &&
+      (args[1] & constants.O_EXCL) !== 0
+    ) {
+      refusals++;
+      throw denied;
+    }
+    return actualFs.open(...args);
+  });
+  const result = await exportWebScripts(input, resources);
+  expect(refusals).toBe(1);
+  if (result.ok) throw new Error("Permission failure was hidden by recovery");
+  expect(result.error.cause).toBeInstanceOf(ArtifactReaderFailure);
+  if (!(result.error.cause instanceof ArtifactReaderFailure))
+    throw new Error("Missing file creation failure");
+  expect(result.error.cause.cause).toBe(denied);
+  await expect(access(input.output_directory)).rejects.toMatchObject({
+    code: "ENOENT",
+  });
+});
+
+it("does not choose collision recovery from an untyped diagnostic prefix", async () => {
+  const { input, resources } = await setup();
+  const refusal = new ArtifactReaderFailure(
+    "path",
+    "Destination filesystem cannot store both diagnostic words and authority.",
+  );
+  const write = vi
+    .spyOn(SafeOutputTree.prototype, "write")
+    .mockRejectedValueOnce(refusal);
+  try {
+    const result = await exportWebScripts(input, resources);
+    expect(result.ok).toBe(false);
+    await expect(access(input.output_directory)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  } finally {
+    write.mockRestore();
+  }
+});
+
+it("isolates an observed exclusive-create alias using typed facts when diagnostic wording changes", async () => {
+  const scripts = [
+    {
+      url: "https://fixture.test/App.js",
+      bytes: Buffer.from("export const upper = 1;"),
+    },
+    {
+      url: "https://fixture.test/app.js",
+      bytes: Buffer.from("export const lower = 2;"),
+    },
+  ];
+  const { input, resources } = await setup(scriptScenarioFixture(scripts));
+  const native = Object.assign(
+    new Error("controlled case-insensitive exclusive create"),
+    { code: "EEXIST" },
+  );
+  openMock.mockImplementation(async (...args) => {
+    if (
+      String(args[0]).endsWith("/app.js") &&
+      typeof args[1] === "number" &&
+      (args[1] & constants.O_EXCL) !== 0
+    )
+      throw native;
+    return actualFs.open(...args);
+  });
+  const collisions: DestinationCaseCollisionFailure[] = [];
+  const original = SafeOutputTree.prototype.write;
+  const write = vi
+    .spyOn(SafeOutputTree.prototype, "write")
+    .mockImplementation(async function (this: SafeOutputTree, ...args) {
+      try {
+        return await original.apply(this, args);
+      } catch (cause) {
+        if (cause instanceof DestinationCaseCollisionFailure) {
+          collisions.push(cause);
+          cause.message = "Observed destination spelling conflict.";
+        }
+        throw cause;
+      }
+    });
+  try {
+    const exported = await exportWebScripts(input, resources);
+    if (!exported.ok) throw exported.error;
+    const result = webScriptExportResultSchema.parse(
+      exported.value.normalized_result,
+    );
+    expect(collisions).toHaveLength(1);
+    expect(collisions[0]?.requestedPath).toMatch(/\/app\.js$/u);
+    expect(collisions[0]?.existingPath).toMatch(/\/App\.js$/u);
+    expect(collisions[0]?.cause).toBe(native);
+    expect(
+      result.scripts.map(({ content }) =>
+        content.state === "exported" ? content.layout : null,
+      ),
+    ).toEqual(["url-path", "isolated"]);
+    expect(result.scripts[1]?.content).toMatchObject({
+      layout_reason: "Observed destination spelling conflict.",
+    });
+    if (result.analysis_input === null)
+      throw new Error("Missing exported bytes");
+    for (const [index, script] of result.scripts.entries()) {
+      if (script.content.state !== "exported")
+        throw new Error("Missing script bytes");
+      expect(script.url).toBe(scripts[index]?.url);
+      expect(
+        await readFile(
+          join(result.analysis_input.input_path, script.content.relative_path),
+        ),
+      ).toEqual(scripts[index]?.bytes);
+    }
+  } finally {
+    write.mockRestore();
+  }
 });

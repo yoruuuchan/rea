@@ -9,7 +9,6 @@ import {
   addLocatedFinding,
 } from "./javascriptStaticAnalysisFindings.js";
 import {
-  STATIC_ROUTE_CALL_NAMES,
   argumentNode,
   argumentValue,
   calleeName,
@@ -442,16 +441,6 @@ const inspectEndpointCall = (
   context: FindingContext,
   bindings: JavaScriptSemanticAnalysisState,
 ): void => {
-  const route = STATIC_ROUTE_CALL_NAMES.some(
-    (candidate) => name === candidate || name.endsWith(`.${candidate}`),
-  );
-  if (route && first !== undefined)
-    addEndpoint(context, {
-      node,
-      kind: "route",
-      value: first,
-      mechanism: `call:${name}`,
-    });
   if (isKnownNetworkRequest(node, bindings)) {
     const target = argumentNode(node.arguments[0]);
     if (target === undefined) return;
@@ -747,21 +736,6 @@ export function* finishRpcScanSteps(
   }
 }
 
-export const inspectRouteProperty = (
-  node: t.ObjectProperty,
-  context: FindingContext,
-): void => {
-  const key = semanticStaticPropertyName(node.key, node.computed);
-  const value = stringValue(node.value);
-  if ((key === "path" || key === "route") && value !== undefined)
-    addEndpoint(context, {
-      node,
-      kind: "route",
-      value,
-      mechanism: `property:${key}`,
-    });
-};
-
 export const inspectRoleProperty = (
   node: t.ObjectProperty,
   context: FindingContext,
@@ -896,7 +870,10 @@ export const addReference = (
   });
 };
 
-const addEndpoint = (context: FindingContext, input: EndpointInput): void =>
+export const addEndpoint = (
+  context: FindingContext,
+  input: EndpointInput,
+): void =>
   addLocatedFinding(context, {
     collection: context.accumulator.endpoints,
     key: `endpoint\0${input.kind}\0${input.interpretation ?? "literal"}\0${input.resolution ?? "exact"}\0${input.value}`,

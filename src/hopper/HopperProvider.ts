@@ -45,13 +45,14 @@ import { projectHopperNameInventory } from "./HopperNameInventory.js";
 import { hopperMachOImageSchema } from "./HopperMachOImage.js";
 
 import {
-  CAPABILITIES,
+  hopperCapabilities,
   HOPPER_PROVIDER_IDENTITY,
 } from "./HopperProviderCapabilities.js";
 
 /** Concrete analysis provider backed by REA's private Hopper bridge. */
 export class HopperProvider implements AnalysisProviderCandidate {
   private readonly environment: Readonly<NodeJS.ProcessEnv>;
+  readonly #capabilities: readonly CapabilityDescriptor[];
   readonly #ownedResources = new ArtifactResourceScope();
   readonly #inspectionOwner: RetainedResourceScope = {
     retain: (owner, resource) =>
@@ -76,6 +77,7 @@ export class HopperProvider implements AnalysisProviderCandidate {
     private readonly platform: NodeJS.Platform = process.platform,
   ) {
     this.environment = snapshotEnvironment(environment, platform);
+    this.#capabilities = hopperCapabilities(config.regexMatchingDeadline);
   }
 
   identity(): ProviderIdentity {
@@ -83,7 +85,7 @@ export class HopperProvider implements AnalysisProviderCandidate {
   }
 
   capabilities(): readonly CapabilityDescriptor[] {
-    return CAPABILITIES;
+    return this.#capabilities;
   }
 
   inspectAvailability(): ProviderAvailability {
@@ -309,7 +311,10 @@ export class HopperProvider implements AnalysisProviderCandidate {
       onDiagnostic: (diagnostic) =>
         this.logger.info(diagnostic, "Hopper bridge reported a diagnostic"),
     });
-    const regexSearch = new HopperRegexSearch(client);
+    const regexSearch = new HopperRegexSearch(
+      client,
+      this.config.regexMatchingDeadline,
+    );
     const projectExecution = (
       operation: AnalysisOperation,
       normalized: JsonValue,
@@ -330,7 +335,7 @@ export class HopperProvider implements AnalysisProviderCandidate {
             : [
                 "REA loaded a verified thin Mach-O image prepared from the original source. Identity and file offsets refer to the original file. The owned temporary image and its Hopper document close together, including on MCP shutdown.",
               ]),
-          ...(CAPABILITIES.find(
+          ...(this.#capabilities.find(
             (descriptor) => descriptor.operation === operation,
           )?.limitations ?? []),
           ...(operation === "read_bytes"

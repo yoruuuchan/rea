@@ -443,16 +443,18 @@ it("recovers launch exec argv from the command line, not process.execArgv", () =
   }
 });
 
-it("describes the effective heap and keeps the deadline fixed", () => {
+it("describes the effective heap and the configurable matching deadline", () => {
   for (const heap of [
     effective(128, false),
     effective(256, true),
     { kind: "unknown" } as const,
   ]) {
     const limitation = regexMatchingLimitation(heap);
-    expect(limitation).toContain(
-      "This release has no runtime override for the deadline.",
-    );
+    expect(limitation).toContain("5000 ms matching deadline (source default)");
+    expect(limitation).toContain("REA_REGEX_MATCHING_DEADLINE_MS");
+    expect(limitation).toContain("floor 1 ms");
+    expect(limitation).toContain("maximum 2147483647 ms");
+    expect(limitation).not.toContain("no runtime override");
     expect(limitation).not.toContain("either cap");
     expect(limitation).not.toContain("no runtime override for the heap");
     const projected = projectAnalysisError(

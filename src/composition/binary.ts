@@ -53,7 +53,9 @@ const composeDeepBinarySession = (
   const hopper = new HopperProvider(config, logger, environment);
   const ghidra = new GhidraProvider(config, logger, environment);
   const ida = new IdaProvider(config, environment);
-  const kuna = new KunaProvider(environment);
+  const kuna = new KunaProvider(environment, {
+    regexMatchingDeadline: config.regexMatchingDeadline,
+  });
   const auxiliaryDeclarations =
     auxiliaryAnalysisProviderDeclarations(environment);
   const nativeInspectionAvailable =

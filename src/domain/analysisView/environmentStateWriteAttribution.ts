@@ -1,4 +1,15 @@
-import type { StateView } from "./environmentStateRules.js";
+import {
+  renderStateEntity,
+  same,
+  type JsonObject,
+  type StateEntity,
+  type StateItemView,
+  type StateView,
+} from "./environmentStateRules.js";
+import {
+  collectionTarget,
+  entityTarget,
+} from "./environmentStateWriteChecks.js";
 
 /** The fields a read of a view shows of its entities, less volatile ones it does not compare; all of a document's. */
 export const shownFields = (
@@ -178,6 +189,27 @@ export class WriteEffects {
           if (!unseen.has(tool)) byTool.get(key)!.delete(tool);
   }
 
+  /** A read showed the entity absent: no write's effect on it remains, so a write left with no entity drops from the collection. */
+  removed(
+    touched: TouchedTargets,
+    gone: {
+      readonly type: string;
+      readonly collection: string;
+      readonly id: string;
+    },
+  ): void {
+    const entity = entityTarget(gone.type, gone.collection, gone.id);
+    const collection = collectionTarget(gone.type, gone.collection);
+    this.#changed.delete(entity);
+    const byTool = this.#members.get(collection);
+    if (byTool === undefined) return;
+    for (const [tool, entities] of byTool) {
+      if (!entities.delete(entity) || entities.size > 0) continue;
+      byTool.delete(tool);
+      touched.get(collection)?.delete(tool);
+    }
+  }
+
   /** Whether a read showing `fields` of a target shows anything of a tool's effect there: a create's or delete's always, an update's through a field it changed; unknown claims count as shown. */
   shows(
     tool: string,
@@ -347,4 +379,36 @@ export const forgetChecked = (
       at?.delete(name);
     }
   pending.effects.checked(key, unseen);
+};
+
+/**
+ * Check, field by field, the writes that changed an entity an unmodelled write also changed:
+ * each write's own fields must show as the state holds them, but for volatile ones, which take
+ * the read's value and so show nothing of a write. A create wrote every field, so it cannot be
+ * told apart from the unmodelled change and is not checked.
+ */
+export const writtenFieldChecks = (
+  entity: StateEntity,
+  view: StateItemView,
+  observed: JsonObject,
+  check: {
+    readonly volatile: ReadonlySet<string>;
+    readonly writes: ReadonlyMap<string, readonly string[] | null>;
+  },
+): Map<string, boolean> => {
+  const shown = renderStateEntity(entity, view, check.volatile, observed);
+  const outcomes = new Map<string, boolean>();
+  for (const [tool, fields] of check.writes) {
+    const compared = (fields ?? []).filter(
+      (field) =>
+        !check.volatile.has(field) &&
+        (Object.hasOwn(observed, field) || Object.hasOwn(shown, field)),
+    );
+    if (fields === null || compared.length === 0) continue;
+    outcomes.set(
+      tool,
+      compared.every((field) => same(shown[field], observed[field])),
+    );
+  }
+  return outcomes;
 };

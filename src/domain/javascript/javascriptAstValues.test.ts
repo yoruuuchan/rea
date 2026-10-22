@@ -2,6 +2,7 @@ import * as t from "@babel/types";
 import { expect, it } from "vitest";
 
 import {
+  semanticMemberChain,
   semanticStaticPropertyKey,
   staticObjectProperty,
   staticObjectPropertyNames,
@@ -255,4 +256,28 @@ it("omits prototype setters copied by literal object spread", () => {
   expect(
     staticObjectPropertyNames(t.objectExpression([t.spreadElement(source)])),
   ).toEqual({ status: "complete", names: ["visible"] });
+});
+
+it("shares static member paths and stops before unadmitted path expansion", () => {
+  const root = t.identifier("registry");
+  const selected = t.optionalMemberExpression(
+    t.memberExpression(
+      t.tsAsExpression(root, t.tsUnknownKeyword()),
+      t.stringLiteral("query"),
+      true,
+    ),
+    t.identifier("nested"),
+    false,
+    true,
+  );
+  expect(semanticMemberChain(selected)).toEqual({
+    root,
+    members: ["query", "nested"],
+  });
+  expect(
+    semanticMemberChain(t.memberExpression(root, t.identifier("key"), true)),
+  ).toBeUndefined();
+  let admitted = 0;
+  expect(semanticMemberChain(selected, () => ++admitted < 2)).toBeUndefined();
+  expect(admitted).toBe(2);
 });

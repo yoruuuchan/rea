@@ -32,6 +32,7 @@ import {
 } from "./javascriptAstValues.js";
 import type { JavaScriptFindingContext } from "./javascriptStaticAnalysisState.js";
 import type { JavaScriptBindingIndex } from "./javascriptSemanticState.js";
+import { optionsAfterOptionalArgv } from "./javascriptSemanticExpressionShapes.js";
 import {
   hasElectronOptionObjectCandidate,
   resolveElectronOptionObject,
@@ -316,13 +317,27 @@ const inspectUtilityProcess = (
     moduleNode === undefined
       ? undefined
       : staticPath(moduleNode, context.nodePathResolve);
-  const options = argumentNode(node.arguments[2]);
-  const serviceNameProperty = staticObjectProperty(options, "serviceName");
-  const serviceName =
-    serviceNameProperty.status === "explicit"
-      ? staticPath(serviceNameProperty.property.value, context.nodePathResolve)
+  // Electron treats a non-array object in the argv slot as the options.
+  const shapes = context.expressionShapes;
+  const options = optionsAfterOptionalArgv(node.arguments, shapes);
+  const serviceNameProperty =
+    options === undefined || shapes.isNullish(options)
+      ? { status: "missing" as const }
+      : staticObjectProperty(options, "serviceName", shapes.isNullish);
+  // A nullish serviceName selects Electron's default display name.
+  const declaredName =
+    serviceNameProperty.status === "explicit" &&
+    !shapes.isNullish(serviceNameProperty.property.value)
+      ? serviceNameProperty.property.value
       : undefined;
-  if (serviceNameProperty.status !== "missing" && serviceName === undefined)
+  const serviceName =
+    declaredName === undefined
+      ? undefined
+      : staticPath(declaredName, context.nodePathResolve);
+  if (
+    serviceNameProperty.status === "dynamic" ||
+    (declaredName !== undefined && serviceName === undefined)
+  )
     context.accumulator.unknownFindings += 1;
   if (modulePath === undefined) context.accumulator.unknownFindings += 1;
   const moduleReference =

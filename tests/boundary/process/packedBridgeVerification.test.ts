@@ -10,6 +10,7 @@ import {
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
+import { z } from "zod";
 
 import { verifyPackedBridge } from "../../../scripts/verify-packed-bridge.mjs";
 import {
@@ -55,6 +56,69 @@ it("parses packed Python without executing it or extracting archive members", as
   expect(await readdir(input.workspace)).toEqual(["caller-owned.txt"]);
   expect(await readFile(sentinel, "utf8")).toBe("preserved\n");
 });
+
+it.each(["cwd", "pythonpath", "sitecustomize"] as const)(
+  "rejects invalid packed Python without importing ambient %s code",
+  async (kind) => {
+    const input = await fixture("def broken(:\n");
+    const modules = join(input.workspace, "local modules");
+    await mkdir(modules);
+    const marker = join(input.workspace, "ambient-import-executed.txt");
+    const moduleSource = [
+      "import os",
+      "from pathlib import Path",
+      "Path(os.environ['REA_PACKED_IMPORT_MARKER']).write_text('executed')",
+      ...(kind === "sitecustomize"
+        ? ["import ast", "ast.parse = lambda *args, **kwargs: None"]
+        : ["def parse(*args, **kwargs): return None"]),
+    ].join("\n");
+    await writeFile(
+      join(modules, kind === "sitecustomize" ? "sitecustomize.py" : "ast.py"),
+      moduleSource,
+    );
+    const verifier = new URL(
+      "../../../scripts/verify-packed-bridge.mjs",
+      import.meta.url,
+    ).href;
+    // A separate Node process owns cwd/environment changes; the Vitest worker
+    // and its other subprocess fixtures retain their original environment.
+    const result = await exec(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        `import { verifyPackedBridge } from ${JSON.stringify(verifier)};
+try {
+  await verifyPackedBridge(JSON.parse(process.env.REA_PACKED_VERIFY_INPUT));
+  console.log(JSON.stringify({ accepted: true }));
+} catch (error) {
+  console.log(JSON.stringify({ accepted: false, stderr: String(error.stderr) }));
+}`,
+      ],
+      {
+        cwd: kind === "cwd" ? modules : input.workspace,
+        env: {
+          ...Object.fromEntries(
+            Object.entries(process.env).filter(
+              ([name]) => name.toLowerCase() !== "pythonpath",
+            ),
+          ),
+          PYTHONPATH: kind === "cwd" ? "" : modules,
+          REA_PACKED_IMPORT_MARKER: marker,
+          REA_PACKED_VERIFY_INPUT: JSON.stringify(input),
+        },
+      },
+    );
+    const observation = z
+      .object({ accepted: z.boolean(), stderr: z.string().optional() })
+      .parse(JSON.parse(result.stdout));
+    expect(observation).toMatchObject({
+      accepted: false,
+      stderr: expect.stringContaining("SyntaxError"),
+    });
+    await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
+  },
+);
 
 it.each(packedFiles)(
   "rejects an unadvertised required member: %s",
@@ -121,6 +185,8 @@ it.each(["symlink", "hardlink", "directory"])(
   async (kind) => {
     const input = await fixture();
     await exec("python3", [
+      "-I",
+      "-S",
       "-c",
       [
         "import io, sys, tarfile",

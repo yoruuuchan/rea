@@ -1,3 +1,6 @@
+import { fitJavaScriptRouteSourceFacts } from "../../domain/javascript/javascriptRouteResultBudget.js";
+import { jsonValueByteLength } from "../../domain/jsonValueByteLength.js";
+import type { JsonValue } from "../../domain/jsonValue.js";
 import type { JavaScriptSemanticProjectionCapacity } from "../../domain/javascript/javascriptSemanticFileProjection.js";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
@@ -117,7 +120,24 @@ const analyzeJob = async (
       {
         phase: async (phase) => send({ kind: "phase", id: request.id, phase }),
         checkpoint: async (facts) => {
-          const value = javaScriptWorkerStaticAnalysisSchema.parse(facts);
+          let value = javaScriptWorkerStaticAnalysisSchema.parse(facts);
+          if (value.routes !== undefined) {
+            const { routes, ...existing } = value;
+            // This is schema-checked, producer-owned JSON. Interface optional
+            // members can only make the size estimate conservative.
+            const available =
+              DEFAULTS.checkpointBytes -
+              jsonValueByteLength(
+                existing as JsonValue,
+                DEFAULTS.checkpointBytes,
+              ) -
+              Buffer.byteLength(',"routes":');
+            const admitted = fitJavaScriptRouteSourceFacts(routes, available);
+            value =
+              admitted === undefined
+                ? existing
+                : { ...existing, routes: admitted };
+          }
           const text = JSON.stringify(value);
           const bytes = Buffer.byteLength(text);
           if (bytes > DEFAULTS.checkpointBytes)

@@ -3,6 +3,10 @@ import {
   type AsarHeaderAdmission,
 } from "../../config/asarHeaderAdmission.js";
 import { constants } from "node:fs";
+import {
+  buildJavaScriptRouteInventorySteps,
+  type JavaScriptRouteInventory,
+} from "../../domain/javascript/javascriptRouteInventory.js";
 import { access, lstat, realpath } from "node:fs/promises";
 import { setImmediate } from "node:timers/promises";
 
@@ -48,6 +52,7 @@ import {
 
 /** Application-layer result retaining local diagnostics outside the canonical graph. */
 export interface JavaScriptArtifactReconstructionResult {
+  readonly route_inventory?: JavaScriptRouteInventory;
   readonly input_path: string;
   readonly format: "asar" | "directory";
   readonly root_artifact_sha256: string;
@@ -265,6 +270,48 @@ export const reconstructJavaScriptArtifact = async (
         await completeJavaScriptAnalysisSteps(semanticGraphSteps);
       await checkpointCompletedAnalysis();
       const completed = {
+        route_inventory: await completeJavaScriptAnalysisSteps(
+          buildJavaScriptRouteInventorySteps([
+            ...analysis.files
+              .filter(({ file }) => file.kind === "javascript")
+              .map(({ file, javascript, analysis_failure }) => ({
+                key: file.path,
+                path: file.path,
+                url: null,
+                sha256: file.sha256,
+                container_sha256: file.container_sha256,
+                status:
+                  javascript === null || javascript.parse_status === "failed"
+                    ? ("unavailable" as const)
+                    : javascript.parse_error_count > 0
+                      ? ("partial" as const)
+                      : ("complete" as const),
+                reason: !file.text.included
+                  ? file.text.reason
+                  : (analysis_failure?.reason ??
+                    (javascript === null
+                      ? "Source analysis is unavailable"
+                      : javascript.parse_status === "failed"
+                        ? "Script parsing failed"
+                        : javascript.parse_error_count > 0
+                          ? "Script parsing recovered from errors"
+                          : null)),
+                facts: javascript?.routes ?? null,
+              })),
+            ...files.unavailable_relevant_files
+              .filter((file) => file.kind === "javascript")
+              .map((file) => ({
+                key: file.path,
+                path: file.path,
+                url: null,
+                sha256: file.sha256,
+                container_sha256: file.container_sha256,
+                status: "unavailable" as const,
+                reason: "Inventoried JavaScript source bytes are unavailable",
+                facts: null,
+              })),
+          ]),
+        ),
         input_path: path,
         format,
         root_artifact_sha256: snapshot.manifest.root_sha256,
@@ -303,6 +350,7 @@ export const reconstructJavaScriptArtifact = async (
         },
         limitations: analysis.limitations,
       };
+      await checkpointCompletedAnalysis();
       if (interruption !== null && interruption !== undefined) {
         const { electron_summary: summary, ...application } = completed;
         const partial = await completeJavaScriptAnalysisSteps(

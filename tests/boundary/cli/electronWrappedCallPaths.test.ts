@@ -557,6 +557,90 @@ for (const surface of ["CLI", "stdio MCP"] as const) {
   );
 
   cliTest(
+    `binds each contextBridge helper invocation's own key and members through ${surface}`,
+    async ({ cli }) => {
+      const root = await createTestTempDirectory(
+        "rea-electron-bridge-helper-calls-",
+      );
+      await writeFixtureFiles(root, {
+        "preload.js": `const { contextBridge, ipcRenderer } = require("electron");
+          function expose(key, api) { contextBridge.exposeInMainWorld(key, api); }
+          function relay(key, label, api) { expose(key, api); }
+          function named(label, key) { expose(key, { hidden: () => ipcRenderer.send("hidden") }); }
+          expose("one", { ping: () => ipcRenderer.send("one:ping") });
+          expose("two", { nested: { pong: () => ipcRenderer.send("two:pong") } });
+          relay("three", "label", { pang: () => ipcRenderer.send("three:pang") });
+          contextBridge.exposeInMainWorld("direct", { d: () => ipcRenderer.send("direct:d") });
+          named("label", globalThis.bridgeName);`,
+      });
+      const application = await analyzeJavaScriptDirectory(surface, cli, root);
+      const bridges = application.graph.nodes
+        .filter((node) => node.kind === "context-bridge-api")
+        .flatMap((node) => node.observations)
+        .map(({ properties }) => ({
+          api_key: properties.api_key,
+          api_key_expression: properties.api_key_expression,
+          members: properties.members,
+          unknown_members: properties.unknown_members,
+          resolution_basis: properties.resolution_basis,
+        }));
+      expect(bridges).toHaveLength(5);
+      expect(bridges).toEqual(
+        expect.arrayContaining([
+          {
+            api_key: "one",
+            api_key_expression: null,
+            members: ["ping"],
+            unknown_members: 0,
+            resolution_basis: "wrapper-substitution",
+          },
+          {
+            api_key: "two",
+            api_key_expression: null,
+            members: ["nested", "nested.pong"],
+            unknown_members: 0,
+            resolution_basis: "wrapper-substitution",
+          },
+          {
+            api_key: "three",
+            api_key_expression: null,
+            members: ["pang"],
+            unknown_members: 0,
+            resolution_basis: "wrapper-substitution",
+          },
+          {
+            api_key: "direct",
+            api_key_expression: null,
+            members: ["d"],
+            unknown_members: 0,
+            resolution_basis: "direct-syntax",
+          },
+          // The traced invocation with an unresolved key stays unknown rather
+          // than lending its members to a resolved key.
+          {
+            api_key: null,
+            api_key_expression: "key",
+            members: [],
+            unknown_members: 1,
+            resolution_basis: "direct-syntax",
+          },
+        ]),
+      );
+      expect(application.summary.context_bridge_apis).toBe(5);
+      expect(application.summary.exposed_api_members).toBe(5);
+      const exposureEntries = new Set(
+        application.graph.nodes
+          .flatMap((node) => node.observations)
+          .filter(({ properties }) => properties.step_kind === "exposure")
+          .map(({ properties }) => properties.entry),
+      );
+      expect(exposureEntries).toEqual(
+        new Set(["one.ping", "two.nested.pong", "three.pang", "direct.d"]),
+      );
+    },
+  );
+
+  cliTest(
     `preserves handler ambiguity and short-circuit factory paths through ${surface}`,
     async ({ cli }) => {
       const root = await createTestTempDirectory("rea-electron-branch-paths-");

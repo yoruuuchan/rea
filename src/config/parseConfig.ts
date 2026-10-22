@@ -4,6 +4,7 @@ import type { ConfigurationError } from "../domain/configurationErrors.js";
 import { ok, type Result } from "../domain/result.js";
 import { parseEnvironment } from "./environment.js";
 import { homeDirectoryFromEnvironment } from "./homeDirectory.js";
+import { DEFAULT_REGEX_MATCHING_DEADLINE } from "./regexMatchingDeadline.js";
 import type { AppConfig } from "./types.js";
 import {
   linuxHopperLauncherCandidates,
@@ -121,5 +122,12 @@ export const parseConfig = (
     referenceSourcePolicy: {
       secretPatterns: env.referenceSecretPatterns,
     },
+    regexMatchingDeadline:
+      env.REA_REGEX_MATCHING_DEADLINE_MS === undefined
+        ? DEFAULT_REGEX_MATCHING_DEADLINE
+        : {
+            deadlineMs: env.REA_REGEX_MATCHING_DEADLINE_MS,
+            source: "setting",
+          },
   });
 };

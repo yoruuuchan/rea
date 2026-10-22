@@ -319,6 +319,7 @@ it("binds provider build reuse to the current run while keeping standalone dispa
     "browser",
     "binary_layout",
     "evm",
+    "apk_signature",
     "javascript_recovery",
     "recorded_crash",
     "web_network",

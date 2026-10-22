@@ -51,8 +51,8 @@ const intersectsResource = (
   );
 };
 
-/** Header admission and unambiguous file-backed RVA mapping, independent of section names. */
-export const readPeResourceLayout = (bytes: Buffer) => {
+/** Shared PE header admission: signature, optional header, data directories, and a section table that fits inside SizeOfHeaders. */
+export const readPeHeaders = (bytes: Buffer) => {
   requirePeRange(bytes, 0, 64);
   if (bytes.readUInt16LE(0) !== 0x5a4d) peFailure("Expected an MZ PE image.");
   const pe = bytes.readUInt32LE(60);
@@ -78,6 +78,30 @@ export const readPeResourceLayout = (bytes: Buffer) => {
   requirePeRange(bytes, table, sectionCount * 40);
   if (headerSize < table + sectionCount * 40 || headerSize > bytes.length)
     peFailure("Invalid PE SizeOfHeaders.");
+  return {
+    pe,
+    sectionCount,
+    optional,
+    magic,
+    directoriesAt,
+    directoryCount,
+    headerSize,
+    table,
+  };
+};
+
+/** Header admission and unambiguous file-backed RVA mapping, independent of section names. */
+export const readPeResourceLayout = (bytes: Buffer) => {
+  const {
+    pe,
+    sectionCount,
+    optional,
+    magic,
+    directoriesAt,
+    directoryCount,
+    headerSize,
+    table,
+  } = readPeHeaders(bytes);
   const sections: Section[] = [];
   for (let index = 0; index < sectionCount; index++) {
     const at = table + index * 40;

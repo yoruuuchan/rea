@@ -282,6 +282,8 @@ export function* collectSemanticMemberMutationsSteps(
     readonly mutation?: t.Node;
     readonly originAt: t.Node | undefined;
     readonly widenedGetterResult?: true;
+    readonly definiteReceiver: boolean;
+    readonly assignedSources?: readonly SemanticIterationSource[];
   }[] = [];
   const iterableReferences: IterableReference[] = [];
   const iterableReferenceKeys = new WeakMap<t.Node, Set<string>>();
@@ -298,6 +300,8 @@ export function* collectSemanticMemberMutationsSteps(
       reference.originAt?.end,
       reference.iterationOnly,
       reference.widenedGetterResult === true,
+      reference.definiteReceiver === true,
+      reference.assignedSources?.[0]?.target?.start,
       reference.requiredSources?.map((source) => [
         source.node.start,
         source.node.end,
@@ -335,16 +339,19 @@ export function* collectSemanticMemberMutationsSteps(
     ownerInitializer?: t.Node,
     widenedGetterResult = false,
     assignedSources?: readonly SemanticIterationSource[],
+    definiteReceiver = true,
   ): void => {
     const pending: (ReferencedValue & {
       readonly bindings: ReadonlySet<string>;
       readonly originAt: t.Node | undefined;
+      readonly definiteReceiver: boolean;
     })[] = [
       {
         node,
         path,
         bindings,
         originAt,
+        definiteReceiver,
         ...(ownerInitializer === undefined ? {} : { ownerInitializer }),
       },
     ];
@@ -525,7 +532,7 @@ export function* collectSemanticMemberMutationsSteps(
           current.originAt?.start ?? -1
         }\u0001${current.originAt?.end ?? -1}\u0001${
           current.ownerInitializer?.start ?? -1
-        }\u0001${current.ownerInitializer?.end ?? -1}\u0001${widenedGetterResult}\u0001${assignedSources?.[0]?.target?.start ?? -1}`;
+        }\u0001${current.ownerInitializer?.end ?? -1}\u0001${widenedGetterResult}\u0001${current.definiteReceiver}\u0001${assignedSources?.[0]?.target?.start ?? -1}`;
         let covering = coveringPaths.get(pathState);
         if (covering === undefined) {
           covering = new SemanticPropertyPathCoverage();
@@ -574,6 +581,9 @@ export function* collectSemanticMemberMutationsSteps(
             });
           else
             binding.memberWrites.push({
+              receiverIdentity: current.definiteReceiver
+                ? "definite"
+                : "possible",
               path,
               node: mutation,
               receiverInitializers,
@@ -588,6 +598,11 @@ export function* collectSemanticMemberMutationsSteps(
               node: initializer.node,
               path: [...initializer.projection, ...path],
               bindings: nested,
+              definiteReceiver:
+                current.definiteReceiver &&
+                origins.initializers.length +
+                  origins.referenceInitializers.length ===
+                  1,
               originAt: initializer.node,
             });
         }
@@ -602,6 +617,15 @@ export function* collectSemanticMemberMutationsSteps(
             initializer,
             path: copiedPath,
             bindings: nested,
+            definiteReceiver:
+              current.definiteReceiver &&
+              origins.initializers.length +
+                origins.referenceInitializers.length ===
+                1 &&
+              copiedPath.every(
+                (key) => key !== null && typeof key !== "object",
+              ),
+            ...(assignedSources === undefined ? {} : { assignedSources }),
             effect,
             ...(widenedGetterResult ? { widenedGetterResult: true } : {}),
             originAt: initializer.node,
@@ -612,23 +636,27 @@ export function* collectSemanticMemberMutationsSteps(
         t.isMemberExpression(expression) ||
         t.isOptionalMemberExpression(expression)
       ) {
+        const key = semanticStaticPropertyKey(
+          expression.property,
+          expression.computed,
+        );
         pending.push({
           node: expression.object,
-          path: [
-            semanticStaticPropertyKey(expression.property, expression.computed),
-            ...current.path,
-          ],
+          path: [key, ...current.path],
           bindings: current.bindings,
+          definiteReceiver: current.definiteReceiver && key !== null,
           originAt: current.originAt,
         });
       } else {
-        for (const value of effect === "escape"
-          ? escapedReferenceLeaves(
-              expression,
-              current.path,
-              widenedGetterResult,
-            )
-          : expandedValues(expression, current.path, effect)) {
+        const references =
+          effect === "escape"
+            ? escapedReferenceLeaves(
+                expression,
+                current.path,
+                widenedGetterResult,
+              )
+            : expandedValues(expression, current.path, effect);
+        for (const value of references) {
           if (
             value.escapes &&
             (effect !== "escape" ||
@@ -651,6 +679,8 @@ export function* collectSemanticMemberMutationsSteps(
               path: value.path,
               fallbackPath: value.iterableFallbackPath,
               bindings: current.bindings,
+              definiteReceiver: false,
+              ...(assignedSources === undefined ? {} : { assignedSources }),
               effect,
               originAt: current.originAt,
               ...(widenedGetterResult ? { widenedGetterResult: true } : {}),
@@ -660,6 +690,21 @@ export function* collectSemanticMemberMutationsSteps(
             pending.push({
               ...value,
               bindings: current.bindings,
+              definiteReceiver:
+                current.definiteReceiver &&
+                references.length === 1 &&
+                value.inherited !== true &&
+                value.escapes !== true &&
+                value.widenedGetterResult !== true &&
+                value.iterableFallbackPath === undefined &&
+                value.ownerInitializer === undefined &&
+                !t.isAwaitExpression(expression) &&
+                current.path.every(
+                  (key) => key !== null && typeof key !== "object",
+                ) &&
+                value.path.every(
+                  (key) => key !== null && typeof key !== "object",
+                ),
               originAt: current.originAt,
             });
         }
@@ -896,6 +941,10 @@ export function* collectSemanticMemberMutationsSteps(
           path: [null, ...reference.path],
           fallbackPath: [],
           bindings: reference.bindings,
+          definiteReceiver: false,
+          ...(reference.assignedSources === undefined
+            ? {}
+            : { assignedSources: reference.assignedSources }),
           effect: reference.effect,
           ...(reference.widenedGetterResult
             ? { widenedGetterResult: true }
@@ -917,6 +966,10 @@ export function* collectSemanticMemberMutationsSteps(
           path: reference.path,
           fallbackPath: projection,
           bindings: reference.bindings,
+          definiteReceiver: false,
+          ...(reference.assignedSources === undefined
+            ? {}
+            : { assignedSources: reference.assignedSources }),
           effect: reference.effect,
           ...(reference.widenedGetterResult
             ? { widenedGetterResult: true }
@@ -936,6 +989,8 @@ export function* collectSemanticMemberMutationsSteps(
           reference.originAt,
           undefined,
           reference.widenedGetterResult === true,
+          reference.assignedSources,
+          reference.definiteReceiver,
         );
     }
     for (const [index, reference] of [...iterableReferences].entries()) {
@@ -962,6 +1017,8 @@ export function* collectSemanticMemberMutationsSteps(
         reference.originAt,
         undefined,
         reference.widenedGetterResult === true,
+        reference.assignedSources,
+        reference.definiteReceiver === true,
       );
     }
     // Native Map lookup methods do not expose their receiver to user code.
@@ -1002,6 +1059,8 @@ interface IterableReference extends ReferencedValue {
   readonly mutation?: t.Node;
   readonly originAt: t.Node | undefined;
   readonly iterationOnly?: boolean;
+  readonly definiteReceiver?: boolean;
+  readonly assignedSources?: readonly SemanticIterationSource[];
   readonly requiredSources?: NonNullable<
     SemanticIterationSource["requiredSources"]
   >;

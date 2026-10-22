@@ -28,7 +28,10 @@ import {
   contextBridgeExposureArguments,
   type JavaScriptContextBridgeExposureArguments,
 } from "./javascriptContextBridgeExposure.js";
-import { boundedExpression } from "./electronStaticAnalysisValues.js";
+import {
+  boundedExpression,
+  contextBridgeMemberPathDepth,
+} from "./electronStaticAnalysisValues.js";
 import { argumentNode } from "./javascriptStaticAnalysisHelpers.js";
 import {
   childNodes,
@@ -159,6 +162,55 @@ const indexIpcFinding = (
     else chains.push(reached);
   }
 };
+
+/** Substituted contextBridge exposures at one exposure call site. */
+interface BridgeSite {
+  readonly offset: number;
+  /** Source of the world id argument, shared by every invocation. */
+  readonly worldExpression: string;
+  /** One exposure per world and key, the identity direct syntax uses. */
+  readonly exposures: Map<string, BridgeExposure>;
+  /**
+   * A traced invocation reached this site without an unconditional literal
+   * key and API, so the site's syntax observation still stands for it.
+   */
+  unresolved: boolean;
+}
+
+/** One exposure and the distinct invocation facts merged into it. */
+interface BridgeExposure {
+  value: ElectronContextBridgeFinding;
+  readonly contributions: Set<string>;
+}
+
+const bridgeExposureKey = (value: ElectronContextBridgeFinding): string =>
+  JSON.stringify([value.world, value.api_key, value.api_key_expression]);
+
+const bridgeContributionKey = (value: ElectronContextBridgeFinding): string =>
+  JSON.stringify([value.world_id, value.members, value.unknown_members]);
+
+/**
+ * Exposures of one key at one site from several invocations, or from an
+ * invocation and the site's own syntax, describe one API whose object and
+ * world are any of theirs: members of every alternative, and the unknown
+ * members of the least resolved one, which also absorbs an alternative that
+ * restates another's unresolved source.
+ */
+const mergeBridgeExposures = (
+  left: ElectronContextBridgeFinding,
+  right: ElectronContextBridgeFinding,
+  worldExpression: string,
+): ElectronContextBridgeFinding => ({
+  ...left,
+  world_id:
+    JSON.stringify(left.world_id) === JSON.stringify(right.world_id)
+      ? left.world_id
+      : { status: "dynamic", value: null, expression: worldExpression },
+  members: [...new Set([...left.members, ...right.members])].sort(
+    compareUnicodeCodePoints,
+  ),
+  unknown_members: Math.max(left.unknown_members, right.unknown_members),
+});
 
 interface PathContext {
   readonly entryNode: t.Node;
@@ -456,6 +508,79 @@ export const collectElectronWrappedCallPaths = (
   };
   const hasConditions = (value: SymbolicValue): boolean =>
     symbolicVariants(value).some((variant) => variant.conditions?.length);
+  const bridgeSites = new Map<string, BridgeSite>();
+  // Sites whose direct syntax already observed every fact substitution could
+  // recover: a literal key and an object literal without unknown members.
+  let completeBridgeSyntax: Set<string> | undefined;
+  const bridgeSiteAt = (
+    node: t.CallExpression | t.OptionalCallExpression,
+    siteKey: string,
+    worldNode: t.Node | undefined,
+  ): BridgeSite | undefined => {
+    completeBridgeSyntax ??= new Set(
+      accumulator.contextBridgeApis.flatMap(({ value }) =>
+        value.api_key !== null &&
+        value.api_status === "object-literal" &&
+        value.unknown_members === 0
+          ? [JSON.stringify(value.location)]
+          : [],
+      ),
+    );
+    if (completeBridgeSyntax.has(siteKey)) return undefined;
+    let site = bridgeSites.get(siteKey);
+    if (site === undefined) {
+      site = {
+        offset: node.start ?? -1,
+        worldExpression: boundedExpression(source, worldNode),
+        exposures: new Map(),
+        unresolved: false,
+      };
+      bridgeSites.set(siteKey, site);
+    }
+    return site;
+  };
+  /**
+   * Dotted member paths of one exposed API value, bounded like the direct
+   * syntax inventory. A nested value is enumerated when it resolves to an
+   * unconditional object; other values remain leaf members, as in syntax.
+   */
+  const bridgeMemberInventory = (
+    object: SymbolicValue,
+  ): { readonly members: readonly string[]; readonly unknown: number } => {
+    const members = new Set<string>();
+    let unknown = 0;
+    const visit = (value: SymbolicValue, prefix: readonly string[]): void => {
+      if (prefix.length >= contextBridgeMemberPathDepth) {
+        unknown += 1;
+        return;
+      }
+      unknown += resolver.unknownMembers(value);
+      for (const member of resolver.members(value)) {
+        if (--remainingVisits < 0) {
+          unknown += 1;
+          return;
+        }
+        const path = [...prefix, member];
+        members.add(path.join("."));
+        for (const variant of symbolicVariants(
+          resolver.property(value, member),
+        ))
+          if (
+            (variant.kind === "object" ||
+              variant.kind === "record" ||
+              variant.kind === "namespace") &&
+            !variant.conditions?.length
+          )
+            visit(variant, path);
+        if (remainingVisits < 0) return;
+      }
+    };
+    visit(object, []);
+    return {
+      members: [...members].sort(compareUnicodeCodePoints),
+      unknown,
+    };
+  };
   function* bridgeMemberFunctions(
     value: SymbolicValue,
     segments: readonly string[] = [],
@@ -803,6 +928,19 @@ export const collectElectronWrappedCallPaths = (
     context: PathContext,
     guardedDispatch: boolean,
   ): void => {
+    const location = range(node);
+    const worldNode =
+      exposure.worldIdIndex === null
+        ? undefined
+        : argumentNode(node.arguments[exposure.worldIdIndex]);
+    // Absent when complete direct syntax leaves substitution nothing to add.
+    const site = bridgeSiteAt(node, JSON.stringify(location), worldNode);
+    // The site evaluated in its own scope is not an invocation; a traced call
+    // that leaves this exposure unresolved keeps the syntax observation.
+    const unresolved = (): void => {
+      if (site !== undefined && context.calls.length > 0)
+        site.unresolved = true;
+    };
     const key = exposure.apiKey;
     const object = exposure.api;
     const worldValue =
@@ -811,46 +949,19 @@ export const collectElectronWrappedCallPaths = (
         : (exposure.worldId ?? symbolicUnknown("missing world id"));
     const worldContext =
       worldValue === null ? context : metadataContext(context, worldValue);
-    if (!worldContext) return;
+    if (!worldContext) return unresolved();
     const worldId =
       worldValue === null
         ? null
-        : electronStaticSymbolicValue(
-            worldValue,
-            exposure.worldIdIndex === null
-              ? undefined
-              : argumentNode(node.arguments[exposure.worldIdIndex]),
-          );
+        : electronStaticSymbolicValue(worldValue, worldNode);
     if (worldId?.status === "dynamic") accumulator.unknownFindings += 1;
     if (key?.kind !== "literal" || typeof key.value !== "string" || !object) {
       accumulator.unknownFindings += 1;
-      return;
+      return unresolved();
     }
     const keyContext = metadataContext(worldContext, key);
-    if (!keyContext || !metadataContext(keyContext, object)) return;
-    const members = [...resolver.members(object)].sort();
-    const location = range(node);
-    const existing = accumulator.contextBridgeApis.find(
-      ({ value }) =>
-        JSON.stringify(value.location) === JSON.stringify(location),
-    );
-    const finding: ElectronContextBridgeFinding = {
-      world: exposure.world,
-      world_id: worldId,
-      api_key: key.value,
-      api_key_expression: null,
-      api_status: "dynamic" as const,
-      resolution_basis: "wrapper-substitution" as const,
-      // The direct syntax pass recursively retains literal dotted paths. The
-      // symbolic resolver enumerates only immediate object keys, so its
-      // replacement must not erase paths already established at this call.
-      members: [
-        ...new Set([...(existing?.value.members ?? []), ...members]),
-      ].sort(compareUnicodeCodePoints),
-      unknown_members: resolver.unknownMembers(object),
-      module_key: null,
-      location,
-    };
+    if (!keyContext || !metadataContext(keyContext, object))
+      return unresolved();
     // This report shape has no predicate field, so a guarded world or object
     // cannot be recorded as an unconditional exposure fact.
     const guardedWorld = worldValue !== null && hasConditions(worldValue);
@@ -862,22 +973,49 @@ export const collectElectronWrappedCallPaths = (
       guardedKey ||
       guardedObject ||
       guardedDispatch;
-    if (guarded) accumulator.unknownFindings += 1;
-    // Existing entries are raw syntax observations and remain valid even when
-    // symbolic substitution can only describe this call under a predicate.
-    if (!guarded && existing)
-      (existing.value.api_status !== "object-literal" ||
-        existing.value.unknown_members > 0) &&
-        accumulator.contextBridgeApis.splice(
-          accumulator.contextBridgeApis.indexOf(existing),
-          1,
-          { offset: node.start ?? -1, value: finding },
+    if (guarded) {
+      accumulator.unknownFindings += 1;
+      unresolved();
+    } else if (site !== undefined) {
+      // Each invocation binds its own key and object, so one helper's exposure
+      // call contributes a separate API per key it is invoked with.
+      const inventory = bridgeMemberInventory(object);
+      const finding: ElectronContextBridgeFinding = {
+        world: exposure.world,
+        world_id: worldId,
+        api_key: key.value,
+        api_key_expression: null,
+        api_status: "dynamic",
+        resolution_basis: "wrapper-substitution",
+        members: inventory.members,
+        unknown_members: inventory.unknown,
+        module_key: null,
+        location,
+      };
+      const identity = bridgeExposureKey(finding);
+      const contribution = bridgeContributionKey(finding);
+      const prior = site.exposures.get(identity);
+      if (prior === undefined)
+        site.exposures.set(identity, {
+          value: finding,
+          contributions: new Set([contribution]),
+        });
+      else if (!prior.contributions.has(contribution)) {
+        prior.contributions.add(contribution);
+        const merged = mergeBridgeExposures(
+          prior.value,
+          finding,
+          site.worldExpression,
         );
-    else if (!guarded)
-      accumulator.contextBridgeApis.push({
-        offset: node.start ?? -1,
-        value: finding,
-      });
+        if (
+          merged.world_id?.status === "dynamic" &&
+          prior.value.world_id?.status === "literal" &&
+          worldId?.status === "literal"
+        )
+          accumulator.unknownFindings += 1;
+        prior.value = merged;
+      }
+    }
     for (const { name, path, fn } of bridgeMemberFunctions(object)) {
       const memberContext = metadataContext(keyContext, fn);
       if (!memberContext) continue;
@@ -957,6 +1095,42 @@ export const collectElectronWrappedCallPaths = (
       }
     }
   };
+  /**
+   * Replace each site's syntax observation with the exposures its invocations
+   * resolved. One a traced invocation left unresolved still stands for that
+   * invocation; when it names a resolved key, it is that exposure's
+   * unresolved alternative.
+   */
+  function recordBridgeExposures(): void {
+    if (bridgeSites.size === 0) return;
+    const sites = new Map(bridgeSites);
+    const resolved = (site: BridgeSite) =>
+      [...site.exposures.values()].map(({ value }) => ({
+        offset: site.offset,
+        value,
+      }));
+    const findings = accumulator.contextBridgeApis.flatMap((entry) => {
+      const siteKey = JSON.stringify(entry.value.location);
+      const site = sites.get(siteKey);
+      if (site === undefined) return [entry];
+      sites.delete(siteKey);
+      if (site.exposures.size === 0) return [entry];
+      if (!site.unresolved) return resolved(site);
+      const same = site.exposures.get(bridgeExposureKey(entry.value));
+      if (same === undefined) return [entry, ...resolved(site)];
+      same.value = mergeBridgeExposures(
+        same.value,
+        entry.value,
+        site.worldExpression,
+      );
+      return resolved(site);
+    });
+    // Exposures direct syntax did not identify follow in source order.
+    for (const site of [...sites.values()].sort((a, b) => a.offset - b.offset))
+      for (const finding of resolved(site)) findings.push(finding);
+    accumulator.contextBridgeApis.length = 0;
+    for (const finding of findings) accumulator.contextBridgeApis.push(finding);
+  }
   function walk(
     node: t.Node,
     env: SymbolicEnvironment,
@@ -1077,6 +1251,7 @@ export const collectElectronWrappedCallPaths = (
       call(node, env, context, isolatedSeed?.callee);
     },
   });
+  recordBridgeExposures();
   if (remainingVisits < 0 || resolver.truncated) {
     accumulator.unknownFindings += 1;
     accumulator.electronCallPathLimitReached = true;

@@ -11,6 +11,7 @@ const MIGRATED_PROVIDER_ROOTS = new Set([
   "il2cpp",
   "model",
   "gpu",
+  "python",
   "rust",
   "wasm",
   "captures",

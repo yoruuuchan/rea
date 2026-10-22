@@ -530,9 +530,12 @@ const installationCoordinates = async (
         .find((candidate) => host.executable(candidate)) ?? "java"
     );
   })();
-  // Relative JAVA_HOME is refused by configuration validation without execution.
+  // Java is a prerequisite of a selected installation. Without one, or with a
+  // relative JAVA_HOME, configuration validation refuses Ghidra before Java can
+  // matter, so callers such as setup and doctor must not execute a host JVM.
   const javaProbe =
-    options.javaHome === undefined || path.isAbsolute(options.javaHome)
+    installDir !== null &&
+    (options.javaHome === undefined || path.isAbsolute(options.javaHome))
       ? await host.probeJava(
           javaCommand,
           ghidraJavaEnvironment(

@@ -1,3 +1,6 @@
+import { fitJavaScriptRouteSourceFacts } from "../domain/javascript/javascriptRouteResultBudget.js";
+import { jsonValueByteLength } from "../domain/jsonValueByteLength.js";
+import type { JsonValue } from "../domain/jsonValue.js";
 import { createHash } from "node:crypto";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
@@ -168,6 +171,21 @@ const analyzeJob = async (
       throw new WebBundleWorkerOutputError(
         "Web bundle analyzer did not produce a completed per-script result",
       );
+    if (result.route_facts != null) {
+      const { route_facts, ...existing } = result;
+      const available =
+        request.result_budget_bytes -
+        jsonValueByteLength(
+          existing as JsonValue,
+          request.result_budget_bytes,
+        ) -
+        Buffer.byteLength(',"route_facts":');
+      const admitted = fitJavaScriptRouteSourceFacts(route_facts, available);
+      result =
+        admitted === undefined
+          ? existing
+          : { ...existing, route_facts: admitted };
+    }
     const resultPath = join(root, `${request.id}.result`);
     const file = await open(resultPath, "wx", 0o600);
     const hash = createHash("sha256");

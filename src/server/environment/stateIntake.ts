@@ -299,6 +299,7 @@ const UNC_PATH = /^[\\/]{2}/u;
 /** The local path a `file://` uri names; another host or a UNC path would open a network share, so neither is opened. */
 const localFilePath = (url: URL): Result<string, RpcError> => {
   if (url.host !== "" && url.host !== "localhost") return err(NETWORK_SHARE);
+  if (UNC_PATH.test(url.pathname)) return err(NETWORK_SHARE);
   let path: string;
   try {
     path = fileURLToPath(url);

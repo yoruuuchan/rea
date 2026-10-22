@@ -392,6 +392,11 @@ observation, because callers outside the traced paths may pass other values.
 A wrapper call that is both its own entry and reached through another entry
 is recorded once when both paths find the same facts; calls that supply
 different handlers or channels stay distinct.
+A contextBridge exposure reached through wrapper calls records one API per key
+those invocations supply, each with its own bounded member paths. Invocations
+that supply the same key to one exposure call describe one API covering each
+alternative object. A traced invocation whose key, API object or world stays
+unresolved or guarded keeps the call's own unresolved observation.
 Unknown spreads, reassigned bindings, accessors,
 dynamic channels and unsupported syntax do not become exact implementations.
 This pass neither executes the bundle nor proves that runtime guards pass.

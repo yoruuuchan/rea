@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   ArtifactPathRegistry,
+  destinationCaseCollision,
+  DestinationCaseCollisionFailure,
   annotateEnglishUnicodeCaseCollisions,
   ENGLISH_UNICODE_CASE_INVENTORY_LIMITATION,
   normalizeArtifactPath,
@@ -155,3 +157,26 @@ const caseVariants = (lowercase: string, count: number): string[] =>
       )
       .join(""),
   );
+
+it("retains both source spellings and the native failure in a destination collision", () => {
+  const cause = Object.assign(new Error("exclusive create refused"), {
+    code: "EEXIST",
+  });
+  const collision = destinationCaseCollision("res/café.js", ["CAFÉ.js"], {
+    cause,
+  });
+  expect(collision).toBeInstanceOf(DestinationCaseCollisionFailure);
+  expect(collision).toMatchObject({
+    reason: "path",
+    requestedPath: "res/café.js",
+    existingPath: "res/CAFÉ.js",
+  });
+  expect(collision?.cause).toBe(cause);
+});
+
+it.each([["app.js"], ["app.js", "App.js"], ["other.js"]])(
+  "does not invent a destination alias from listing %j",
+  (...names) => {
+    expect(destinationCaseCollision("res/app.js", names)).toBeUndefined();
+  },
+);

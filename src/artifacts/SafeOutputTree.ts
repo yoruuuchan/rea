@@ -15,7 +15,7 @@ import { streamChunkToBuffer } from "./StreamBytes.js";
 
 import {
   ArtifactPathRegistry,
-  destinationCaseCollisionMessage,
+  destinationCaseCollision,
   normalizeArtifactPath,
 } from "./ArtifactPaths.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
@@ -188,7 +188,8 @@ export class SafeOutputTree {
           constants.O_NOFOLLOW,
         0o600,
       ).catch(async (cause: unknown) => {
-        await throwIfDestinationCaseCollision(parent.path, path, cause);
+        if (isAlreadyExists(cause))
+          await throwIfDestinationCaseCollision(parent.path, path, cause);
         throw new ArtifactReaderFailure(
           "path",
           `Could not exclusively create extraction path: ${path}`,
@@ -482,13 +483,19 @@ export class SafeOutputTree {
         logicalParent.length === 0 ? part : `${logicalParent}/${part}`;
       current = join(current, part);
       await assertPathIdentity(parent.path, parent.identity);
-      let created = true;
-      await mkdir(current, { mode: 0o700 }).catch((cause: unknown) => {
-        if (!isAlreadyExists(cause)) throw cause;
-        created = false;
-      });
-      if (!created) {
-        await throwIfDestinationCaseCollision(parent.path, logicalPath);
+      const creation = await mkdir(current, { mode: 0o700 }).then(
+        () => ({ kind: "created" }) as const,
+        (cause: unknown) => {
+          if (!isAlreadyExists(cause)) throw cause;
+          return { kind: "existing", cause } as const;
+        },
+      );
+      if (creation.kind === "existing") {
+        await throwIfDestinationCaseCollision(
+          parent.path,
+          logicalPath,
+          creation.cause,
+        );
         const identity = this.#nestedDirectories.get(current);
         if (identity === undefined) throw replacedDirectory(current);
         await assertPathIdentity(current, identity);
@@ -684,11 +691,10 @@ const throwIfDestinationCaseCollision = async (
 ): Promise<void> => {
   const names = await readdir(parentDirectory).catch(() => undefined);
   if (names === undefined) return;
-  const message = destinationCaseCollisionMessage(logicalPath, names);
-  if (message === undefined) return;
-  throw new ArtifactReaderFailure(
-    "path",
-    message,
+  const failure = destinationCaseCollision(
+    logicalPath,
+    names,
     cause === undefined ? undefined : { cause },
   );
+  if (failure !== undefined) throw failure;
 };

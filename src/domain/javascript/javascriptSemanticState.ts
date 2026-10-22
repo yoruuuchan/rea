@@ -3,6 +3,7 @@ import type { SemanticIterationSource } from "./javascriptSemanticIterationSourc
 import * as t from "@babel/types";
 import {
   semanticStaticPropertyKey,
+  staticJavaScriptTruthiness,
   unwrapJavaScriptExpression,
 } from "./javascriptAstValues.js";
 import {
@@ -60,6 +61,8 @@ export interface JavaScriptSemanticMemberEffect {
   readonly assignedSources?: readonly SemanticIterationSource[];
   /** Binding values whose receiver identities were selected for this effect. */
   readonly receiverInitializers?: readonly JavaScriptSemanticInitializer[];
+  /** Proof that the write selects this captured receiver, not just a possible alias. */
+  readonly receiverIdentity?: "definite" | "possible";
   /** Capture of this binding used while following an aliased effect receiver. */
   readonly receiverAt?: t.Node;
 }
@@ -412,7 +415,7 @@ const semanticWithRequireLookup = (
         ? "captures"
         : "unknown";
     }
-    const truthiness = semanticWithStaticTruthiness(entry);
+    const truthiness = staticJavaScriptTruthiness(entry);
     return truthiness === true
       ? "skips"
       : truthiness === false
@@ -490,23 +493,6 @@ const finalSemanticWithStringProperty = (
       return t.isObjectProperty(property) ? property.value : "unknown";
     if (name === null && property.computed) return "unknown";
   }
-  return undefined;
-};
-
-const semanticWithStaticTruthiness = (node: t.Node): boolean | undefined => {
-  const value = unwrapJavaScriptExpression(node).node;
-  if (t.isBooleanLiteral(value)) return value.value;
-  if (t.isNullLiteral(value)) return false;
-  if (t.isStringLiteral(value)) return value.value.length > 0;
-  if (t.isNumericLiteral(value))
-    return value.value !== 0 && !Number.isNaN(value.value);
-  if (
-    t.isObjectExpression(value) ||
-    t.isArrayExpression(value) ||
-    t.isFunctionExpression(value) ||
-    t.isArrowFunctionExpression(value)
-  )
-    return true;
   return undefined;
 };
 
