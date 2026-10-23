@@ -477,7 +477,17 @@ const parseFields = (block: string): ParsedFields => {
 /** Names and linker options are text even when they look numeric. */
 const TEXT_FIELDS = /^(?:segname|sectname|string #\d+)$/u;
 
+/**
+ * otool prints load-command strings as `<key> %s (offset %u)`: exactly one
+ * separator space on each side of the recorded string, whose own leading and
+ * trailing whitespace belongs to the Mach-O value.
+ */
+const OFFSET_STRING_FIELD = /^(name|path) (.* \(offset \d+\))$/u;
+
 const parseField = (rawLine: string): readonly [string, string] | undefined => {
+  const offsetString = OFFSET_STRING_FIELD.exec(rawLine.trimStart());
+  if (offsetString?.[1] !== undefined && offsetString[2] !== undefined)
+    return [offsetString[1], offsetString[2]];
   // otool prints each linker option as `string #n <option>`; keep the option
   // exactly, including surrounding spaces, under otool's ordinal label.
   const option = /^\s*(string #[1-9]\d*)(?: (.*))?$/u.exec(rawLine);
@@ -640,7 +650,7 @@ const hexField = (
 };
 
 const stripOffsetSuffix = (value: string | null): string =>
-  value?.replace(/\s+\(offset\s+\d+\)$/u, "") ?? "unknown";
+  value?.replace(/ \(offset \d+\)$/u, "") ?? "unknown";
 
 const sectionAlignment = (raw: string | null): number | null => {
   if (raw === null) return null;

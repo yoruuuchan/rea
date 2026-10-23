@@ -200,8 +200,19 @@ rather than interpreted according to section order.
 
 ### Selected member inspection
 
-When whole-assembly member decoding reaches the representation budget, select
-known declaring types before their signatures and CIL bodies are decoded:
+Member inspection admits type names, tokens, list ranges/counts, nesting facts,
+module identity and their output representation before decoding members. If
+later decoding or projection reaches the 64 MiB representation budget, the
+result retains this type inventory with `coverage.state: "partial"` and the
+original `resource-limit` coordinate. It does not return partially admitted
+member collections: empty fields, methods, references and edges are unexamined,
+not proof of absence; exported types, user strings and signature-resolution
+attestation remain null. Summary and retained pages keep this partial coverage.
+The capacity limit is unchanged. If metadata or the type inventory itself cannot
+be admitted, the result remains unavailable.
+
+Use the returned `types[].full_name` values to select declaring types before
+their signatures and CIL bodies are decoded:
 
 ```bash
 rea inspect-managed-members /absolute/path/Assembly.dll --type Example.Parser
@@ -232,6 +243,14 @@ Coverage describes the selected members. Comparisons leave members outside the
 opposite observation's selection unknown, and application graphs report their
 selected scope as partial. Neither makes an absence claim about the whole
 assembly. Older member Evidence without `selection` remains readable.
+
+For MCP callers, request `detail: "summary"` and page the `types` collection
+using the returned parent Evidence ID. Select one or more returned full names
+in a subsequent `inspect_managed_members` request. Selection is a recovery path,
+not a guarantee: a single type or the assembly-wide member references can still
+exhaust the representation budget. A successful command exit means the Evidence
+was returned; inspect `coverage.state` and `coverage.issues` before treating any
+collection as complete.
 
 ### User strings
 

@@ -235,6 +235,49 @@ it("preserves dependency install names that begin with the word stamp", () => {
   ).toMatch(/^2 Thu Jan/);
 });
 
+it.each([
+  ["surrounding spaces", "  leading.dylib  "],
+  ["surrounding tabs", "\tleading.dylib\t"],
+  ["version prefix", "version 2.dylib"],
+  ["embedded offset annotation", "named (offset 99)"],
+  ["numeric name", "123"],
+  ["ordinary control", "leading.dylib"],
+])(
+  "preserves dependency install-name whitespace: %s",
+  (_label, installName) => {
+    const load = parseOtoolLoadCommands(
+      withOtoolMachHeader(
+        [
+          "Load command 0",
+          "          cmd LC_LOAD_DYLIB",
+          "      cmdsize 48",
+          `         name ${installName} (offset 24)`,
+          "   time stamp 2 Thu Jan  1 00:00:02 1970",
+          "      current version 0.0.0",
+          "compatibility version 0.0.0",
+          "Load command 1",
+          "          cmd LC_RPATH",
+          "      cmdsize 32",
+          `         path ${installName} (offset 12)`,
+          "",
+        ].join("\n"),
+      ),
+    );
+    expect(load.dependencies).toEqual([
+      {
+        path: installName,
+        kind: "LC_LOAD_DYLIB",
+        current_version: "0.0.0",
+        compatibility_version: "0.0.0",
+      },
+    ]);
+    expect(load.commands.map((command) => command.fields)).toMatchObject([
+      { name: `${installName} (offset 24)` },
+      { path: `${installName} (offset 12)` },
+    ]);
+  },
+);
+
 it("normalizes legacy version-minimum commands into build metadata", () => {
   const load = parseOtoolLoadCommands(
     withOtoolMachHeader(

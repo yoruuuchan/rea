@@ -263,7 +263,12 @@ const verifyManagedCatalogAndNativeWorkflow = async (
     },
   });
   expect(parseMcpToolError(wrong)).toMatchObject({
-    error: { code: "evidence_integrity_mismatch" },
+    error: {
+      code: "invalid_request",
+      details: {
+        issues: [expect.objectContaining({ path: ["managed_boundaries"] })],
+      },
+    },
   });
 };
 

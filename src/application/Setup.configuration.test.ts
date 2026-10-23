@@ -105,20 +105,6 @@ describe("setup workflow", () => {
     );
   });
 
-  it("reports a failed Hopper installation without configuring clients", async () => {
-    const host = new FakeSetupHost();
-    host.hopperInstallSucceeds = false;
-    host.clients = [{ name: "cursor", configPath: "/cursor.json" }];
-    const result = await runSetup(
-      { ...options(true, true), clientIds: [] },
-      host,
-    );
-    expect(result.status).toBe("needs_human");
-    expect(result.code).toBe("download_failed");
-    expect(result.remediation).toBe("Download failed.");
-    expect(host.configurations).toBe(0);
-  });
-
   it("blocks malformed client configuration before Hopper or file mutation", async () => {
     const host = new FakeSetupHost();
     host.clients = [
@@ -193,6 +179,63 @@ describe("setup workflow", () => {
       operation: "update",
     });
     expect(host.configurations).toBe(0);
+  });
+});
+
+describe("optional Hopper installation failures", () => {
+  it("reports a failed Hopper installation and still configures the selected clients", async () => {
+    // Hopper is optional; a package conflict must not cost the approved client
+    // registrations and skill (#5113).
+    const host = new FakeSetupHost();
+    host.hopperInstallSucceeds = false;
+    host.clients = [{ name: "cursor", configPath: "/cursor.json" }];
+    const result = await runSetup(
+      {
+        ...options(true, true),
+        clientIds: ["cursor"],
+        skillClientIds: ["cursor"],
+      },
+      host,
+    );
+    expect(result.status).toBe("needs_human");
+    expect(result.code).toBe("download_failed");
+    expect(result.remediation).toBe("Download failed.");
+    expect(result.appliedActions).not.toContain("installed_hopper");
+    expect(host.configurations).toBe(1);
+    expect(host.configuredProviderEnvironments).toEqual([{}]);
+    expect(host.skillInstalls).toBe(1);
+  });
+
+  it("keeps the Hopper failure when a client write also fails", async () => {
+    const host = new FakeSetupHost();
+    host.hopperInstallSucceeds = false;
+    host.clients = [{ name: "cursor", configPath: "/cursor.json" }];
+    host.clientResults.set("cursor", { status: "failed", reason: "write" });
+    const result = await runSetup(
+      { ...options(true, true), clientIds: ["cursor"] },
+      host,
+    );
+    expect(result.code).toBe("download_failed");
+    expect(result.remediation).toMatch(/^Download failed\. ./);
+    expect(host.configurations).toBe(1);
+  });
+
+  it("keeps the Hopper repair steps when the skill install also fails", async () => {
+    const host = new FakeSetupHost();
+    host.hopperInstallSucceeds = false;
+    host.skill = "failed";
+    host.clients = [{ name: "cursor", configPath: "/cursor.json" }];
+    const result = await runSetup(
+      {
+        ...options(true, true),
+        clientIds: ["cursor"],
+        skillClientIds: ["cursor"],
+      },
+      host,
+    );
+    expect(result.code).toBe("skill_install_failed");
+    expect(result.remediation).toMatch(/^Download failed\. ./);
+    expect(host.skillInstalls).toBe(1);
   });
 });
 

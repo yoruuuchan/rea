@@ -1,26 +1,25 @@
 import { createHash } from "node:crypto";
-import type { z } from "zod";
 import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
 import type { EvidenceBundle } from "../../domain/evidenceBundle.js";
-import { immutableEvidence, type Evidence } from "../../domain/evidence.js";
+import type { Evidence } from "../../domain/evidence.js";
+import { readImmutableEvidence } from "../../domain/evidenceValidation.js";
 import {
   EvidenceIntegrityError,
   EvidenceReferenceError,
 } from "../../domain/evidenceErrors.js";
 import { digestCanonicalValue } from "../../domain/canonicalDigest.js";
 import { retainedEvidenceReferenceSchema } from "../../domain/evidenceReference.js";
-import type { matchNativeFunctionsInputSchema } from "../../contracts/native/functionMatchingContracts.js";
+import type { MatchNativeFunctionsInput } from "../../contracts/native/functionMatchingContracts.js";
 import { readImmutableEvidenceBundle } from "../EvidenceBundleFiles.js";
 import type { EvidenceLookup } from "../EvidenceInputResolver.js";
 import type { NativeMatchingAdmission } from "./NativeMatchingAdmission.js";
 
-type Request = z.output<typeof matchNativeFunctionsInputSchema>;
 interface SourceEntry {
   readonly file: number;
   readonly links: readonly string[];
 }
 interface Options {
-  readonly input: Request;
+  readonly input: MatchNativeFunctionsInput;
   readonly paths: readonly string[];
   readonly resources: ArtifactResourceScope;
   readonly admission: NativeMatchingAdmission;
@@ -55,7 +54,10 @@ export const loadNativeMatchingBundleSources = async ({
   paths,
   resources,
   admission,
-}: Options): Promise<{ input: Request; lookup: EvidenceLookup }> => {
+}: Options): Promise<{
+  input: MatchNativeFunctionsInput;
+  lookup: EvidenceLookup;
+}> => {
   const records = new Map<string, Evidence>(),
     index = new Map<string, SourceEntry>();
   const rootIds: string[] = [];
@@ -69,7 +71,9 @@ export const loadNativeMatchingBundleSources = async ({
     if (parsed.success) rootIds.push(parsed.data.evidence_id);
     else {
       await admission.admit(value);
-      const record = immutableEvidence(value);
+      const checked = readImmutableEvidence(value);
+      if (!checked.ok) throw checked.error;
+      const record = checked.value;
       rootIds.push(record.evidence_id);
       records.set(record.evidence_id, record);
       index.set(record.evidence_id, { file: -1, links: record.evidence_links });

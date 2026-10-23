@@ -2,10 +2,9 @@ import type { EvidenceMcpServer } from "../EvidenceMcpServer.js";
 import { runAdmittedToolOperation } from "../admittedToolOperation.js";
 import { recordSessionEvidenceSources } from "../sessionEvidence.js";
 
-import {
-  buildReconstructionObligationLedgerEvidenceValidated,
-  resolveReconstructionObligationLedgerRequest,
-} from "../../application/ReconstructionObligationLedgerService.js";
+import { buildResolvedReconstructionObligationLedgerEvidence } from "../../application/ReconstructionObligationLedgerService.js";
+import { resolveReconstructionObligationLedgerRequest } from "../../application/ReconstructionObligationLedgerRequest.js";
+import { ok } from "../../domain/result.js";
 import { applicationToolContract } from "../../contracts/applicationToolContracts.js";
 import { logToolExecution } from "../toolLogging.js";
 import { toolRegistrationOptions } from "../toolRegistrationOptions.js";
@@ -39,8 +38,10 @@ export const registerReconstructionObligationLedgerTool = (
             contract.name,
             () =>
               Promise.resolve(
-                buildReconstructionObligationLedgerEvidenceValidated(
-                  resolved.value,
+                ok(
+                  buildResolvedReconstructionObligationLedgerEvidence(
+                    resolved.value,
+                  ),
                 ),
               ),
           );
@@ -48,7 +49,7 @@ export const registerReconstructionObligationLedgerTool = (
             return server.delivery.toCallToolResult(result, contract);
           const recorded = recordSessionEvidenceSources(
             options.recordEvidence,
-            resolved.value.evidence_bundle.records,
+            resolved.value.sources.bundle.records,
           );
           if (!recorded.ok)
             return server.delivery.toCallToolResult(recorded, contract);

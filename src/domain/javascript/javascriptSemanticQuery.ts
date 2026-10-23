@@ -38,8 +38,17 @@ interface QueryResult {
 export const queryJavaScriptSemanticGraph = (
   graph: JavaScriptSemanticGraph,
   rawInput: unknown,
+): JavaScriptSemanticQueryResult =>
+  queryJavaScriptSemanticGraphValidated(
+    graph,
+    javaScriptSemanticQueryInputSchema.parse(rawInput),
+  );
+
+/** Run a query already parsed by its owning request boundary. */
+export const queryJavaScriptSemanticGraphValidated = (
+  graph: JavaScriptSemanticGraph,
+  input: JavaScriptSemanticQueryInput,
 ): JavaScriptSemanticQueryResult => {
-  const input = javaScriptSemanticQueryInputSchema.parse(rawInput);
   const queryId = queryIdentifier(graph, input);
   const seeds = resolveSeeds(graph, input);
   const nodes = new Map(graph.nodes.map((node) => [node.node_id, node]));

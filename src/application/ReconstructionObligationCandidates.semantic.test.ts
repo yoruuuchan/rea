@@ -12,8 +12,11 @@ import {
   createJavaScriptSemanticGraphUnknown,
   JavaScriptSemanticEvidenceContextRegistry,
 } from "../domain/javascript/javascriptSemanticGraph.js";
-import { deriveReconstructionObligationCandidates } from "./ReconstructionObligationCandidates.js";
-import { build, request } from "./ReconstructionObligationLedger.fixture.js";
+import {
+  build,
+  deriveCandidates,
+  request,
+} from "./ReconstructionObligationLedger.fixture.js";
 
 const semanticApplication = (
   frontiers: readonly {
@@ -162,10 +165,7 @@ describe("semantic uncertainty at the obligation candidate boundary", () => {
       ),
     ].sort();
     for (const order of [records, [...records].reverse()]) {
-      const generated = deriveReconstructionObligationCandidates(
-        createEvidenceBundle(order),
-        [],
-      );
+      const generated = deriveCandidates(createEvidenceBundle(order), []);
       expect(generated.candidates).toHaveLength(1);
       expect(generated.candidates[0]).toMatchObject({
         definitionCount: 1,

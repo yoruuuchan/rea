@@ -8,7 +8,7 @@ import { ok, type Result } from "../domain/result.js";
 import { AnalysisInputError } from "../domain/analysisErrorCore.js";
 import { createEvidenceBundle } from "../domain/evidenceBundle.js";
 import { publishEvidenceDelivery } from "../application/EvidenceBundleCommands.js";
-import { inspectAnalysisView } from "../application/analysisView/AnalysisViewService.js";
+import { inspectAnalysisViewValidated } from "../application/analysisView/AnalysisViewService.js";
 import { absoluteCallerPath } from "../filesystem/callerPath.js";
 import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
 
@@ -118,7 +118,7 @@ export const publishCliAnalysisEvidence = async (
   // unreported bundle; publication then owns every post-commit outcome.
   const delivered =
     detail === "summary"
-      ? inspectAnalysisView({
+      ? inspectAnalysisViewValidated({
           source: { kind: "inline", evidence: complete },
           view: input.view ?? { kind: "summary" },
         })

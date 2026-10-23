@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { evidenceSchema, type Evidence } from "../evidence.js";
+import type { Evidence } from "../evidence.js";
 import {
   createJavaScriptApplicationGraph,
   javascriptApplicationGraphSchema,
@@ -36,17 +36,21 @@ import {
 } from "./managedApplicationGraphRelations.js";
 import { digestSchema } from "../digests.js";
 import { prefixedDigestSchema } from "../digests.js";
-import { parseManagedInspectionEvidence } from "./managedInspectionEvidence.js";
+import { readManagedInspectionEvidence } from "./managedInspectionEvidence.js";
+import { AnalysisInputError } from "../analysisErrorCore.js";
+import type { EvidenceIntegrityError } from "../evidenceErrors.js";
+import { analysisInputErrorFromIssues } from "../inputIssueProjection.js";
+import { err, ok, type Result } from "../result.js";
 
 const evidenceIdSchema = prefixedDigestSchema("ev");
 const textSchema = z.string().min(1);
 
 /** Authenticated managed Evidence records projected into the application graph. */
-export const projectManagedApplicationGraphInputSchema = z
+const managedGraphRequestSchema = z
   .strictObject({
-    managed_artifact: evidenceSchema.optional(),
-    managed_members: evidenceSchema.optional(),
-    managed_native_boundaries: evidenceSchema.optional(),
+    managed_artifact: z.unknown().optional(),
+    managed_members: z.unknown().optional(),
+    managed_native_boundaries: z.unknown().optional(),
   })
   .superRefine((input, context) => {
     if (
@@ -105,9 +109,6 @@ export const managedApplicationGraphResultSchema = z.strictObject({
   limitations: z.array(textSchema),
 });
 
-export type ProjectManagedApplicationGraphInput = z.infer<
-  typeof projectManagedApplicationGraphInputSchema
->;
 export type ManagedApplicationGraphResult = z.infer<
   typeof managedApplicationGraphResultSchema
 >;
@@ -138,14 +139,16 @@ export interface GraphBuildState {
   readonly fieldNodes: Map<string, ApplicationNode>;
 }
 
-/** Project authenticated managed Evidence records into the application graph. */
-export const projectManagedApplicationGraph = (
-  input: ProjectManagedApplicationGraphInput,
+export interface ManagedGraphProjection {
+  readonly sources: ParsedManagedGraphInput;
+  readonly artifact: { readonly sha256: string; readonly path: string };
+}
+
+/** Build from authenticated sources whose shared identity has been established. */
+export const projectManagedGraph = (
+  request: ManagedGraphProjection,
 ): ManagedApplicationGraphResult => {
-  const parsed = parseManagedInputs(input);
-  const artifactIdentity = chooseArtifact(parsed);
-  assertSameArtifact(parsed, artifactIdentity.sha256);
-  assertConsistentModuleIdentity(parsed);
+  const { sources: parsed, artifact: artifactIdentity } = request;
   const evidenceLinks = [
     parsed.artifact?.evidence.evidence_id,
     parsed.members?.evidence.evidence_id,
@@ -232,34 +235,71 @@ const countEdges = (
   relation: ApplicationEdge["relation"],
 ): number => edges.filter((edge) => edge.relation === relation).length;
 
-const parseManagedInputs = (
-  input: ProjectManagedApplicationGraphInput,
-): ParsedManagedGraphInput => ({
-  artifact:
-    input.managed_artifact === undefined
-      ? null
-      : parseManagedInspectionEvidence(
-          input.managed_artifact,
+/** Authenticate each source once, then establish the shared projection identity. */
+export const readManagedGraphProjection = (
+  input: unknown,
+): Result<
+  ManagedGraphProjection,
+  AnalysisInputError | EvidenceIntegrityError
+> => {
+  const frame = managedGraphRequestSchema.safeParse(input);
+  if (!frame.success)
+    return err(
+      analysisInputErrorFromIssues(OPERATION, frame.error.issues, input, {
+        cause: frame.error,
+      }),
+    );
+  const { managed_artifact, managed_members, managed_native_boundaries } =
+    frame.data;
+  const artifact =
+    managed_artifact === undefined
+      ? ok(null)
+      : readManagedInspectionEvidence(
+          managed_artifact,
           "inspect_managed_artifact",
           managedArtifactInspectionSchema,
-        ),
-  members:
-    input.managed_members === undefined
-      ? null
-      : parseManagedInspectionEvidence(
-          input.managed_members,
+          { operation: OPERATION, path: ["managed_artifact"] },
+        );
+  if (!artifact.ok) return artifact;
+  const members =
+    managed_members === undefined
+      ? ok(null)
+      : readManagedInspectionEvidence(
+          managed_members,
           "inspect_managed_members",
           managedMemberInspectionSchema,
-        ),
-  boundaries:
-    input.managed_native_boundaries === undefined
-      ? null
-      : parseManagedInspectionEvidence(
-          input.managed_native_boundaries,
+          { operation: OPERATION, path: ["managed_members"] },
+        );
+  if (!members.ok) return members;
+  const boundaries =
+    managed_native_boundaries === undefined
+      ? ok(null)
+      : readManagedInspectionEvidence(
+          managed_native_boundaries,
           "inspect_managed_native_boundaries",
           managedNativeBoundaryInspectionSchema,
-        ),
-});
+          { operation: OPERATION, path: ["managed_native_boundaries"] },
+        );
+  if (!boundaries.ok) return boundaries;
+  const sources = {
+    artifact: artifact.value,
+    members: members.value,
+    boundaries: boundaries.value,
+  };
+  const identity = chooseArtifact(sources);
+  const mismatch =
+    artifactMismatch(sources, identity.sha256) ??
+    moduleIdentityMismatch(sources);
+  if (mismatch !== null)
+    return err(
+      new AnalysisInputError(OPERATION, { userMessage: mismatch }, [
+        { path: [], reason: "invalid_value", message: mismatch },
+      ]),
+    );
+  return ok({ sources, artifact: identity });
+};
+
+const OPERATION = "project_managed_application_graph";
 
 const chooseArtifact = (
   parsed: ParsedManagedGraphInput,
@@ -269,29 +309,28 @@ const chooseArtifact = (
     parsed.members?.result ??
     parsed.boundaries?.result;
   if (result === undefined)
-    throw new TypeError("Managed graph projection requires managed Evidence");
+    throw new Error("Validated managed graph projection has no source");
   return { sha256: result.artifact.sha256, path: result.artifact.path };
 };
 
-const assertSameArtifact = (
+const artifactMismatch = (
   parsed: ParsedManagedGraphInput,
   sha256Value: string,
-): void => {
+): string | null => {
   for (const result of [
     parsed.artifact?.result,
     parsed.members?.result,
     parsed.boundaries?.result,
   ])
     if (result !== undefined && result.artifact.sha256 !== sha256Value)
-      throw new TypeError(
-        "Managed graph projection inputs must describe the same artifact SHA-256",
-      );
+      return "Managed graph projection inputs must describe the same artifact SHA-256";
+  return null;
 };
 
 /** Reject contradictory known module identities while leaving null fields unknown. */
-const assertConsistentModuleIdentity = (
+const moduleIdentityMismatch = (
   parsed: ParsedManagedGraphInput,
-): void => {
+): string | null => {
   const mvidClaims = [
     parsed.artifact?.result.module?.mvid,
     parsed.members?.result.module?.mvid,
@@ -302,9 +341,7 @@ const assertConsistentModuleIdentity = (
     .filter((mvid): mvid is string => mvid !== undefined && mvid !== null)
     .map((mvid) => mvid.toLowerCase());
   if (new Set(mvidClaims).size > 1)
-    throw new TypeError(
-      "Managed graph inputs report conflicting known module MVIDs or token scopes",
-    );
+    return "Managed graph inputs report conflicting known module MVIDs or token scopes";
 
   const modules = [
     parsed.artifact?.result.module,
@@ -317,9 +354,7 @@ const assertConsistentModuleIdentity = (
   for (const field of ["name", "generation", "token", "row_offset"] as const) {
     const values = new Set(modules.map((module) => module[field]));
     if (values.size > 1)
-      throw new TypeError(
-        `Managed graph inputs report conflicting module ${field} values`,
-      );
+      return `Managed graph inputs report conflicting module ${field} values`;
   }
   for (const field of ["enc_id", "enc_base_id"] as const) {
     const values = new Set(
@@ -328,10 +363,9 @@ const assertConsistentModuleIdentity = (
         .filter((value): value is string => value !== undefined),
     );
     if (values.size > 1)
-      throw new TypeError(
-        `Managed graph inputs report conflicting module ${field} values`,
-      );
+      return `Managed graph inputs report conflicting module ${field} values`;
   }
+  return null;
 };
 
 const projectionLimitations = (

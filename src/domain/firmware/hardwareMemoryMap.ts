@@ -1,31 +1,16 @@
-import { z } from "zod";
 import { err, ok, type Result } from "../result.js";
 
 /** Supported target hardware CPU architectures for memory map classification. */
-export const HARDWARE_ARCHITECTURES = [
-  "arm",
-  "arm64",
-  "riscv",
-  "mips",
-  "x86",
-] as const;
-export type HardwareArchitecture = (typeof HARDWARE_ARCHITECTURES)[number];
-export const hardwareArchitectureSchema = z.enum(HARDWARE_ARCHITECTURES);
+export type HardwareArchitecture = "arm" | "arm64" | "riscv" | "mips" | "x86";
 
 /** Standard hardware memory region functional classifications. */
-export const HARDWARE_MEMORY_REGION_KINDS = [
-  "code",
-  "sram",
-  "peripheral_mmio",
-  "external_device",
-  "system_control",
-  "reserved",
-] as const;
 export type HardwareMemoryRegionKind =
-  (typeof HARDWARE_MEMORY_REGION_KINDS)[number];
-export const hardwareMemoryRegionKindSchema = z.enum(
-  HARDWARE_MEMORY_REGION_KINDS,
-);
+  | "code"
+  | "sram"
+  | "peripheral_mmio"
+  | "external_device"
+  | "system_control"
+  | "reserved";
 
 /** Internal descriptor for an architectural memory map segment. */
 export interface HardwareMemoryRegionDefinition {

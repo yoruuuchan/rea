@@ -150,7 +150,7 @@ export const comparisonLimitations = (
     );
   if (left.exported_types === null || right.exported_types === null)
     limitations.push(
-      "At least one managed member observation predates ExportedType inspection; its exported and forwarded types are unknown.",
+      "At least one managed member observation did not examine ExportedType rows; its exported and forwarded types are unknown.",
     );
   if (
     (left.exported_types?.length ?? 0) > 0 ||

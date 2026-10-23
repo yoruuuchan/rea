@@ -316,6 +316,8 @@ export const parseDumpsysPackageOutput = (
   let permissions = 0;
   let parsedPackageAvailable: boolean | null = null;
   for (const line of stdout.split(/\r?\n/u)) {
+    // Hidden system packages describe a separate section, not the requested package.
+    if (/^\s*Hidden system packages:\s*$/u.test(line)) break;
     if (line.trim().startsWith("requested permissions:")) {
       hasPermissionsSection = true;
       inPermissions = true;
@@ -324,7 +326,7 @@ export const parseDumpsysPackageOutput = (
     // Android 10 and 11 mark restricted entries as "NAME: restricted=true".
     if (
       inPermissions &&
-      /^\s{2,}[A-Za-z0-9._]+(?:: restricted=true)?$/u.test(line)
+      /^\s{2,}[A-Za-z0-9._$-]+(?:: restricted=true)?$/u.test(line)
     ) {
       permissions += 1;
       continue;
@@ -465,15 +467,38 @@ export const parseAmStartOutput = (
   );
   const nonOkStatus = statuses.find((status) => status.toLowerCase() !== "ok");
   const reportedStatus = nonOkStatus ?? statuses[0] ?? null;
-  const error = [normalizedStdout, stderr.replaceAll("\r\n", "\n")]
+  const errorLines = [normalizedStdout, stderr.replaceAll("\r\n", "\n")]
     .flatMap((stream) => stream.split("\n"))
     .map((line) => line.trim())
     .map((line) => ({
       line,
-      match: /^(?:Error|Exception)(?::|\b)(.*)$/iu.exec(line),
-    }))
-    .find(({ match }) => match !== null);
-  const errorReason = error?.match?.[1]?.trim() || error?.line || null;
+      prefixedMatch: /^(?:Error|Exception)(?::|\b)(.*)$/iu.exec(line),
+      throwable:
+        /^(?:(?:[A-Za-z_$][A-Za-z0-9_$]*\.)+(?:[A-Za-z_$][A-Za-z0-9_$]*(?:Exception|Error)|Exception|Error)|[A-Za-z_$][A-Za-z0-9_$]*(?:Exception|Error))(?::\s*.*)?$/u.test(
+          line,
+        ),
+      genericHeader:
+        /^(?:Error\s+type\s+\d+|Exception\s+occurred\s+while\s+executing\b.*)$/iu.test(
+          line,
+        ),
+    }));
+
+  // Prefer the underlying Java throwable over the generic Activity Manager
+  // wrapper, regardless of which line or stream printed it first.
+  const error =
+    errorLines.find(({ throwable }) => throwable) ??
+    errorLines.find(
+      ({ prefixedMatch, genericHeader }) =>
+        prefixedMatch !== null && !genericHeader,
+    ) ??
+    errorLines.find(({ prefixedMatch }) => prefixedMatch !== null);
+
+  const errorReason =
+    error === undefined
+      ? null
+      : error.throwable
+        ? error.line
+        : error.prefixedMatch?.[1]?.trim() || error.line;
   const statusReason =
     nonOkStatus === ""
       ? "am start reported an empty status"

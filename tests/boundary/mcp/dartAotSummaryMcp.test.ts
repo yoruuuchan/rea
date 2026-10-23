@@ -141,7 +141,7 @@ it("honors explicit ABI and old full requests, validates SDK schemas and reuses 
       .exportEvidenceBundle()
       .records.find((record) => record.evidence_id === parent.evidence_id),
   ).toEqual(parent);
-  const portable = inspectAnalysisView({
+  const portable = await inspectAnalysisView({
     source: { kind: "inline", evidence: parent },
     view: { kind: "summary" },
   });
@@ -149,7 +149,7 @@ it("honors explicit ABI and old full requests, validates SDK schemas and reuses 
   expect(portable.value.normalized_result).toEqual(view);
 }, 30000);
 
-it("preserves null snapshot facts and pool lower bounds after exhaustion, rejecting malformed and conflicting identities", () => {
+it("preserves null snapshot facts and pool lower bounds after exhaustion, rejecting malformed and conflicting identities", async () => {
   const report = {
     target: { path: "/source.apk", bytes: 10, sha256: "a".repeat(64) },
     abi: "arm64-v8a",
@@ -191,7 +191,7 @@ it("preserves null snapshot facts and pool lower bounds after exhaustion, reject
       },
     );
   for (const parent of [evidence(), evidence(report, null)]) {
-    const summary = inspectAnalysisView({
+    const summary = await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view: { kind: "summary" },
     });
@@ -203,7 +203,7 @@ it("preserves null snapshot facts and pool lower bounds after exhaustion, reject
     expect(result.summary.string_pool.package_uri_count_at_least).toBe(1000);
     expect(result.summary.string_pool.returned_counts.package_uris).toBe(1);
     expect(result.limitations).toEqual(parent.limitations);
-    const page = inspectAnalysisView({
+    const page = await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view: {
         kind: "dart-aot",
@@ -222,13 +222,13 @@ it("preserves null snapshot facts and pool lower bounds after exhaustion, reject
     });
   }
   expect(
-    inspectAnalysisView({
+    await inspectAnalysisView({
       source: { kind: "inline", evidence: evidence(report, "c".repeat(64)) },
       view: { kind: "summary" },
     }),
   ).toMatchObject({ ok: false, error: { _tag: "EvidenceIntegrityError" } });
   expect(
-    inspectAnalysisView({
+    await inspectAnalysisView({
       source: {
         kind: "inline",
         evidence: evidence({
@@ -243,7 +243,7 @@ it("preserves null snapshot facts and pool lower bounds after exhaustion, reject
     }),
   ).toMatchObject({ ok: false, error: { _tag: "AnalysisInputError" } });
   expect(
-    inspectAnalysisView({
+    await inspectAnalysisView({
       source: { kind: "inline", evidence: evidence() },
       view: { kind: "android", facet: "manifest", offset: 0, limit: 1 },
     }),

@@ -1,3 +1,4 @@
+import { applicationInventoryProjectionInputSchema } from "../domain/mobileApplicationGraphProjection.js";
 import { z } from "zod";
 import {
   sourceToBundleSummaryViewResultSchema,
@@ -21,18 +22,9 @@ import {
   reconstructionObligationLedgerInputSchema,
   reconstructionObligationLedgerSchema,
 } from "../domain/reconstructionObligationLedgerSchemas.js";
-import {
-  androidApplicationProjectionInputSchema,
-  androidApplicationProjectionResultSchema,
-} from "../domain/android/androidApplication.js";
-import {
-  appleApplicationProjectionInputSchema,
-  appleApplicationProjectionResultSchema,
-} from "../domain/apple/appleApplication.js";
-import {
-  harmonyApplicationProjectionInputSchema,
-  harmonyApplicationProjectionResultSchema,
-} from "../domain/harmony/harmonyApplication.js";
+import { androidApplicationProjectionResultSchema } from "../domain/android/androidApplication.js";
+import { appleApplicationProjectionResultSchema } from "../domain/apple/appleApplication.js";
+import { harmonyApplicationProjectionResultSchema } from "../domain/harmony/harmonyApplication.js";
 import type { ToolContract } from "./toolContractTypes.js";
 import { toolContractMetadata } from "./toolEffects.js";
 import { evidenceResultOf } from "./toolOutputSchemaPrimitives.js";
@@ -280,7 +272,7 @@ export const APPLICATION_TOOL_CONTRACTS = [
     description:
       "Project authenticated APK inventory_artifact Evidence into an execution-free Android application inventory. Reports exact component paths and hashes, runtime-family hints, and path-based bridge hypotheses without decoding DEX, executing the APK, or claiming observed runtime calls.",
     kind: "application",
-    inputSchema: androidApplicationProjectionInputSchema,
+    inputSchema: applicationInventoryProjectionInputSchema,
     outputSchema: evidenceResultOf(androidApplicationProjectionResultSchema),
     examples: [
       {
@@ -296,7 +288,7 @@ export const APPLICATION_TOOL_CONTRACTS = [
     description:
       "Project authenticated IPA, macOS .app directory, ZIP, or DMG inventory Evidence into an execution-free Apple application inventory. Reports application roots, nested bundles with path-convention roles (app extensions, XPC services, login items, privileged helpers, system extensions, frameworks), launchd plists, exact component paths and hashes, runtime-family hints, and path-based bridge hypotheses without parsing plist/CMS semantics or claiming observed runtime calls.",
     kind: "application",
-    inputSchema: appleApplicationProjectionInputSchema,
+    inputSchema: applicationInventoryProjectionInputSchema,
     outputSchema: evidenceResultOf(appleApplicationProjectionResultSchema),
     examples: [
       {
@@ -316,7 +308,7 @@ export const APPLICATION_TOOL_CONTRACTS = [
     description:
       "Project authenticated HarmonyOS HAP, HSP, or App Pack inventory Evidence into an execution-free application inventory. Reports packaging-model hints (Stage module.json versus FA config.json), exact component paths and hashes (manifests, Ark bytecode, resources, native libraries, JavaScript, signing), App Pack child packages, runtime-family hints, and path-based N-API bridge hypotheses without decoding Ark bytecode, parsing manifest semantics, or claiming observed runtime calls.",
     kind: "application",
-    inputSchema: harmonyApplicationProjectionInputSchema,
+    inputSchema: applicationInventoryProjectionInputSchema,
     outputSchema: evidenceResultOf(harmonyApplicationProjectionResultSchema),
     examples: [
       {

@@ -144,7 +144,7 @@ cliTest(
     expect(parent.locations).toEqual(complete.locations);
     expect(parent.parameters).toEqual({ type_names: typeNames });
     expect(receipt.evidence_links).toEqual([parent.evidence_id]);
-    const portable = inspectAnalysisView({
+    const portable = await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view: { kind: "summary" },
     });

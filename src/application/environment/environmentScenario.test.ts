@@ -49,8 +49,8 @@ describe("environment manifests from capture_browser_scenario parents", () => {
     );
   });
 
-  it("refuses a scenario capture that selected neither response bodies nor header values", () => {
-    const refused = inspectAnalysisView({
+  it("refuses a scenario capture that selected neither response bodies nor header values", async () => {
+    const refused = await inspectAnalysisView({
       source: {
         kind: "inline",
         evidence: scenarioCaptureEvidence(
@@ -70,8 +70,8 @@ describe("environment manifests from capture_browser_scenario parents", () => {
     });
   });
 
-  it("names the views a scenario capture supports when another is requested", () => {
-    const refused = inspectAnalysisView({
+  it("names the views a scenario capture supports when another is requested", async () => {
+    const refused = await inspectAnalysisView({
       source: {
         kind: "inline",
         evidence: scenarioCaptureEvidence(scenarioCaptureFixture()),

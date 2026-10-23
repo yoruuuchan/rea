@@ -55,16 +55,11 @@ const withLedgerClient = async (
   }
 };
 
-const inputError = (message: string) => ({
+const integrityError = (message: string) => ({
   error: {
-    code: "invalid_request",
-    category: "invalid_input",
-    details: {
-      operation: "build_reconstruction_obligation_ledger",
-      issues: [
-        expect.objectContaining({ message: expect.stringContaining(message) }),
-      ],
-    },
+    code: "evidence_integrity_mismatch",
+    category: "integrity_mismatch",
+    details: { reason: expect.stringContaining(message) },
   },
 });
 
@@ -97,7 +92,7 @@ describe("reconstruction obligation ledger residual graph input", () => {
       const result = await request(createEvidenceBundle([], [unknown]));
       expect(result.isError).toBe(true);
       expect(parseMcpToolError(result)).toMatchObject(
-        inputError(
+        integrityError(
           `Residual unknown references missing evidence ${mutation.evidence_id}`,
         ),
       );
@@ -110,7 +105,7 @@ describe("reconstruction obligation ledger residual graph input", () => {
   });
 
   it.each(["history", "relationship", "resolution"] as const)(
-    "reports residual %s constraints as caller input",
+    "reports residual %s source integrity constraints",
     async (constraint) => {
       const missingId = `unk_${"a".repeat(64)}`;
       const input = recordUnknownInputSchema.parse({
@@ -168,14 +163,14 @@ describe("reconstruction obligation ledger residual graph input", () => {
           createEvidenceBundle([mutation], unknowns),
         );
         expect(result.isError).toBe(true);
-        expect(parseMcpToolError(result)).toMatchObject(inputError(reason));
+        expect(parseMcpToolError(result)).toMatchObject(integrityError(reason));
       });
     },
   );
 });
 
 describe("reconstruction obligation ledger MCP parity", () => {
-  it("returns canonical bundle failures as caller input errors", async () => {
+  it("rejects noncanonical source bundles before ledger generation", async () => {
     const records = ["first", "second"].map((label) =>
       createEvidence(
         undefined,
@@ -218,22 +213,9 @@ describe("reconstruction obligation ledger MCP parity", () => {
         records: [...canonical.records].reverse(),
       });
       expect(result.isError).toBe(true);
-      expect(parseMcpToolError(result)).toMatchObject({
-        error: {
-          code: "invalid_request",
-          category: "invalid_input",
-          details: {
-            operation: "build_reconstruction_obligation_ledger",
-            issues: [
-              expect.objectContaining({
-                message: expect.stringContaining(
-                  "Evidence bundle manifests are not canonical",
-                ),
-              }),
-            ],
-          },
-        },
-      });
+      expect(parseMcpToolError(result)).toMatchObject(
+        integrityError("Evidence bundle manifests are not canonical"),
+      );
     } finally {
       await client.close();
       await server.close();
@@ -241,7 +223,7 @@ describe("reconstruction obligation ledger MCP parity", () => {
     }
   });
 
-  it("returns duplicate records and missing review Evidence as caller input errors", async () => {
+  it("distinguishes corrupt source bundles from missing caller-selected review references", async () => {
     const record = createEvidence(
       undefined,
       { id: "fixture", name: "Fixture", version: "1" },
@@ -256,17 +238,25 @@ describe("reconstruction obligation ledger MCP parity", () => {
       });
       expect(duplicate.isError).toBe(true);
       expect(parseMcpToolError(duplicate)).toMatchObject(
-        inputError("Evidence bundle contains duplicate record IDs"),
+        integrityError("Evidence bundle contains duplicate record IDs"),
       );
       const missing = await request(canonical, [
         reviewedObligation("obl.reviewed", missingEvidenceId),
       ]);
       expect(missing.isError).toBe(true);
-      expect(parseMcpToolError(missing)).toMatchObject(
-        inputError(
-          `Reviewed obligation Evidence is missing: ${missingEvidenceId}`,
-        ),
-      );
+      expect(parseMcpToolError(missing)).toMatchObject({
+        error: {
+          code: "invalid_request",
+          details: {
+            issues: [
+              expect.objectContaining({
+                path: ["reviewed_obligations", 0, "review_evidence_ids", 0],
+                message: `Reviewed obligation Evidence is missing: ${missingEvidenceId}`,
+              }),
+            ],
+          },
+        },
+      });
     });
   });
 

@@ -11,7 +11,10 @@ import {
 } from "./managedArtifact.js";
 import { digestCanonicalValue } from "../canonicalDigest.js";
 import { digestSchema, prefixedDigestSchema } from "../digests.js";
-import { parseManagedInspectionEvidence } from "./managedInspectionEvidence.js";
+import { readManagedInspectionEvidence } from "./managedInspectionEvidence.js";
+import { AnalysisInputError } from "../analysisErrorCore.js";
+import { EvidenceIntegrityError } from "../evidenceErrors.js";
+import { err, ok, type Result } from "../result.js";
 
 const evidenceIdSchema = prefixedDigestSchema("ev");
 const textSchema = z.string().min(1);
@@ -43,11 +46,22 @@ type ManagedReconstructionMethodInput = z.infer<
   typeof managedReconstructionMethodInputSchema
 >;
 
-export const managedReconstructionImportInputSchema = z.strictObject({
-  static_members: evidenceSchema,
+const managedReconstructionImportRequestShape = {
+  static_members: z.unknown(),
   decompiler: decompilerSchema,
   methods: z.array(managedReconstructionMethodInputSchema).min(1),
   notes: z.array(textSchema).default([]),
+};
+
+/** Request envelope parsed before interpreting the nested Evidence source. */
+export const managedReconstructionImportRequestSchema = z.strictObject(
+  managedReconstructionImportRequestShape,
+);
+
+/** Public reconstruction request with the complete source Evidence contract. */
+export const managedReconstructionImportInputSchema = z.strictObject({
+  ...managedReconstructionImportRequestShape,
+  static_members: evidenceSchema,
 });
 
 const importedMethodSchema = z.strictObject({
@@ -109,6 +123,9 @@ export const managedReconstructionImportResultSchema = z.strictObject({
 export type ManagedReconstructionImportInput = z.infer<
   typeof managedReconstructionImportInputSchema
 >;
+export type ManagedReconstructionImportRequest = z.infer<
+  typeof managedReconstructionImportRequestSchema
+>;
 export type ManagedReconstructionImportResult = z.infer<
   typeof managedReconstructionImportResultSchema
 >;
@@ -137,19 +154,6 @@ const findObservedMethod = (
       candidate.normalized_il_sha256 !== null &&
       item.body.normalized_il_sha256 === candidate.normalized_il_sha256,
   );
-
-const verifyTextSha256 = (
-  candidate: ManagedReconstructionMethodInput,
-  textSha256: string,
-): void => {
-  if (
-    candidate.reconstruction.text_sha256 !== undefined &&
-    candidate.reconstruction.text_sha256 !== textSha256
-  )
-    throw new TypeError(
-      `Reconstruction text hash mismatch for ${candidate.token}`,
-    );
-};
 
 const buildImportedMethod = (
   observed: Member,
@@ -233,7 +237,7 @@ const RECONSTRUCTION_LIMITATIONS = [
 ];
 
 const buildReconstructionWithoutId = (
-  input: ManagedReconstructionImportInput,
+  input: ManagedReconstructionImportRequest,
   staticEvidence: Evidence,
   members: ManagedMemberInspection,
   methods: readonly ImportedMethod[],
@@ -249,31 +253,74 @@ const buildReconstructionWithoutId = (
   limitations: RECONSTRUCTION_LIMITATIONS,
 });
 
-/** Authenticate decompiler reconstruction against static IL Evidence. */
-export const importManagedReconstruction = (
-  input: ManagedReconstructionImportInput,
-): ManagedReconstructionImportResult => {
-  const { evidence: staticEvidence, result: members } =
-    parseManagedInspectionEvidence(
-      input.static_members,
-      "inspect_managed_members",
-      managedMemberInspectionSchema,
-    );
-  const methods = input.methods.map((candidate) => {
-    const observed = findObservedMethod(members, candidate);
-    if (observed === undefined)
-      throw new TypeError(
-        `Reconstruction method lock ${candidate.token} does not match a static managed member observation`,
+export interface ResolvedManagedReconstructionImport {
+  readonly request: ManagedReconstructionImportRequest;
+  readonly staticEvidence: Evidence;
+  readonly members: ManagedMemberInspection;
+  readonly methods: readonly ImportedMethod[];
+}
+
+/** Parse the managed member facts once, then validate every caller lock at its request path. */
+export const resolveManagedReconstructionImport = (
+  input: ManagedReconstructionImportRequest,
+): Result<
+  ResolvedManagedReconstructionImport,
+  AnalysisInputError | EvidenceIntegrityError
+> => {
+  const source = readManagedInspectionEvidence(
+    input.static_members,
+    "inspect_managed_members",
+    managedMemberInspectionSchema,
+    { operation: "import_managed_reconstruction", path: ["static_members"] },
+  );
+  if (!source.ok) return source;
+
+  const methods: ImportedMethod[] = [];
+  for (const [index, candidate] of input.methods.entries()) {
+    const observed = findObservedMethod(source.value.result, candidate);
+    if (observed === undefined) {
+      const message = `Reconstruction method lock ${candidate.token} does not match a static managed member observation`;
+      return err(
+        new AnalysisInputError("import_managed_reconstruction", {}, [
+          { path: ["methods", index], reason: "invalid_value", message },
+        ]),
       );
+    }
     const textSha256 = sha256Text(candidate.reconstruction.text);
-    verifyTextSha256(candidate, textSha256);
-    return buildImportedMethod(observed, candidate, textSha256);
-  });
-  const withoutId = buildReconstructionWithoutId(
-    input,
-    staticEvidence,
-    members,
+    if (
+      candidate.reconstruction.text_sha256 !== undefined &&
+      candidate.reconstruction.text_sha256 !== textSha256
+    ) {
+      const message = `Reconstruction text hash mismatch for ${candidate.token}`;
+      return err(
+        new AnalysisInputError("import_managed_reconstruction", {}, [
+          {
+            path: ["methods", index, "reconstruction", "text_sha256"],
+            reason: "invalid_value",
+            message,
+          },
+        ]),
+      );
+    }
+    methods.push(buildImportedMethod(observed, candidate, textSha256));
+  }
+  return ok({
+    request: input,
+    staticEvidence: source.value.evidence,
+    members: source.value.result,
     methods,
+  });
+};
+
+/** Build the import solely from facts authenticated and validated by the resolver. */
+export const executeManagedReconstructionImport = (
+  resolved: ResolvedManagedReconstructionImport,
+): ManagedReconstructionImportResult => {
+  const withoutId = buildReconstructionWithoutId(
+    resolved.request,
+    resolved.staticEvidence,
+    resolved.members,
+    resolved.methods,
   );
   return managedReconstructionImportResultSchema.parse({
     ...withoutId,
@@ -282,4 +329,13 @@ export const importManagedReconstruction = (
       "Managed reconstruction",
     )}`,
   });
+};
+
+/** Authenticate decompiler reconstruction against static IL Evidence. */
+export const importManagedReconstruction = (
+  input: ManagedReconstructionImportInput,
+): ManagedReconstructionImportResult => {
+  const resolved = resolveManagedReconstructionImport(input);
+  if (!resolved.ok) throw resolved.error;
+  return executeManagedReconstructionImport(resolved.value);
 };

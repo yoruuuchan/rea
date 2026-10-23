@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   build,
+  deriveCandidates,
+  resolveRequest,
   originalCases,
   processEvidence,
   proofEvidence,
@@ -9,7 +11,6 @@ import {
   request,
   reviewedObligation,
 } from "./ReconstructionObligationLedger.fixture.js";
-import { deriveReconstructionObligationCandidates } from "./ReconstructionObligationCandidates.js";
 import { evaluateReconstructionObligationLedger } from "./ReconstructionObligationLedgerEvaluation.js";
 
 describe("reconstruction obligation ledger", () => {
@@ -136,7 +137,7 @@ describe("reconstruction obligation ledger Evidence provenance", () => {
     const capture = processEvidence();
     const caseEvidence = proofEvidence("distinct-original-case");
     const bundle = request([capture, caseEvidence]).evidence_bundle;
-    const generated = deriveReconstructionObligationCandidates(bundle, []);
+    const generated = deriveCandidates(bundle, []);
     const candidates = generated.candidates.map((candidate) => ({
       ...candidate,
       observed_cases: candidate.observed_cases.map((observedCase) => ({
@@ -147,7 +148,11 @@ describe("reconstruction obligation ledger Evidence provenance", () => {
 
     const result = evaluateReconstructionObligationLedger({
       candidates,
-      bundle,
+      sources: resolveRequest({
+        evidence_bundle: bundle,
+        reviewed_obligations: [],
+        manifest: { bindings: [], contradictions: [] },
+      }).sources,
       manifest: { bindings: [], contradictions: [] },
       generationLimitations: [],
     });
@@ -234,13 +239,13 @@ describe("reconstruction obligation ledger case closure", () => {
     expect(result.status).toBe("ready");
     expect(result.summary.required_open).toBe(0);
 
-    const generated = deriveReconstructionObligationCandidates(
+    const generated = deriveCandidates(
       ledgerRequest.evidence_bundle,
       ledgerRequest.reviewed_obligations,
     );
     const limited = evaluateReconstructionObligationLedger({
       candidates: generated.candidates,
-      bundle: ledgerRequest.evidence_bundle,
+      sources: resolveRequest(ledgerRequest).sources,
       manifest: ledgerRequest.manifest,
       generationLimitations: ["A supplementary source was unavailable."],
     });

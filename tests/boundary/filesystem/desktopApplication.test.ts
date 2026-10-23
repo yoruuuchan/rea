@@ -113,13 +113,13 @@ it("joins real PE/CLI reference facts and independent engine markers without pic
     expect(probe.path).toBe(
       join(await realpath(root), files.get(probe.file_id)!.path),
     );
-  const summary = inspectAnalysisView({
+  const summary = await inspectAnalysisView({
     source: { kind: "inline", evidence },
     view: { kind: "summary" },
   });
   if (!summary.ok) throw summary.error;
   expect(JSON.stringify(summary.value)).not.toContain('"files":[');
-  const selected = inspectAnalysisView({
+  const selected = await inspectAnalysisView({
     source: { kind: "inline", evidence },
     view: {
       kind: "desktop-application",
@@ -203,7 +203,7 @@ it("retains bounded coverage and stable pages without claiming absence after a t
     entries_examined: 2,
   });
   expect(report.files).toHaveLength(2);
-  const result = inspectAnalysisView({
+  const result = await inspectAnalysisView({
     source: { kind: "inline", evidence },
     view: {
       kind: "desktop-application",
@@ -497,7 +497,7 @@ it.skipIf(process.platform === "win32").each(["path", "kind"] as const)(
       files_probed: 0,
       bytes_read: 0,
     });
-    const page = inspectAnalysisView({
+    const page = await inspectAnalysisView({
       source: { kind: "inline", evidence: after.evidence },
       view: {
         kind: "desktop-application",
@@ -999,7 +999,7 @@ it("bounds diagnostic previews while preserving complete caller-provided issue f
     source,
     evidence.provider,
   );
-  const summarized = inspectAnalysisView({
+  const summarized = await inspectAnalysisView({
     source: { kind: "inline", evidence: callerEvidence },
     view: { kind: "summary" },
   });
@@ -1024,7 +1024,7 @@ it("bounds diagnostic previews while preserving complete caller-provided issue f
     },
   });
   for (const ids of [undefined, []]) {
-    const selected = inspectAnalysisView({
+    const selected = await inspectAnalysisView({
       source: { kind: "inline", evidence: callerEvidence },
       view: {
         kind: "desktop-application",

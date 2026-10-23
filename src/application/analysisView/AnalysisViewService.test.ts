@@ -23,7 +23,6 @@ import {
 import {
   inspectAnalysisView,
   inspectAnalysisViewValidated,
-  inspectAnalysisViewWithFiles,
   summarizeRetainedAnalysis,
 } from "./AnalysisViewService.js";
 import type { Evidence } from "../../domain/evidence.js";
@@ -42,7 +41,7 @@ import { projectAnalysisError } from "../../domain/analysisErrorProjection.js";
 
 it.each(["layout", "javascript"])(
   "carries the retained %s source snapshot into repeatable shared views",
-  (kind) => {
+  async (kind) => {
     const parent =
       kind === "layout"
         ? analysisViewLayoutEvidence()
@@ -56,9 +55,13 @@ it.each(["layout", "javascript"])(
       source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
       view: { kind: "summary" },
     } as const;
-    const first = inspectAnalysisView(input, (id) => ledger.forAnalysis(id));
+    const first = await inspectAnalysisView(input, (id) =>
+      ledger.forAnalysis(id),
+    );
     if (!first.ok) throw first.error;
-    const repeated = inspectAnalysisView(input, (id) => ledger.forAnalysis(id));
+    const repeated = await inspectAnalysisView(input, (id) =>
+      ledger.forAnalysis(id),
+    );
     if (!repeated.ok) throw repeated.error;
     expect(repeated.value.normalized_result).toEqual(
       first.value.normalized_result,
@@ -71,7 +74,7 @@ it.each(["layout", "javascript"])(
 
 it.each(["/fixtures/unknown.exe", ""])(
   "preserves recorded empty native identity fields: path=%j",
-  (path) => {
+  async (path) => {
     const original = functionDossierSchema.parse(ghidraFunctionDossier());
     const parent = createEvidence(
       { path, format: "pe", sha256: "c".repeat(64) },
@@ -89,7 +92,7 @@ it.each(["/fixtures/unknown.exe", ""])(
         },
       },
     );
-    const result = inspectAnalysisView({
+    const result = await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view: {
         kind: "native",
@@ -110,7 +113,7 @@ it.each(["/fixtures/unknown.exe", ""])(
   },
 );
 
-it("reports inline Evidence identity failures at the complete source path", () => {
+it("reports inline Evidence identity failures at the complete source path", async () => {
   const parent = analysisViewLayoutEvidence();
   const input = {
     source: {
@@ -121,7 +124,7 @@ it("reports inline Evidence identity failures at the complete source path", () =
   } as const;
 
   for (const result of [
-    inspectAnalysisView(input),
+    await inspectAnalysisView(input),
     inspectAnalysisViewValidated(input),
   ])
     expect(result).toMatchObject({
@@ -139,7 +142,7 @@ it("reports inline Evidence identity failures at the complete source path", () =
     });
 });
 
-it("projects a small native view from an authenticated >10 MiB retained dossier", () => {
+it("projects a small native view from an authenticated >10 MiB retained dossier", async () => {
   const original = functionDossierSchema.parse(ghidraFunctionDossier());
   const parent = createEvidence(
     { path: "/fixtures/large.exe", format: "pe", sha256: "c".repeat(64) },
@@ -163,7 +166,7 @@ it("projects a small native view from an authenticated >10 MiB retained dossier"
       limit: 128,
     },
   };
-  const view = inspectAnalysisView(input, (id) =>
+  const view = await inspectAnalysisView(input, (id) =>
     id === parent.evidence_id ? parent : undefined,
   );
   if (!view.ok) throw view.error;
@@ -182,15 +185,15 @@ it("projects a small native view from an authenticated >10 MiB retained dossier"
   ]);
   expect(JSON.stringify(view.value).length).toBeLessThan(12000);
   expect(JSON.stringify(parent).length).toBeGreaterThan(10 * 1024 * 1024);
-  expect(inspectAnalysisView(input, () => undefined)).toMatchObject({
+  expect(await inspectAnalysisView(input, () => undefined)).toMatchObject({
     ok: false,
     error: { _tag: "EvidenceIntegrityError" },
   });
 });
 
-it("projects inline layout Evidence and retains a derived view record", () => {
+it("projects inline layout Evidence and retains a derived view record", async () => {
   const parent = analysisViewLayoutEvidence();
-  const result = inspectAnalysisView({
+  const result = await inspectAnalysisView({
     source: { kind: "inline", evidence: parent },
     view: {
       kind: "item",
@@ -211,13 +214,13 @@ it("projects inline layout Evidence and retains a derived view record", () => {
   });
 });
 
-it("resolves same-session retained JavaScript Evidence without re-running analysis", () => {
+it("resolves same-session retained JavaScript Evidence without re-running analysis", async () => {
   const parent = analysisViewJavaScriptEvidence(
     analysisViewJavaScriptAnalysisWithSource(),
   );
   const lookup = (evidenceId: string) =>
     evidenceId === parent.evidence_id ? parent : undefined;
-  const summary = inspectAnalysisView(
+  const summary = await inspectAnalysisView(
     {
       source: {
         kind: "retained-evidence",
@@ -236,7 +239,7 @@ it("resolves same-session retained JavaScript Evidence without re-running analys
   expect(summary.value.normalized_result).not.toHaveProperty(
     "summary.semantic_graph",
   );
-  const item = inspectAnalysisView(
+  const item = await inspectAnalysisView(
     {
       source: {
         kind: "retained-evidence",
@@ -256,8 +259,8 @@ it("resolves same-session retained JavaScript Evidence without re-running analys
   );
 });
 
-it("rejects stale retained IDs and unsupported parent operations", () => {
-  const missing = inspectAnalysisView(
+it("rejects stale retained IDs and unsupported parent operations", async () => {
+  const missing = await inspectAnalysisView(
     {
       source: {
         kind: "retained-evidence",
@@ -283,7 +286,7 @@ it("rejects stale retained IDs and unsupported parent operations", () => {
       result: { path: "/artifacts/crash.core" },
     },
   );
-  const rejected = inspectAnalysisView({
+  const rejected = await inspectAnalysisView({
     source: { kind: "inline", evidence: unsupported },
     view: { kind: "summary" },
   });
@@ -292,7 +295,7 @@ it("rejects stale retained IDs and unsupported parent operations", () => {
     error: { _tag: "AnalysisUnsupportedTargetError" },
   });
   expect(
-    inspectAnalysisView({
+    await inspectAnalysisView({
       source: { kind: "inline", evidence: analysisViewLayoutEvidence() },
       view: { kind: "summary", approval: true },
     }),
@@ -302,7 +305,7 @@ it("rejects stale retained IDs and unsupported parent operations", () => {
   });
 });
 
-it("preserves an absent parent subject instead of guessing its format", () => {
+it("preserves an absent parent subject instead of guessing its format", async () => {
   const analysis = analysisViewJavaScriptAnalysisWithSource();
   const original = analysisViewJavaScriptEvidence(analysis);
   const parent = createEvidence(undefined, original.provider, {
@@ -311,7 +314,7 @@ it("preserves an absent parent subject instead of guessing its format", () => {
     result: original.normalized_result,
     limitations: original.limitations,
   });
-  const result = inspectAnalysisView(
+  const result = await inspectAnalysisView(
     {
       source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
       view: { kind: "summary" },
@@ -325,7 +328,7 @@ it("preserves an absent parent subject instead of guessing its format", () => {
   ]);
 });
 
-it("rejects contradictory subject and analysis artifact digests", () => {
+it("rejects contradictory subject and analysis artifact digests", async () => {
   const analysis = analysisViewJavaScriptAnalysisWithSource();
   const original = analysisViewJavaScriptEvidence(analysis);
   const parent = createEvidence(
@@ -341,7 +344,7 @@ it("rejects contradictory subject and analysis artifact digests", () => {
       result: original.normalized_result,
     },
   );
-  const result = inspectAnalysisView(
+  const result = await inspectAnalysisView(
     {
       source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
       view: { kind: "summary" },
@@ -398,7 +401,7 @@ describe("summarizeRetainedAnalysis", () => {
   });
 });
 
-it("seals inferred and literal HAR pages, including a null artifact digest", () => {
+it("seals inferred and literal HAR pages, including a null artifact digest", async () => {
   const capture = analysisViewCaptureFixture();
   capture.artifact.sha256 = null;
   const parent = analysisViewCaptureEvidence(capture);
@@ -407,7 +410,7 @@ it("seals inferred and literal HAR pages, including a null artifact digest", () 
     [0, "inferred"],
     [11, "inferred"],
   ] as const) {
-    const result = inspectAnalysisView({
+    const result = await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view: { kind: "api-surface", offset, limit: 1 },
     });
@@ -417,7 +420,7 @@ it("seals inferred and literal HAR pages, including a null artifact digest", () 
     expect(parseEvidence(result.value)).toEqual(result.value);
   }
   expect(
-    inspectAnalysisView({
+    await inspectAnalysisView({
       source: { kind: "inline", evidence: analysisViewLayoutEvidence() },
       view: { kind: "api-surface" },
     }),
@@ -427,7 +430,7 @@ it("seals inferred and literal HAR pages, including a null artifact digest", () 
   });
 });
 
-it("rejects a null projected digest under a present parent subject", () => {
+it("rejects a null projected digest under a present parent subject", async () => {
   const capture = analysisViewCaptureFixture();
   capture.artifact.sha256 = null;
   const parent = createEvidence(
@@ -441,14 +444,14 @@ it("rejects a null projected digest under a present parent subject", () => {
     },
   );
   expect(
-    inspectAnalysisView({
+    await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view: { kind: "api-surface" },
     }),
   ).toMatchObject({ ok: false, error: { _tag: "EvidenceIntegrityError" } });
 });
 
-it("refuses an object-dense borrowed capture before making a full schema clone", () => {
+it("refuses an object-dense borrowed capture before making a full schema clone", async () => {
   const capture = analysisViewObjectDenseCapture();
   expect(Buffer.byteLength(JSON.stringify(capture))).toBeLessThan(
     WEB_NETWORK_CAPTURE_LIMITS.inputBytes,
@@ -464,7 +467,7 @@ it("refuses an object-dense borrowed capture before making a full schema clone",
     { kind: "environment-manifest" },
     { kind: "environment-state" },
   ] as const) {
-    const result = inspectAnalysisView(
+    const result = await inspectAnalysisView(
       {
         source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
         view,
@@ -482,11 +485,11 @@ it("refuses an object-dense borrowed capture before making a full schema clone",
   expect(ledger.forAnalysis(parent.evidence_id)).toBe(borrowed);
 });
 
-it("seals an inferred environment manifest and a derived manifest without templated groups", () => {
+it("seals an inferred environment manifest and a derived manifest without templated groups", async () => {
   const parent = analysisViewCaptureEvidence(
     environmentManifestCaptureFixture(),
   );
-  const inferred = inspectAnalysisView({
+  const inferred = await inspectAnalysisView({
     source: { kind: "inline", evidence: parent },
     view: { kind: "environment-manifest", template_rules: ["opaque-token"] },
   });
@@ -510,7 +513,7 @@ it("seals an inferred environment manifest and a derived manifest without templa
   const literal = environmentManifestCaptureFixture();
   literal.artifact.sha256 = null;
   literal.records = [3, 4, 8].map((ordinal) => literal.records[ordinal]!);
-  const derived = inspectAnalysisView({
+  const derived = await inspectAnalysisView({
     source: { kind: "inline", evidence: analysisViewCaptureEvidence(literal) },
     view: { kind: "environment-manifest" },
   });
@@ -525,7 +528,7 @@ it("seals an inferred environment manifest and a derived manifest without templa
     ]),
   });
   expect(
-    inspectAnalysisView({
+    await inspectAnalysisView({
       source: { kind: "inline", evidence: analysisViewLayoutEvidence() },
       view: { kind: "environment-manifest" },
     }),
@@ -535,9 +538,9 @@ it("seals an inferred environment manifest and a derived manifest without templa
   });
 });
 
-it("seals an inferred environment state whose values are the recorded ones", () => {
+it("seals an inferred environment state whose values are the recorded ones", async () => {
   const parent = analysisViewCaptureEvidence(environmentStateCaptureFixture());
-  const sealed = inspectAnalysisView({
+  const sealed = await inspectAnalysisView({
     source: { kind: "inline", evidence: parent },
     view: { kind: "environment-state", template_rules: ["opaque-token"] },
   });
@@ -566,36 +569,39 @@ it.each([
   "api-surface",
   "environment-manifest",
   "environment-state",
-] as const)("rejects inline accessors before parsing a %s view", (kind) => {
-  let accessed = false;
-  const evidence = {
-    get normalized_result() {
-      accessed = true;
-      throw new Error("Evidence must be admitted before parsing");
-    },
-  };
-  const input = {
-    source: { kind: "inline", evidence },
-    view: { kind },
-  };
-  const parsed = inspectAnalysisViewInputSchema.parse(input);
-  if (parsed.source.kind !== "inline") throw new Error("Expected inline input");
-  expect(parsed.source.evidence).toBe(evidence);
-  expect(inspectAnalysisView(input)).toMatchObject({
-    ok: false,
-    error: {
-      _tag: "AnalysisInputError",
-      issues: [{ path: ["source", "evidence", "normalized_result"] }],
-    },
-  });
-  expect(accessed).toBe(false);
-  expect(
-    inspectAnalysisView({
+] as const)(
+  "rejects inline accessors before parsing a %s view",
+  async (kind) => {
+    let accessed = false;
+    const evidence = {
+      get normalized_result() {
+        accessed = true;
+        throw new Error("Evidence must be admitted before parsing");
+      },
+    };
+    const input = {
+      source: { kind: "inline", evidence },
+      view: { kind },
+    };
+    const parsed = inspectAnalysisViewInputSchema.parse(input);
+    if (parsed.source.kind !== "inline")
+      throw new Error("Expected inline input");
+    expect(parsed.source.evidence).toBe(evidence);
+    expect(await inspectAnalysisView(input)).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisInputError",
+        issues: [{ path: ["source", "evidence", "normalized_result"] }],
+      },
+    });
+    expect(accessed).toBe(false);
+    const ordinary = await inspectAnalysisView({
       source: { kind: "inline", evidence: analysisViewCaptureEvidence() },
       view: { kind },
-    }).ok,
-  ).toBe(true);
-});
+    });
+    expect(ordinary.ok).toBe(true);
+  },
+);
 
 it.each([
   "summary",
@@ -605,7 +611,7 @@ it.each([
   "environment-state",
 ] as const)(
   "rejects nested, hidden and inherited inline accessors for %s",
-  (kind) => {
+  async (kind) => {
     const parent = analysisViewCaptureEvidence();
     let accessed = false;
     const getter = () => {
@@ -643,10 +649,11 @@ it.each([
         view: { kind },
       };
       for (const result of [
-        inspectAnalysisView(input),
-        inspectAnalysisViewValidated(
-          inspectAnalysisViewInputSchema.parse(input),
-        ),
+        await inspectAnalysisView(input),
+        inspectAnalysisViewValidated({
+          source: input.source,
+          view: inspectAnalysisViewInputSchema.parse(input).view,
+        }),
       ])
         expect(result).toMatchObject({
           ok: false,
@@ -668,7 +675,7 @@ it.each([
   ["inherited iterator", Symbol.iterator, true],
 ] as const)(
   "rejects array %s accessors without invoking them",
-  (_name, key, inherited) => {
+  async (_name, key, inherited) => {
     const parent = analysisViewCaptureEvidence();
     let accessed = false;
     const array: unknown[] = [];
@@ -687,7 +694,7 @@ it.each([
       "environment-manifest",
       "environment-state",
     ] as const) {
-      const result = inspectAnalysisView({
+      const result = await inspectAnalysisView({
         source: { kind: "inline", evidence: { ...parent, raw_result: array } },
         view: { kind },
       });
@@ -700,7 +707,7 @@ it.each([
   },
 );
 
-it("rejects callable array overrides and subclass species before parsing", () => {
+it("rejects callable array overrides and subclass species before parsing", async () => {
   const parent = analysisViewCaptureEvidence();
   let invoked = false;
   const callback = () => {
@@ -724,7 +731,7 @@ it("rejects callable array overrides and subclass species before parsing", () =>
       "environment-manifest",
       "environment-state",
     ] as const) {
-      const result = inspectAnalysisView({
+      const result = await inspectAnalysisView({
         source: { kind: "inline", evidence: { ...parent, raw_result: array } },
         view: { kind },
       });
@@ -742,10 +749,10 @@ it.each([
   "api-surface",
   "environment-manifest",
   "environment-state",
-] as const)("preserves ordinary inline Evidence for %s", (kind) => {
+] as const)("preserves ordinary inline Evidence for %s", async (kind) => {
   const parent = analysisViewCaptureEvidence();
   const before = JSON.stringify(parent);
-  const result = inspectAnalysisView({
+  const result = await inspectAnalysisView({
     source: { kind: "inline", evidence: parent },
     view: { kind },
   });
@@ -760,7 +767,7 @@ it.each([
   expect(Object.isFrozen(parent)).toBe(false);
 });
 
-it("rejects executable constructor values before schema plain-object checks", () => {
+it("rejects executable constructor values before schema plain-object checks", async () => {
   const parent = analysisViewCaptureEvidence();
   let invoked = false;
   const constructor = () => undefined;
@@ -778,7 +785,7 @@ it("rejects executable constructor values before schema plain-object checks", ()
     "environment-state",
   ] as const) {
     expect(
-      inspectAnalysisView({
+      await inspectAnalysisView({
         source: {
           kind: "inline",
           evidence: { ...parent, raw_result: { constructor } },
@@ -790,7 +797,7 @@ it("rejects executable constructor values before schema plain-object checks", ()
   expect(invoked).toBe(false);
 });
 
-it("rejects inline proxy values before reflection or parsing can run traps", () => {
+it("rejects inline proxy values before reflection or parsing can run traps", async () => {
   const parent = analysisViewCaptureEvidence();
   let invoked = false;
   const trap = () => {
@@ -811,7 +818,7 @@ it("rejects inline proxy values before reflection or parsing can run traps", () 
       "environment-manifest",
       "environment-state",
     ] as const) {
-      const result = inspectAnalysisView({
+      const result = await inspectAnalysisView({
         source: { kind: "inline", evidence: { ...parent, raw_result: value } },
         view: { kind },
       });
@@ -823,7 +830,7 @@ it("rejects inline proxy values before reflection or parsing can run traps", () 
   expect(invoked).toBe(false);
 });
 
-it("keeps ignored array metadata inert through parsing and projection", () => {
+it("keeps ignored array metadata inert through parsing and projection", async () => {
   const capture = analysisViewCaptureFixture();
   const parent = createEvidence(
     {
@@ -856,7 +863,7 @@ it("keeps ignored array metadata inert through parsing and projection", () => {
     "environment-manifest",
     "environment-state",
   ] as const) {
-    const result = inspectAnalysisView({
+    const result = await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view: { kind },
     });
@@ -867,19 +874,19 @@ it("keeps ignored array metadata inert through parsing and projection", () => {
   expect(parseEvidence(parent).raw_result).toEqual([]);
 });
 
-it("keeps inline-envelope admission live alongside capture validation and grouping", () => {
+it("keeps inline-envelope admission live alongside capture validation and grouping", async () => {
   // Each clone alone fits; both graphs coexist while the view is projected.
   const capture = analysisViewObjectDenseCapture(40_000);
   const parent = analysisViewCaptureEvidence(capture);
   for (const kind of ["summary", "capture"] as const) {
-    const projected = inspectAnalysisView({
+    const projected = await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view: { kind },
     });
     if (!projected.ok) throw projected.error;
     expect(projected.value.evidence_links).toEqual([parent.evidence_id]);
   }
-  const retained = inspectAnalysisView(
+  const retained = await inspectAnalysisView(
     {
       source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
       view: { kind: "api-surface" },
@@ -888,7 +895,7 @@ it("keeps inline-envelope admission live alongside capture validation and groupi
   );
   if (!retained.ok) throw retained.error;
   expect(
-    inspectAnalysisView({
+    await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view: { kind: "api-surface" },
     }),
@@ -898,7 +905,7 @@ it("keeps inline-envelope admission live alongside capture validation and groupi
   });
 });
 
-it("admits raw_result and parameters before authenticating a portable capture", () => {
+it("admits raw_result and parameters before authenticating a portable capture", async () => {
   const dense = analysisViewObjectDenseCapture();
   const parent = analysisViewCaptureEvidence();
   for (const field of ["raw_result", "parameters"] as const)
@@ -907,7 +914,7 @@ it("admits raw_result and parameters before authenticating a portable capture", 
       "environment-manifest",
       "environment-state",
     ] as const) {
-      const result = inspectAnalysisView({
+      const result = await inspectAnalysisView({
         source: { kind: "inline", evidence: { ...parent, [field]: dense } },
         view: { kind },
       });
@@ -927,18 +934,18 @@ const writeEvidenceFile = async (value: unknown): Promise<string> => {
   return path;
 };
 
-describe("inspectAnalysisViewWithFiles", () => {
+describe("inspectAnalysisView", () => {
   const view = manifestView;
 
   it("projects an Evidence file exactly as the same Evidence inline", async () => {
     const parent = analysisViewCaptureEvidence(
       environmentManifestCaptureFixture(),
     );
-    const fromFile = await inspectAnalysisViewWithFiles({
+    const fromFile = await inspectAnalysisView({
       source: { kind: "evidence-file", path: await writeEvidenceFile(parent) },
       view,
     });
-    const inline = inspectAnalysisView({
+    const inline = await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view,
     });
@@ -961,7 +968,7 @@ describe("inspectAnalysisViewWithFiles", () => {
     );
     const parent = analysisViewCaptureEvidence(capture);
     expect(
-      inspectAnalysisView({
+      await inspectAnalysisView({
         source: { kind: "inline", evidence: parent },
         view,
       }),
@@ -969,7 +976,7 @@ describe("inspectAnalysisViewWithFiles", () => {
       ok: false,
       error: { _tag: "AnalysisResourceConstraintError", resource: "memory" },
     });
-    const fromFile = await inspectAnalysisViewWithFiles({
+    const fromFile = await inspectAnalysisView({
       source: { kind: "evidence-file", path: await writeEvidenceFile(parent) },
       view,
     });
@@ -981,7 +988,7 @@ describe("inspectAnalysisViewWithFiles", () => {
 
   it("refuses a relative path, a missing file and JSON that is not Evidence", async () => {
     expect(
-      await inspectAnalysisViewWithFiles({
+      await inspectAnalysisView({
         source: { kind: "evidence-file", path: "capture.json" },
         view,
       }),
@@ -991,12 +998,12 @@ describe("inspectAnalysisViewWithFiles", () => {
       "absent.json",
     );
     expect(
-      await inspectAnalysisViewWithFiles({
+      await inspectAnalysisView({
         source: { kind: "evidence-file", path: missing },
         view,
       }),
     ).toMatchObject({ ok: false, error: { _tag: "EvidenceFileError" } });
-    const notEvidence = await inspectAnalysisViewWithFiles({
+    const notEvidence = await inspectAnalysisView({
       source: {
         kind: "evidence-file",
         path: await writeEvidenceFile({ hello: 1 }),
@@ -1028,7 +1035,7 @@ describe("inspectAnalysisViewWithFiles", () => {
     const parent = analysisViewCaptureEvidence(
       environmentManifestCaptureFixture(),
     );
-    const result = await inspectAnalysisViewWithFiles(
+    const result = await inspectAnalysisView(
       {
         source: {
           kind: "evidence-file",
@@ -1053,7 +1060,7 @@ describe("inspectAnalysisViewWithFiles", () => {
       environmentManifestCaptureFixture(),
     );
     const path = await writeEvidenceFile(parent);
-    const running = inspectAnalysisViewWithFiles(
+    const running = inspectAnalysisView(
       { source: { kind: "evidence-file", path }, view },
       undefined,
       { signal: controller.signal },
@@ -1067,21 +1074,9 @@ describe("inspectAnalysisViewWithFiles", () => {
     });
     expect(result.ok ? undefined : result.error.cause).toBe(reason);
   });
-
-  it("leaves file sources to the file-aware entry point", () => {
-    expect(
-      inspectAnalysisView({
-        source: { kind: "evidence-file", path: "/tmp/capture.json" },
-        view,
-      }),
-    ).toMatchObject({
-      ok: false,
-      error: { _tag: "AnalysisCapabilityUnavailableError" },
-    });
-  });
 });
 
-describe("inspectAnalysisViewWithFiles scenario parents", () => {
+describe("inspectAnalysisView scenario parents", () => {
   const view = manifestView;
 
   it("accepts from a file a scenario capture whose response bodies exceed the inline budget", async () => {
@@ -1096,7 +1091,7 @@ describe("inspectAnalysisViewWithFiles scenario parents", () => {
       ),
     );
     expect(
-      inspectAnalysisView({
+      await inspectAnalysisView({
         source: { kind: "inline", evidence: parent },
         view,
       }),
@@ -1104,7 +1099,7 @@ describe("inspectAnalysisViewWithFiles scenario parents", () => {
       ok: false,
       error: { _tag: "AnalysisResourceConstraintError", resource: "memory" },
     });
-    const fromFile = await inspectAnalysisViewWithFiles({
+    const fromFile = await inspectAnalysisView({
       source: { kind: "evidence-file", path: await writeEvidenceFile(parent) },
       view,
     });

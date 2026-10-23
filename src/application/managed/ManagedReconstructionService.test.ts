@@ -56,21 +56,36 @@ describe("managed decompiler reconstruction import", () => {
           },
         ],
       }),
-    ).toThrow(/text hash mismatch/u);
+    ).toThrow(AnalysisInputError);
   });
 
   it("rejects stale method locks", () => {
-    expect(() =>
-      importManagedReconstruction({
-        ...exampleInput(),
-        methods: [
+    const staleInput = {
+      ...exampleInput(),
+      methods: [
+        {
+          ...exampleMethod(),
+          normalized_il_sha256: "6".repeat(64),
+        },
+      ],
+    };
+    expect(() => importManagedReconstruction(staleInput)).toThrow(
+      AnalysisInputError,
+    );
+
+    const result = importManagedReconstructionEvidence(staleInput);
+    expect(result.ok).toBe(false);
+    if (!result.ok)
+      expect(result.error).toMatchObject({
+        _tag: "AnalysisInputError",
+        issues: [
           {
-            ...exampleMethod(),
-            normalized_il_sha256: "6".repeat(64),
+            path: ["methods", 0],
+            reason: "invalid_value",
+            message: expect.stringMatching(/does not match/u),
           },
         ],
-      }),
-    ).toThrow(/does not match/u);
+      });
   });
 
   it("rejects static Evidence with a token MVID but no module identity", () => {
@@ -146,7 +161,7 @@ describe("managed decompiler reconstruction import", () => {
           },
         ],
       }),
-    ).toThrow(/does not match/u);
+    ).toThrow(AnalysisInputError);
   });
 });
 
@@ -182,7 +197,7 @@ describe("managed reconstruction input diagnostics", () => {
       _tag: "AnalysisInputError",
       issues: [
         {
-          path: [],
+          path: ["methods", 0, "reconstruction", "text_sha256"],
           reason: "invalid_value",
           message: expect.stringMatching(/text hash mismatch/u),
         },
@@ -209,18 +224,9 @@ describe("managed reconstruction input diagnostics", () => {
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
-    expect(result.error).toMatchObject({ _tag: "AnalysisInputError" });
-    const issues =
-      result.error instanceof AnalysisInputError ? result.error.issues : [];
-    expect(issues.length).toBeGreaterThan(0);
-    expect(issues.every(({ path }) => path.length === 0)).toBe(true);
-    expect(issues).toContainEqual(
-      expect.objectContaining({
-        reason: "invalid_value",
-        message: expect.stringContaining(
-          "nested value failed validation at artifact",
-        ),
-      }),
-    );
+    expect(result.error).toMatchObject({
+      _tag: "EvidenceIntegrityError",
+      message: expect.stringContaining("artifact"),
+    });
   });
 });

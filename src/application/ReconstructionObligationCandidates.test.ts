@@ -5,7 +5,10 @@ import {
   createJavaScriptSemanticGraphNode,
   JavaScriptSemanticEvidenceContextRegistry,
 } from "../domain/javascript/javascriptSemanticGraph.js";
-import { proofEvidence } from "./ReconstructionObligationLedger.fixture.js";
+import {
+  deriveCandidates,
+  proofEvidence,
+} from "./ReconstructionObligationLedger.fixture.js";
 import { describe, expect, it } from "vitest";
 
 import { createEvidence } from "../domain/evidence.js";
@@ -33,7 +36,6 @@ import {
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import { MANAGED_WORKFLOW_PROVIDER } from "./InvestigationProviders.js";
 import { createProcessCaptureEvidence } from "./process/ProcessEvidence.js";
-import { deriveReconstructionObligationCandidates } from "./ReconstructionObligationCandidates.js";
 
 const applicationWithUnknowns = (
   keys: readonly string[],
@@ -119,7 +121,7 @@ const applicationWithUnknowns = (
   return {
     graph,
     unknownNodes,
-    generated: deriveReconstructionObligationCandidates(
+    generated: deriveCandidates(
       createEvidenceBundle([source, application]),
       [],
     ),
@@ -192,10 +194,7 @@ describe("reconstruction obligation candidates", () => {
       },
     });
     const evidence = createProcessCaptureEvidence(scenario, capture);
-    const generated = deriveReconstructionObligationCandidates(
-      createEvidenceBundle([evidence]),
-      [],
-    );
+    const generated = deriveCandidates(createEvidenceBundle([evidence]), []);
 
     expect(generated.candidates).toEqual([]);
     expect(generated.limitations).toContain(
@@ -227,10 +226,7 @@ describe("reconstruction obligation candidates", () => {
         },
       }),
     });
-    const generated = deriveReconstructionObligationCandidates(
-      createEvidenceBundle([evidence]),
-      [],
-    );
+    const generated = deriveCandidates(createEvidenceBundle([evidence]), []);
 
     expect(generated.limitations).toEqual([
       `Process Evidence ${evidence.evidence_id} could not generate candidates: at manifest.completed_at: Invalid input: expected string, received undefined (1 more issues)`,
@@ -318,7 +314,7 @@ it("keeps each semantic candidate bound to its own file and authority context", 
       evidenceLinks: sourceRecords.map(({ evidence_id }) => evidence_id),
     },
   );
-  const generated = deriveReconstructionObligationCandidates(
+  const generated = deriveCandidates(
     createEvidenceBundle([...sourceRecords, application]),
     [],
   );
@@ -425,7 +421,7 @@ it("falls back to a kind-based title when a semantic node label is blank", () =>
       evidenceLinks: [source.evidence_id],
     },
   );
-  const generated = deriveReconstructionObligationCandidates(
+  const generated = deriveCandidates(
     createEvidenceBundle([source, application]),
     [],
   );

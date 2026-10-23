@@ -202,9 +202,6 @@ export const managedMemberComparisonResultSchema = z.strictObject({
   limitations: z.array(boundedTextSchema),
 });
 
-export type CompareManagedMembersInput = z.infer<
-  typeof compareManagedMembersInputSchema
->;
 export type ManagedMemberComparisonResult = z.infer<
   typeof managedMemberComparisonResultSchema
 >;

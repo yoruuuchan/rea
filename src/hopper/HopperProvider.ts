@@ -299,6 +299,7 @@ export class HopperProvider implements AnalysisProviderCandidate {
         bridgeScriptPath: fileURLToPath(
           new URL("../../bridge/hopper_bridge.py", import.meta.url),
         ),
+        bridgeMaxRequestBytes: this.config.bridgeMaxRequestBytes,
         ...(this.platform === "linux"
           ? {
               launchMode: "verified_linux_demo" as const,
@@ -310,6 +311,7 @@ export class HopperProvider implements AnalysisProviderCandidate {
       }),
       ...(context === undefined ? {} : { runId: context.runId }),
       startupTimeoutMs: this.config.hopperStartupTimeoutMs,
+      bridgeMaxRequestBytes: this.config.bridgeMaxRequestBytes,
       logger: this.logger.child({ layer: "bridge" }),
       onDiagnostic: (diagnostic) =>
         this.logger.info(diagnostic, "Hopper bridge reported a diagnostic"),

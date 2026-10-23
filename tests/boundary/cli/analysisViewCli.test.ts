@@ -72,7 +72,7 @@ cliTest(
       ],
     });
     expect(result.exitCode).toBe(0);
-    const expected = inspectAnalysisView({
+    const expected = await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view,
     });
@@ -191,7 +191,7 @@ cliTest(
         limit: 1,
       },
     };
-    const expected = inspectAnalysisView(input);
+    const expected = await inspectAnalysisView(input);
     if (!expected.ok) throw expected.error;
     await writeFile(request, JSON.stringify(input));
     const response = await cli.run({
@@ -348,7 +348,7 @@ cliTest(
           source: { kind: "inline" as const, evidence },
           view: { kind: "summary" as const },
         };
-        const application = inspectAnalysisView(request);
+        const application = await inspectAnalysisView(request);
         await writeFile(path, JSON.stringify(request));
         const reply = await cli.run({
           arguments: ["inspect-analysis-view", path, "--json"],
@@ -397,7 +397,7 @@ cliTest(
       source: { kind: "inline" as const, evidence: reseal(inspection, nested) },
       view: { kind: "summary" as const },
     };
-    const application = inspectAnalysisView(request);
+    const application = await inspectAnalysisView(request);
     expect(application.ok).toBe(false);
     if (application.ok) throw new Error("Expected invalid nested Evidence");
     expect(application.error.cause).toMatchObject({
@@ -664,7 +664,7 @@ cliTest("rejects a request that omits source", async ({ cli }) => {
   expect(result.json).toMatchObject({
     code: "invalid_request",
     category: "invalid_input",
-    details: { operation: "inspect-analysis-view" },
+    details: { operation: "inspect_analysis_view" },
   });
 });
 
@@ -820,7 +820,7 @@ cliTest(
       parent_evidence_id: parent.evidence_id,
     });
     // The file source projects exactly what the same Evidence projects inline.
-    const inline = inspectAnalysisView({
+    const inline = await inspectAnalysisView({
       source: { kind: "inline", evidence: parent },
       view,
     });

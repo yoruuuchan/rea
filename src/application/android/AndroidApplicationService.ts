@@ -1,8 +1,5 @@
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
-import {
-  androidApplicationProjectionInputSchema,
-  projectAndroidApplication,
-} from "../../domain/android/androidApplication.js";
+import { projectAndroidInventory } from "../../domain/android/androidApplication.js";
 import type { Result } from "../../domain/result.js";
 import { ANDROID_APPLICATION_PROVIDER } from "../InvestigationProviders.js";
 import {
@@ -18,8 +15,7 @@ export const projectAndroidApplicationEvidence = (
 ): Result<InventoryProjectionEvidenceResult, AnalysisError> => {
   return projectInventoryEvidence({
     rawInput,
-    schema: androidApplicationProjectionInputSchema,
-    project: projectAndroidApplication,
+    project: projectAndroidInventory,
     operation: OPERATION,
     predicateType: "rea.android-application-graph",
     provider: ANDROID_APPLICATION_PROVIDER,

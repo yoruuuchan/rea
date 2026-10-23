@@ -1,7 +1,8 @@
 import { functionStructuralCandidate } from "./functionStructuralCandidate.js";
-import type { z } from "zod";
+import { z } from "zod";
 import type { Evidence } from "../evidence.js";
 import { EvidenceIntegrityError } from "../evidenceErrors.js";
+import { readEvidencePayload } from "../evidenceValidation.js";
 import { digestCanonicalValue } from "../canonicalDigest.js";
 import {
   functionBodySchema,
@@ -13,7 +14,7 @@ import {
   addressedValueSchema,
   nativeInventoryRowsSchemas,
 } from "./nativeInventory.js";
-import { parseNativeAddress } from "./nativeAddress.js";
+import { nativeAddressInputSchema } from "./nativeAddress.js";
 import { nativeByteReadSchema } from "./nativeByteRead.js";
 import { procedureInfoSchema } from "./procedureInfo.js";
 import type { NativeFunctionMatchMember } from "./functionMatching.js";
@@ -22,15 +23,52 @@ import {
   type NativeMatchingCheckpoint,
 } from "./functionByteCoverage.js";
 
+const matchingRowsSchema = nativeInventoryRowsSchemas.names.element
+  .extend({ address: nativeAddressInputSchema })
+  .array();
+const availableBodySchema = functionBodySchema.options[1];
+const matchingBodySchema = z.discriminatedUnion("available", [
+  functionBodySchema.options[0],
+  availableBodySchema.safeExtend({
+    ranges: availableBodySchema.shape.ranges.element
+      .extend({
+        start: nativeAddressInputSchema,
+        end: nativeAddressInputSchema,
+      })
+      .array(),
+  }),
+]);
+const matchingProcedureInfoSchema = procedureInfoSchema
+  .safeExtend({
+    entrypoint: nativeAddressInputSchema,
+    body: matchingBodySchema,
+  })
+  .transform(({ entrypoint, body }) => ({ address: entrypoint, body }));
+const matchingFunctionDossierSchema = functionDossierSchema.safeExtend({
+  procedure: functionDossierSchema.shape.procedure.safeExtend({
+    address: nativeAddressInputSchema,
+    body: matchingBodySchema,
+  }),
+});
+const sourcePayload = <Output>(
+  schema: z.ZodType<Output>,
+  input: unknown,
+): Output => {
+  const result = readEvidencePayload(schema, input);
+  if (!result.ok) throw result.error;
+  return result.value;
+};
+
 type Body = z.infer<typeof functionBodySchema>;
 type AddressedValue = z.infer<typeof addressedValueSchema>;
+
 export interface MatchingFunction {
   readonly member: NativeFunctionMatchMember;
   readonly symbol: string | null;
   readonly fingerprint: string | null;
 }
 interface Detail {
-  body?: Body;
+  body: Body;
   dossier?: string | null;
   candidate?: string | null;
   conflict: boolean;
@@ -66,27 +104,30 @@ const requireContext = (inventory: Evidence, observation: Evidence): void => {
 const addBody = (observation: Evidence, details: Facts["details"]): void => {
   const dossier =
     observation.operation === "analyze_function"
-      ? functionDossierSchema.parse(observation.normalized_result)
+      ? sourcePayload(
+          matchingFunctionDossierSchema,
+          observation.normalized_result,
+        )
       : undefined;
   const procedure =
     dossier?.procedure ??
-    (() => {
-      const info = procedureInfoSchema.parse(observation.normalized_result);
-      return { address: info.entrypoint, body: info.body };
-    })();
-  const address = parseNativeAddress(procedure.address);
+    sourcePayload(matchingProcedureInfoSchema, observation.normalized_result);
+  const address = procedure.address;
   if (!functionBodyEntryAgrees(procedure.body, address))
     throw new EvidenceIntegrityError(
       "Procedure body entry membership contradicts its address",
     );
   let detail = details.get(address);
-  if (detail === undefined)
-    details.set(address, (detail = { conflict: false, links: [] }));
-  if (
-    detail.body !== undefined &&
+  if (detail === undefined) {
+    details.set(
+      address,
+      (detail = { body: procedure.body, conflict: false, links: [] }),
+    );
+  } else if (
     digestCanonicalValue(detail.body) !== digestCanonicalValue(procedure.body)
-  )
+  ) {
     detail.conflict = true;
+  }
   detail.body = procedure.body;
   if (observation.operation === "analyze_function") {
     const candidate = functionStructuralCandidate(observation, dossier!);
@@ -106,11 +147,12 @@ const addNames = async (
   symbols: Facts["symbols"],
   checkpoint: NativeMatchingCheckpoint,
 ): Promise<void> => {
-  for (const symbol of nativeInventoryRowsSchemas.names.parse(
+  for (const symbol of sourcePayload(
+    matchingRowsSchema,
     observation.normalized_result,
   )) {
     await checkpoint(128 + symbol.value.length * 2);
-    const address = parseNativeAddress(symbol.address);
+    const address = symbol.address;
     let group = symbols.get(address);
     if (group === undefined)
       symbols.set(address, (group = { values: [], links: new Set() }));
@@ -122,11 +164,23 @@ const addBytes = async (
   observation: Evidence,
   bytes: FunctionByteCoverage,
 ): Promise<void> => {
-  const read = nativeByteReadSchema.parse(observation.normalized_result);
+  const parsed = sourcePayload(
+    nativeByteReadSchema,
+    observation.normalized_result,
+  );
+  const requestAddress =
+    typeof observation.parameters.address === "string"
+      ? sourcePayload(nativeAddressInputSchema, observation.parameters.address)
+      : undefined;
+  const read = {
+    ...parsed,
+    address:
+      requestAddress !== undefined || parsed.returned_bytes > 0
+        ? sourcePayload(nativeAddressInputSchema, parsed.address)
+        : parsed.address,
+  };
   if (
-    (typeof observation.parameters.address === "string" &&
-      parseNativeAddress(observation.parameters.address) !==
-        parseNativeAddress(read.address)) ||
+    (requestAddress !== undefined && requestAddress !== read.address) ||
     (typeof observation.parameters.length === "number" &&
       observation.parameters.length !== read.requested_bytes)
   )
@@ -176,7 +230,7 @@ const functionFact = async (
   facts: Facts,
   checkpoint: NativeMatchingCheckpoint,
 ): Promise<MatchingFunction> => {
-  const address = parseNativeAddress(row.address),
+  const address = row.address,
     detail = facts.details.get(address),
     symbols = facts.symbols.get(address);
   // Bound expansion before creating per-occurrence sets, arrays and subsequent
@@ -250,9 +304,7 @@ export const readFunctionInventory = async (
     throw new EvidenceIntegrityError(
       "Expected artifact-bound list_procedures Evidence",
     );
-  const rows = nativeInventoryRowsSchemas.names.parse(
-    inventory.normalized_result,
-  );
+  const rows = sourcePayload(matchingRowsSchema, inventory.normalized_result);
   const facts: Facts = {
     details: new Map(),
     symbols: new Map(),

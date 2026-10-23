@@ -1,6 +1,7 @@
+import { analysisViewRequestSchema } from "../../src/domain/analysisView/analysisView.js";
 import { createHash } from "node:crypto";
 
-import { inspectAnalysisView } from "../../src/application/analysisView/AnalysisViewService.js";
+import { inspectAnalysisViewValidated } from "../../src/application/analysisView/AnalysisViewService.js";
 import { createBrowserScenarioEvidence } from "../../src/application/BrowserScenarioEvidence.js";
 import { sanitizeBrowserUrl } from "../../src/domain/browserObservation.js";
 import { browserScenarioSchema } from "../../src/domain/browserScenario.js";
@@ -304,12 +305,12 @@ export const scenarioCaptureEvidence = (
 export const scenarioServeFixture = (
   capture: Evidence = scenarioCaptureEvidence(),
 ): EnvironmentServeFixture => {
-  const manifest = inspectAnalysisView({
+  const manifest = inspectAnalysisViewValidated({
     source: { kind: "inline", evidence: capture },
-    view: {
+    view: analysisViewRequestSchema.parse({
       kind: "environment-manifest",
       template_rules: [...ALL_TEMPLATE_RULES],
-    },
+    }),
   });
   if (!manifest.ok) throw manifest.error;
   return { manifest: manifest.value, capture };

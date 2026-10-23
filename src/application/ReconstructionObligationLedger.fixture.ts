@@ -1,11 +1,13 @@
 import { PROCESS_PROVIDER } from "../domain/process/processEvidenceProvider.js";
-import {
-  buildReconstructionObligationLedgerEvidenceValidated,
-  resolveReconstructionObligationLedgerRequest,
-} from "./ReconstructionObligationLedgerService.js";
+import { buildReconstructionObligationLedgerEvidence } from "./ReconstructionObligationLedgerService.js";
+import { resolveReconstructionObligationLedgerRequest } from "./ReconstructionObligationLedgerRequest.js";
+import { deriveReconstructionObligationCandidates } from "./ReconstructionObligationCandidates.js";
 import { EMPTY_PROCESS_CAPTURE_EXAMPLE } from "../domain/process/processCaptureExample.js";
 import { createEvidence, type Evidence } from "../domain/evidence.js";
-import { createEvidenceBundle } from "../domain/evidenceBundle.js";
+import {
+  createEvidenceBundle,
+  type EvidenceBundle,
+} from "../domain/evidenceBundle.js";
 import { jsonValueSchema } from "../domain/jsonValue.js";
 import {
   reconstructionObligationLedgerSchema,
@@ -98,11 +100,7 @@ export const request = (
 export const build = (
   input: ReconstructionObligationLedgerInput,
 ): ReconstructionObligationLedger => {
-  const parsed = resolveReconstructionObligationLedgerRequest(input);
-  if (!parsed.ok) throw parsed.error;
-  const result = buildReconstructionObligationLedgerEvidenceValidated(
-    parsed.value,
-  );
+  const result = buildReconstructionObligationLedgerEvidence(input);
   if (!result.ok) throw result.error;
   return reconstructionObligationLedgerSchema.parse(
     result.value.normalized_result,
@@ -266,3 +264,23 @@ export const MIXED_AUTHORITY_SUMMARY = {
     { key: "unknown", count: 0 },
   ],
 } as const;
+
+/** Resolve fixture sources through the production request owner. */
+export const resolveRequest = (input: ReconstructionObligationLedgerInput) => {
+  const resolved = resolveReconstructionObligationLedgerRequest(input);
+  if (!resolved.ok) throw resolved.error;
+  return resolved.value;
+};
+
+/** Derive candidates from fixture requests after authenticating their sources. */
+export const deriveCandidates = (
+  bundle: EvidenceBundle,
+  reviewed: readonly ReviewedReconstructionObligation[],
+) =>
+  deriveReconstructionObligationCandidates(
+    resolveRequest({
+      evidence_bundle: bundle,
+      reviewed_obligations: [...reviewed],
+      manifest: { bindings: [], contradictions: [] },
+    }),
+  );

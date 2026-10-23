@@ -31,6 +31,7 @@ import { AnalysisError } from "../domain/analysisErrorBase.js";
 import { analysisErrorWithCleanupFailure } from "../domain/analysisErrorCleanup.js";
 import { ProviderCleanupError } from "../domain/providerCleanupError.js";
 import type { SetupSkillInstallError } from "./SetupSkill.js";
+import type { SetupHopperInstallFailure } from "./SetupInstallFailure.js";
 
 /** Discover, approve, and apply setup actions idempotently. */
 export const runSetup = async (
@@ -312,6 +313,7 @@ const runSetupWorkflow = async (
   let selectedClients: readonly SetupClient[] =
     planSelection.clientsToConfigure;
   let hopperWarning: string | undefined;
+  let hopperFailure: SetupHopperInstallFailure | undefined;
   if (
     planSelection.installHopper &&
     (interactiveApproval || options.installHopper)
@@ -319,21 +321,20 @@ const runSetupWorkflow = async (
     const install = await installHopperAction({
       host,
       options,
-      plannedActions,
       appliedActions,
-      clients,
       selectedClients,
       providerEnvironment,
-      doctorScope: readinessScope,
-      clientStates,
     });
-    if ("failure" in install) return install.failure;
-    ({
-      hopperPath,
-      providerEnvironment,
-      selectedClients,
-      warning: hopperWarning,
-    } = install);
+    // Hopper is optional: a failed install still applies the client
+    // registrations and skill approved with it (#5113).
+    if ("failure" in install) hopperFailure = install.failure;
+    else
+      ({
+        hopperPath,
+        providerEnvironment,
+        selectedClients,
+        warning: hopperWarning,
+      } = install);
   }
   const clientFailure = await configureDetectedClients({
     host,
@@ -346,7 +347,20 @@ const runSetupWorkflow = async (
       ? {}
       : { onProgress: options.onProgress }),
   });
-  if (clientFailure !== undefined) return fail(clientFailure);
+  // A later failure must not hide a failed Hopper install: keep its repair
+  // steps, and its code when the later failure carries none.
+  const withHopperFailure = (result: SetupResult): SetupResult =>
+    hopperFailure === undefined
+      ? result
+      : {
+          ...result,
+          code: result.code ?? hopperFailure.code,
+          remediation:
+            combineRemediation(hopperFailure.remediation, result.remediation) ??
+            hopperFailure.remediation,
+        };
+  if (clientFailure !== undefined)
+    return withHopperFailure(await fail(clientFailure));
   if (planSelection.installSkill) {
     const skillFailure = await installSkillAction(
       host,
@@ -355,18 +369,19 @@ const runSetupWorkflow = async (
       selectedSkillClientIds,
     );
     if (skillFailure !== undefined) {
-      return failSkill(skillFailure);
+      return withHopperFailure(await failSkill(skillFailure));
     }
   }
   const doctor = summarizeDoctor(await host.doctor(readinessScope));
   const remediation = combineRemediation(
-    finalSetupRemediation(
-      host.platform,
-      appliedActions.includes("installed_hopper"),
-      doctor.healthy,
-      // Offer --install-hopper only where the explicit installation gate accepts it.
-      hopperPath === undefined && planDiscovery.hopperInstall.supported,
-    ),
+    hopperFailure?.remediation ??
+      finalSetupRemediation(
+        host.platform,
+        appliedActions.includes("installed_hopper"),
+        doctor.healthy,
+        // Offer installation only where the explicit gate accepts it.
+        hopperPath === undefined && planDiscovery.hopperInstall.supported,
+      ),
     hopperWarning,
     manualRemediation,
   );
@@ -378,19 +393,16 @@ const runSetupWorkflow = async (
     doctor,
     clientStates,
     ...(remediation === undefined ? {} : { remediation }),
+    ...(hopperFailure === undefined ? {} : { code: hopperFailure.code }),
   };
 };
 
 const installHopperAction = async (input: {
   readonly host: SetupHost;
   readonly options: SetupOptions;
-  readonly plannedActions: readonly SetupAction[];
   readonly appliedActions: string[];
-  readonly clients: Readonly<Record<string, ClientConfigurationResult>>;
   readonly selectedClients: readonly SetupClient[];
   readonly providerEnvironment: SetupProviderEnvironment;
-  readonly doctorScope: DoctorScope | undefined;
-  readonly clientStates: readonly SetupClientState[];
 }) => {
   const label = "Hopper deep-analysis provider";
   emitProgress(input.options, {
@@ -406,18 +418,7 @@ const installHopperAction = async (input: {
       state: "failed",
       detail: installed.remediation,
     });
-    return {
-      failure: {
-        status: "needs_human" as const,
-        plannedActions: input.plannedActions,
-        appliedActions: input.appliedActions,
-        clients: input.clients,
-        doctor: summarizeDoctor(await input.host.doctor(input.doctorScope)),
-        clientStates: input.clientStates,
-        code: installed.code,
-        remediation: installed.remediation,
-      },
-    };
+    return { failure: installed };
   }
   input.appliedActions.push("installed_hopper");
   const warning = [installed.warning, installed.cleanupFailure]

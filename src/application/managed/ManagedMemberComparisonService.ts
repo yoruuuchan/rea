@@ -2,17 +2,18 @@ import { z } from "zod";
 
 import {
   compareManagedMembers,
-  managedMemberComparisonResultSchema,
-  type CompareManagedMembersInput,
+  type ManagedMemberComparisonResult,
 } from "../../domain/managed/managedMemberComparison.js";
-import { parseManagedMemberEvidence } from "../../domain/managed/managedMemberComparisonMatch.js";
+import { readManagedMemberEvidence } from "../../domain/managed/managedMemberComparisonMatch.js";
 import type { BinaryTarget } from "../../domain/binaryTargetTypes.js";
 import type { ArtifactResourceScope } from "../../artifacts/ArtifactResourceScope.js";
-import { AnalysisProtocolError } from "../../domain/analysisErrorCore.js";
+import {
+  AnalysisInputError,
+  AnalysisOutputError,
+} from "../../domain/analysisErrorCore.js";
 import { EvidenceIntegrityError } from "../../domain/evidenceErrors.js";
 import { AnalysisError } from "../../domain/analysisErrorBase.js";
 import { createEvidence, type Evidence } from "../../domain/evidence.js";
-import { jsonValueSchema } from "../../domain/jsonValue.js";
 import {
   classifyBinaryTargetFilesystemFailure,
   parseBinaryTarget,
@@ -24,24 +25,61 @@ import {
   MANAGED_STATIC_PROVIDER,
   MANAGED_WORKFLOW_PROVIDER,
 } from "../InvestigationProviders.js";
-import { workflowInputError } from "../workflowInputError.js";
+import { requestInputError } from "../workflowInputError.js";
 
-/** Compare managed members from input parsed by a trusted adapter. */
-export const compareManagedMembersEvidenceValidated = (
-  input: CompareManagedMembersInput,
-): Result<Evidence, AnalysisError> => {
+const managedMemberComparisonRequestSchema = z.strictObject({
+  left: z.unknown(),
+  right: z.unknown(),
+});
+
+export interface ManagedMemberComparisonExecution {
+  readonly evidence: Evidence;
+  readonly summary: ManagedMemberComparisonResult["summary"];
+  readonly sources: readonly [Evidence, Evidence];
+}
+
+/** Authenticate both source records, then compare their parsed observations. */
+export const executeManagedMemberComparison = (
+  input: unknown,
+): Result<ManagedMemberComparisonExecution, AnalysisError> => {
   const operation = "compare_managed_members";
-  try {
-    const left = parseManagedMemberEvidence(input.left);
-    const right = parseManagedMemberEvidence(input.right);
-    const result = compareManagedMembers(
-      { evidenceId: left.evidenceId, result: left.result },
-      { evidenceId: right.evidenceId, result: right.result },
+  const request = managedMemberComparisonRequestSchema.safeParse(input);
+  if (!request.success)
+    return err(requestInputError(operation, request.error, input));
+  const left = readManagedMemberEvidence(request.data.left, "left");
+  if (!left.ok) return left;
+  const right = readManagedMemberEvidence(request.data.right, "right");
+  if (!right.ok) return right;
+  if (left.value.evidence.evidence_id === right.value.evidence.evidence_id)
+    return err(
+      new AnalysisInputError(operation, undefined, [
+        {
+          path: ["right"],
+          reason: "invalid_value",
+          message: "Managed member Evidence must be distinct",
+        },
+      ]),
     );
-    return ok(createManagedMemberComparisonEvidence(input, result));
-  } catch (cause: unknown) {
-    return workflowFailure(operation, cause);
-  }
+  const result = compareManagedMembers(
+    {
+      evidenceId: left.value.evidence.evidence_id,
+      result: left.value.result,
+    },
+    {
+      evidenceId: right.value.evidence.evidence_id,
+      result: right.value.result,
+    },
+  );
+  const evidence = createManagedMemberComparisonEvidence(
+    left.value.evidence,
+    right.value.evidence,
+    result,
+  );
+  return ok({
+    evidence,
+    summary: result.summary,
+    sources: [left.value.evidence, right.value.evidence],
+  });
 };
 
 interface ManagedMemberComparisonPathDependencies {
@@ -100,7 +138,7 @@ export const compareManagedMemberPaths = async (
       const evidence = createEvidence(target, MANAGED_STATIC_PROVIDER, {
         operation: "inspect_managed_members",
         parameters: {},
-        result: jsonValueSchema.parse(inspection),
+        result: inspection,
         rawResult: null,
         limitations: inspection.limitations,
         locations: [{ kind: "artifact-path", path: selectedPath }],
@@ -122,30 +160,34 @@ export const compareManagedMemberPaths = async (
     );
     return ok(
       createManagedMemberComparisonEvidence(
-        {
-          left: left.evidence,
-          right: right.evidence,
-        },
+        left.evidence,
+        right.evidence,
         result,
         { leftPath: input.leftPath, rightPath: input.rightPath },
       ),
     );
   } catch (cause: unknown) {
-    return workflowFailure(operation, cause, partialEvidence);
+    const failure = asOutputFailure(operation, cause);
+    return err(
+      partialEvidence === undefined
+        ? failure
+        : failure.retainPartialObservation(partialEvidence),
+    );
   }
 };
 
 const createManagedMemberComparisonEvidence = (
-  parameters: Pick<CompareManagedMembersInput, "left" | "right">,
-  result: z.infer<typeof managedMemberComparisonResultSchema>,
+  left: Evidence,
+  right: Evidence,
+  result: ManagedMemberComparisonResult,
   sourcePaths?: { readonly leftPath: string; readonly rightPath: string },
 ): Evidence =>
   createEvidence(undefined, MANAGED_WORKFLOW_PROVIDER, {
     predicateType: "rea.managed-member-comparison",
     operation: "compare_managed_members",
     parameters: {
-      left_evidence_id: parameters.left.evidence_id,
-      right_evidence_id: parameters.right.evidence_id,
+      left_evidence_id: left.evidence_id,
+      right_evidence_id: right.evidence_id,
       ...(sourcePaths === undefined
         ? {}
         : {
@@ -153,7 +195,7 @@ const createManagedMemberComparisonEvidence = (
             right_path: sourcePaths.rightPath,
           }),
     },
-    result: jsonValueSchema.parse(result),
+    result,
     rawResult: null,
     confidence: "inferred",
     authority: "analyst-inference",
@@ -169,23 +211,11 @@ const createManagedMemberComparisonEvidence = (
     evidenceLinks: result.evidence_links,
   });
 
-const workflowFailure = (
-  operation: string,
-  cause: unknown,
-  partialEvidence?: Evidence,
-): Result<never, AnalysisError> => {
-  const failure =
-    cause instanceof AnalysisError
-      ? cause
-      : cause instanceof z.ZodError || cause instanceof TypeError
-        ? workflowInputError(operation, cause)
-        : new AnalysisProtocolError(
-            "Managed member comparison produced an invalid result",
-            { cause },
-          );
-  return err(
-    partialEvidence === undefined
-      ? failure
-      : failure.retainPartialObservation(partialEvidence),
-  );
-};
+const asOutputFailure = (operation: string, cause: unknown): AnalysisError =>
+  cause instanceof AnalysisError
+    ? cause
+    : new AnalysisOutputError(
+        operation,
+        "Managed member comparison produced invalid output",
+        { cause },
+      );

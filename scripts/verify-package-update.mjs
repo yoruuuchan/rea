@@ -24,8 +24,14 @@ export async function verifyPackageUpdate({
     '[mcp_servers.rea]\ncommand = "npx"\nargs = ["-y", "rea-agents@0.0.0", "mcp"]\n';
   await mkdir(dirname(codexPath), { recursive: true });
   await writeFile(codexPath, originalConfig);
+  let fixtureFailure;
   const server = createServer((request, response) => {
     void serveRegistry(request, response).catch((error) => {
+      fixtureFailure ??= error;
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
       response.writeHead(500);
       response.end(String(error));
     });
@@ -57,11 +63,12 @@ export async function verifyPackageUpdate({
       response.end("{}");
     } else {
       const upstream = await fetch(`https://registry.npmjs.org${request.url}`);
+      const body = Buffer.from(await upstream.arrayBuffer());
       response.writeHead(upstream.status, {
         "Content-Type":
           upstream.headers.get("content-type") ?? "application/octet-stream",
       });
-      response.end(Buffer.from(await upstream.arrayBuffer()));
+      response.end(body);
     }
   }
   await new Promise((resolveListen, reject) => {
@@ -171,11 +178,14 @@ if (result.status === "failed") process.exitCode = 1;
       throw new Error(
         "Updated CLI did not expose update as its sole maintenance command",
       );
+    if (fixtureFailure !== undefined) throw fixtureFailure;
     return {
       installed_version: result.installedVersion,
       exact_release: true,
       maintenance_read_only: true,
     };
+  } catch (error) {
+    throw fixtureFailure ?? error;
   } finally {
     server.closeAllConnections();
     await new Promise((resolveClose, reject) =>

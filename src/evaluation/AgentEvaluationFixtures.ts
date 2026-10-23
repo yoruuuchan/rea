@@ -19,7 +19,7 @@ import {
 } from "../domain/managed/managedArtifact.js";
 import {
   managedTokenScopesMatch,
-  parseManagedInspectionEvidence,
+  readManagedInspectionEvidence,
 } from "../domain/managed/managedInspectionEvidence.js";
 import { compareUnicodeCodePoints } from "../domain/unicodeCodePointOrder.js";
 import type {
@@ -416,11 +416,14 @@ const parserClaims = (
 };
 
 const managedMembers = ({ evidence }: FixtureClaimContext) => {
-  const { result } = parseManagedInspectionEvidence(
+  const parsed = readManagedInspectionEvidence(
     evidence,
     "inspect_managed_members",
     managedMemberInspectionSchema,
+    { operation: "agent_evaluation", path: ["evidence"] },
   );
+  if (!parsed.ok) throw parsed.error;
+  const { result } = parsed.value;
   if (
     result.coverage.state !== "complete" ||
     result.metadata.status !== "complete" ||
@@ -484,11 +487,14 @@ const managedClaims = (
               evidence.subject.digest.sha256 === source.subject.sha256,
           );
           if (artifacts.length !== 1) return undefined;
-          const { result: artifact } = parseManagedInspectionEvidence(
+          const parsedArtifact = readManagedInspectionEvidence(
             artifacts[0],
             "inspect_managed_artifact",
             managedArtifactInspectionSchema,
+            { operation: "agent_evaluation", path: ["deliveredEvidence"] },
           );
+          if (!parsedArtifact.ok) throw parsedArtifact.error;
+          const { result: artifact } = parsedArtifact.value;
           if (
             artifact.coverage.state !== "complete" ||
             artifact.metadata.status !== "complete" ||

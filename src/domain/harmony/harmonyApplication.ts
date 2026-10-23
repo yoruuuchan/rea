@@ -7,15 +7,13 @@ import { AnalysisInputError } from "../analysisErrorCore.js";
 
 import {
   hasCompleteInventoryCoverage,
-  parseArtifactInventoryEvidence,
+  type ParsedInventorySet,
 } from "../artifactInventoryEvidence.js";
 import { digestSchema } from "../digests.js";
 import { prefixedDigestSchema } from "../digests.js";
 import { digestCanonicalValue } from "../canonicalDigest.js";
 import { nativeRuntimeConvention } from "../nativeConvention.js";
 import {
-  applicationInventoryProjectionInputSchema,
-  type MobileApplicationProjectionWithSources,
   projectedBridgeCandidateSchema,
   projectedComponentSchema,
   projectedInventoryEntries,
@@ -25,34 +23,28 @@ import {
   unavailableComponentSchema,
 } from "../mobileApplicationGraphProjection.js";
 import { compareUnicodeCodePoints } from "../unicodeCodePointOrder.js";
-
-const evidenceIdSchema = projectionEvidenceIdSchema;
-const componentSchema = projectedComponentSchema;
+import { err, ok, type Result } from "../result.js";
 
 const HARMONY_ROOT_FORMATS = ["hap", "hsp", "app-pack"] as const;
 type RootFormat = (typeof HARMONY_ROOT_FORMATS)[number];
-
-/** Authenticated HarmonyOS inventory pages projected as one application. */
-export const harmonyApplicationProjectionInputSchema =
-  applicationInventoryProjectionInputSchema;
 
 /** Deterministic, execution-free HarmonyOS application inventory projection. */
 export const harmonyApplicationProjectionResultSchema = z.strictObject({
   projection_id: prefixedDigestSchema("hmp"),
   root_sha256: digestSchema,
   root_format: z.enum(HARMONY_ROOT_FORMATS),
-  source_evidence_ids: z.array(evidenceIdSchema).min(1),
+  source_evidence_ids: z.array(projectionEvidenceIdSchema).min(1),
   packaging_model: z.enum(["stage", "fa", "unknown"]),
   components: z.strictObject({
-    manifests: z.array(componentSchema),
-    bytecode: z.array(componentSchema),
-    resources: z.array(componentSchema),
-    native_libraries: z.array(componentSchema),
-    javascript: z.array(componentSchema),
-    signing: z.array(componentSchema),
+    manifests: z.array(projectedComponentSchema),
+    bytecode: z.array(projectedComponentSchema),
+    resources: z.array(projectedComponentSchema),
+    native_libraries: z.array(projectedComponentSchema),
+    javascript: z.array(projectedComponentSchema),
+    signing: z.array(projectedComponentSchema),
   }),
   unavailable_components: z.array(unavailableComponentSchema),
-  app_pack_children: z.array(componentSchema),
+  app_pack_children: z.array(projectedComponentSchema),
   runtime_families: z.array(
     z.enum(["ark", "native", "javascript", "react-native", "flutter", "unity"]),
   ),
@@ -71,24 +63,21 @@ export const harmonyApplicationProjectionResultSchema = z.strictObject({
   limitations: z.array(z.string()),
 });
 
-export type HarmonyApplicationProjectionInput = z.infer<
-  typeof harmonyApplicationProjectionInputSchema
->;
 export type HarmonyApplicationProjectionResult = z.infer<
   typeof harmonyApplicationProjectionResultSchema
 >;
-type Component = z.infer<typeof componentSchema>;
+type Component = z.infer<typeof projectedComponentSchema>;
 
 /** Project exact HarmonyOS package paths and hashes without decoding or executing target code. */
-export const projectHarmonyApplication = (
-  input: HarmonyApplicationProjectionInput,
-): MobileApplicationProjectionWithSources<HarmonyApplicationProjectionResult> => {
-  const parsed = harmonyApplicationProjectionInputSchema.parse(input);
-  const { evidence, inventory } = parseArtifactInventoryEvidence(
-    parsed.inventory_evidence,
-  );
-  const rootFormat = harmonyRootFormat(inventory.manifest.root_format);
-  const entries = projectedInventoryEntries(inventory);
+export const projectHarmonyInventory = (
+  source: ParsedInventorySet,
+): Result<HarmonyApplicationProjectionResult, AnalysisInputError> => {
+  const { evidence, inventory } = source;
+  const rootFormatResult = harmonyRootFormat(inventory.manifest.root_format);
+  if (!rootFormatResult.ok) return rootFormatResult;
+  const rootFormat = rootFormatResult.value;
+  const { entries, limitations: unresolved } =
+    projectedInventoryEntries(inventory);
   const all = projectedFileComponents(entries);
   const unavailable = entries.flatMap(({ unavailable }) =>
     unavailable === undefined ? [] : [unavailable],
@@ -99,6 +88,7 @@ export const projectHarmonyApplication = (
     classified.native_libraries,
   );
   const limitations = [
+    ...unresolved,
     ...inventory.limitations,
     ...(!hasCompleteInventoryCoverage(inventory, "container-entries")
       ? ["Source inventory coverage is partial; absence is unknown."]
@@ -149,32 +139,35 @@ export const projectHarmonyApplication = (
     ),
     limitations,
   };
-  return {
-    projection: harmonyApplicationProjectionResultSchema.parse({
+  return ok(
+    harmonyApplicationProjectionResultSchema.parse({
       ...withoutId,
       projection_id: `hmp_${digestCanonicalValue(withoutId, "HarmonyOS application projection")}`,
     }),
-    sources: evidence,
-  };
+  );
 };
 
-const harmonyRootFormat = (format: string): RootFormat => {
+const harmonyRootFormat = (
+  format: string,
+): Result<RootFormat, AnalysisInputError> => {
   const root = HARMONY_ROOT_FORMATS.find((candidate) => candidate === format);
   if (root === undefined)
-    throw new AnalysisInputError("project_harmony_application_graph", {}, [
-      {
-        path: [
-          "inventory_evidence",
-          0,
-          "normalized_result",
-          "manifest",
-          "root_format",
-        ],
-        reason: "invalid_value",
-        message: `HarmonyOS application projection requires HAP, HSP, or App Pack inventory Evidence (got ${format})`,
-      },
-    ]);
-  return root;
+    return err(
+      new AnalysisInputError("project_harmony_application_graph", {}, [
+        {
+          path: [
+            "inventory_evidence",
+            0,
+            "normalized_result",
+            "manifest",
+            "root_format",
+          ],
+          reason: "invalid_value",
+          message: `HarmonyOS application projection requires HAP, HSP, or App Pack inventory Evidence (got ${format})`,
+        },
+      ]),
+    );
+  return ok(root);
 };
 
 const packagingModel = (

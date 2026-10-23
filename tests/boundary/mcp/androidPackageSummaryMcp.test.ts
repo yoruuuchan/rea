@@ -135,7 +135,7 @@ it.skipIf(process.platform === "win32")(
       offset = page.coverage.next_offset ?? manifest.text.length;
     } while (offset < manifest.text.length);
     expect(text).toBe(manifest.text);
-    const portable = inspectAnalysisView({
+    const portable = await inspectAnalysisView({
       source: { kind: "inline", evidence: parseEvidence(JSON.parse(before)) },
       view: { kind: "summary" },
     });
@@ -156,7 +156,7 @@ it.skipIf(process.platform === "win32")(
   30000,
 );
 
-it("preserves partial/unknown declarations and Unicode text while rejecting missing APK identity and malformed source", () => {
+it("preserves partial/unknown declarations and Unicode text while rejecting missing APK identity and malformed source", async () => {
   const report = {
     engine: {
       name: "jadx",
@@ -192,7 +192,10 @@ it("preserves partial/unknown declarations and Unicode text while rejecting miss
     );
   const parent = evidence();
   const source = { kind: "inline", evidence: parent };
-  const summary = inspectAnalysisView({ source, view: { kind: "summary" } });
+  const summary = await inspectAnalysisView({
+    source,
+    view: { kind: "summary" },
+  });
   if (!summary.ok) throw summary.error;
   const overview = androidPackageSummaryViewResultSchema.parse(
     summary.value.normalized_result,
@@ -200,7 +203,7 @@ it("preserves partial/unknown declarations and Unicode text while rejecting miss
   expect(overview.summary.package_name).toBeNull();
   expect(overview.summary.manifest.status).toBe("partial");
   expect(overview.limitations).toEqual(parent.limitations);
-  const page = inspectAnalysisView({
+  const page = await inspectAnalysisView({
     source,
     view: { kind: "android", facet: "manifest", offset: 0, limit: 4 },
   });
@@ -218,7 +221,7 @@ it("preserves partial/unknown declarations and Unicode text while rejecting miss
   expect(result.unknowns.join(" ")).toContain("partial");
   for (const offset of [2])
     expect(
-      inspectAnalysisView({
+      await inspectAnalysisView({
         source,
         view: { kind: "android", facet: "manifest", offset, limit: 2 },
       }),
@@ -228,7 +231,7 @@ it("preserves partial/unknown declarations and Unicode text while rejecting miss
     evidence({ ...report, class_count: -1 }),
   ])
     expect(
-      inspectAnalysisView({
+      await inspectAnalysisView({
         source: { kind: "inline", evidence: invalid },
         view: { kind: "summary" },
       }),

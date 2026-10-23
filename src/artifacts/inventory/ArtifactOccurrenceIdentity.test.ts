@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 
 import { inventoryArtifact } from "../../../tests/fixtures/artifactInventory.js";
 import { compareArtifacts } from "../../domain/artifactComparison.js";
-import { projectAppleApplication } from "../../domain/apple/appleApplication.js";
+import { parseArtifactInventoryEvidence } from "../../domain/artifactInventoryEvidence.js";
+import { projectAppleInventory } from "../../domain/apple/appleApplication.js";
 import { createEvidence } from "../../domain/evidence.js";
 import { jsonValueSchema } from "../../domain/jsonValue.js";
 import { thinMach } from "../../domain/binaryTarget.fixture.js";
@@ -115,8 +116,8 @@ describe("content identity and occurrence facts", () => {
         );
       await writeFile(path, await writer.close());
       const inventory = await inventoryArtifact(path);
-      const projection = projectAppleApplication({
-        inventory_evidence: [
+      const projectionResult = projectAppleInventory(
+        parseArtifactInventoryEvidence([
           createEvidence(
             { path, sha256: inventory.manifest.root_sha256, format: "zip" },
             {
@@ -132,8 +133,10 @@ describe("content identity and occurrence facts", () => {
               authority: "shipped-artifact",
             },
           ),
-        ],
-      }).projection;
+        ]),
+      );
+      if (!projectionResult.ok) throw projectionResult.error;
+      const projection = projectionResult.value;
       expect(
         projection.components.javascript.map((component) => component.path),
       ).toEqual(["Demo.app/Contents/Resources/a.js"]);

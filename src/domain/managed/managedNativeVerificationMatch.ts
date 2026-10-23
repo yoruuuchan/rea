@@ -1,16 +1,13 @@
 import { basename } from "node:path";
 
-import { parseEvidence } from "../evidence.js";
 import { digestCanonicalValue } from "../canonicalDigest.js";
-import { functionDossierSchema } from "../hopperValues.js";
-import { inspectMachoSchema } from "../native/nativeInspection.js";
+import type { Evidence } from "../evidence.js";
+import type { ManagedNativeObservationFacts } from "./managedNativeVerificationSource.js";
 import type { ManagedNativeBoundaryInspection } from "./managedArtifact.js";
-import {
-  pinvokeVerificationSchema,
-  type ManagedNativeVerificationInput,
-  type ManagedNativeVerificationResult,
-  type NativeSymbol,
-  type PinvokeVerification,
+import type {
+  ManagedNativeVerificationResult,
+  NativeSymbol,
+  PinvokeVerification,
 } from "./managedNativeVerificationSchemas.js";
 
 type PinvokeImport = ManagedNativeBoundaryInspection["pinvoke_imports"][number];
@@ -18,57 +15,8 @@ type VerifiedPinvoke = {
   readonly verification: PinvokeVerification;
 };
 
-const moduleName = (
-  evidence: ReturnType<typeof parseEvidence>,
-): string | null => evidence.subject?.name ?? null;
-
-const modulePath = (
-  evidence: ReturnType<typeof parseEvidence>,
-): string | null => evidence.subject?.local_path ?? null;
-
-const symbolsForEvidence = (
-  evidence: ReturnType<typeof parseEvidence>,
-): {
-  readonly supported: boolean;
-  readonly symbols: readonly NativeSymbol[];
-} => {
-  if (evidence.operation === "inspect_macho") {
-    const result = inspectMachoSchema.parse(evidence.normalized_result);
-    return {
-      supported: true,
-      symbols: result.exports.items.map((symbol) => ({
-        evidence_id: evidence.evidence_id,
-        operation: evidence.operation,
-        name: symbol.name,
-        address: symbol.address,
-        module_name: moduleName(evidence),
-        module_path: modulePath(evidence),
-        source: "macho-export" as const,
-      })),
-    };
-  }
-  if (evidence.operation === "analyze_function") {
-    const dossier = functionDossierSchema.parse(evidence.normalized_result);
-    return {
-      supported: true,
-      symbols: [
-        {
-          evidence_id: evidence.evidence_id,
-          operation: evidence.operation,
-          name: dossier.procedure.name,
-          address: dossier.procedure.address,
-          module_name: moduleName(evidence),
-          module_path: modulePath(evidence),
-          source: "function-dossier" as const,
-        },
-      ],
-    };
-  }
-  return { supported: false, symbols: [] };
-};
-
 export const collectNativeSymbols = (
-  observations: readonly ManagedNativeVerificationInput["native_observations"][number][],
+  observations: readonly ManagedNativeObservationFacts[],
 ): {
   readonly symbols: readonly NativeSymbol[];
   readonly accepted: number;
@@ -77,14 +25,12 @@ export const collectNativeSymbols = (
   const symbols: NativeSymbol[] = [];
   let accepted = 0;
   let unsupported = 0;
-  for (const raw of observations) {
-    const evidence = parseEvidence(raw);
-    const extracted = symbolsForEvidence(evidence);
-    if (!extracted.supported) {
+  for (const observation of observations) {
+    if (!observation.supported) {
       unsupported += 1;
     } else {
       accepted += 1;
-      symbols.push(...extracted.symbols);
+      symbols.push(...observation.symbols);
     }
   }
   return { symbols, accepted, unsupported };
@@ -261,7 +207,7 @@ const matchPinvoke = (
 const pinvokeLimitations = (
   match: PinvokeMatch,
   managed: PinvokeImport,
-): readonly string[] => [
+): string[] => [
   ...(managed.import_scope_name === null ||
   managed.import_scope_name.trim().length === 0
     ? ["Managed declaration does not name an import scope/module."]
@@ -296,6 +242,11 @@ interface VerifyPinvokeContext {
   };
 }
 
+type PinvokeVerificationContext = Pick<
+  PinvokeVerification,
+  "item_id" | "managed" | "evidence_links" | "limitations"
+>;
+
 export const verifyPinvoke = ({
   item,
   managedEvidenceId,
@@ -314,26 +265,26 @@ export const verifyPinvoke = ({
   };
   const selection = matchPinvoke(item, native.symbols, native.accepted);
   const limitations = pinvokeLimitations(selection.match, item);
-  return {
-    verification: pinvokeVerificationSchema.parse({
-      item_id: `mnv_pinvoke_${digestCanonicalValue(
-        {
-          managedEvidenceId,
-          token: item.token,
-          importName: item.import_name,
-          importScope: item.import_scope_name,
-          candidates: selection.match.candidates,
-        },
-        "Managed/native verification",
-      )}`,
-      managed,
-      ...selection.match,
-      evidence_links: [
+  const context: PinvokeVerificationContext = {
+    item_id: `mnv_pinvoke_${digestCanonicalValue(
+      {
         managedEvidenceId,
-        ...new Set(selection.match.candidates.map(({ evidence_id: id }) => id)),
-      ],
-      limitations,
-    }),
+        token: item.token,
+        importName: item.import_name,
+        importScope: item.import_scope_name,
+        candidates: selection.match.candidates,
+      },
+      "Managed/native verification",
+    )}`,
+    managed,
+    evidence_links: [
+      managedEvidenceId,
+      ...new Set(selection.match.candidates.map(({ evidence_id: id }) => id)),
+    ],
+    limitations,
+  };
+  return {
+    verification: { ...context, ...selection.match },
   };
 };
 
@@ -350,7 +301,7 @@ const countStatuses = (
 });
 
 interface VerificationResultInput {
-  readonly managedEvidence: ReturnType<typeof parseEvidence>;
+  readonly managedEvidence: Evidence;
   readonly managed: ManagedNativeBoundaryInspection;
   readonly native: {
     readonly symbols: readonly NativeSymbol[];
@@ -358,7 +309,8 @@ interface VerificationResultInput {
     readonly unsupported: number;
   };
   readonly pinvokeImports: readonly PinvokeVerification[];
-  readonly input: ManagedNativeVerificationInput;
+  readonly nativeObservationCount: number;
+  readonly nativeEvidenceIds: readonly string[];
 }
 
 export const buildVerificationResult = ({
@@ -366,7 +318,8 @@ export const buildVerificationResult = ({
   managed,
   native,
   pinvokeImports,
-  input,
+  nativeObservationCount,
+  nativeEvidenceIds,
 }: VerificationResultInput): Omit<
   ManagedNativeVerificationResult,
   "verification_id"
@@ -398,7 +351,7 @@ export const buildVerificationResult = ({
       coverage_state: managed.coverage.state,
     },
     native_observations: {
-      total: input.native_observations.length,
+      total: nativeObservationCount,
       accepted: native.accepted,
       unsupported: native.unsupported,
       symbols: native.symbols.length,
@@ -414,10 +367,7 @@ export const buildVerificationResult = ({
         "Managed metadata tokens and RVAs are not translated to native provider addresses by this workflow; C++/CLI, ReadyToRun, and native-body mappings require explicit provider-supported bridge evidence.",
     },
     coverage,
-    evidence_links: [
-      managedEvidence.evidence_id,
-      ...input.native_observations.map(({ evidence_id: id }) => id),
-    ],
+    evidence_links: [managedEvidence.evidence_id, ...nativeEvidenceIds],
     limitations: [
       "P/Invoke verification checks declared import names against supplied native export or function-name Evidence only.",
       "A matching native symbol verifies that a candidate export/function was observed; it does not prove CLR binding, marshaling behavior, call reachability, or runtime loading.",

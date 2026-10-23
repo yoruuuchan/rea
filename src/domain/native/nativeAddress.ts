@@ -18,6 +18,3 @@ export const nativeAddressInputSchema = z
       .replace(/%[0-9a-fA-F]{2}/gu, (escape) => escape.toUpperCase());
     return `${space}0x${BigInt(address.slice(separator)).toString(16)}`;
   });
-
-export const parseNativeAddress = (input: unknown): string =>
-  nativeAddressInputSchema.parse(input);

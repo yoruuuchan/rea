@@ -7,9 +7,7 @@ import { withAdmittedAnalysis } from "./analysisAdmission.js";
 import { createEvidenceToolHandler } from "./contractToolHandler.js";
 import { toolRegistrationOptions } from "./toolRegistrationOptions.js";
 import { recordSessionEvidenceSources } from "./sessionEvidence.js";
-import { matchNativeFunctionsInputSchema } from "../contracts/native/functionMatchingContracts.js";
-import { analysisInputErrorFromIssues } from "../domain/inputIssueProjection.js";
-import { err, ok } from "../domain/result.js";
+import { ok } from "../domain/result.js";
 import type { Logger } from "pino";
 
 /** Bind one named contract to the same retained-Evidence workflow used by CLI. */
@@ -26,27 +24,14 @@ export const registerNativeFunctionMatchingTool = (
   const handler = createEvidenceToolHandler(
     server,
     async (input, options) => {
-      const parsed = matchNativeFunctionsInputSchema.safeParse(input);
-      if (!parsed.success)
-        return err(
-          analysisInputErrorFromIssues(
-            contract.name,
-            parsed.error.issues,
-            input,
-          ),
-        );
-      const result = await matchNativeFunctions(
-        parsed.data,
-        options,
-        evidenceById,
-      );
+      const result = await matchNativeFunctions(input, options, evidenceById);
       if (!result.ok) return result;
       const recorded = recordSessionEvidenceSources(
         recordEvidence,
         result.value.sources,
       );
       if (!recorded.ok) return recorded;
-      return parsed.data.detail === "summary"
+      return result.value.detail === "summary"
         ? summarizeRetainedAnalysis(result.value.evidence, {
             evidenceById,
             recordEvidence,

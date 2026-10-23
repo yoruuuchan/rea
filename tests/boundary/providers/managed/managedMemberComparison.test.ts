@@ -8,12 +8,12 @@ import { ArtifactResourceScope } from "../../../../src/artifacts/ArtifactResourc
 import { OwnedFileHandle } from "../../../../src/filesystem/OwnedFileHandle.js";
 
 import {
-  compareManagedMembersEvidenceValidated,
+  executeManagedMemberComparison,
   compareManagedMemberPaths,
 } from "../../../../src/application/managed/ManagedMemberComparisonService.js";
 import { parseBinaryTarget } from "../../../../src/application/BinaryTargetResolver.js";
 import { managedMemberComparisonResultSchema } from "../../../../src/domain/managed/managedMemberComparison.js";
-import { parseManagedMemberEvidence } from "../../../../src/domain/managed/managedMemberComparisonMatch.js";
+import { readManagedMemberEvidence } from "../../../../src/domain/managed/managedMemberComparisonMatch.js";
 import { createEvidence } from "../../../../src/domain/evidence.js";
 import { projectAnalysisError } from "../../../../src/domain/analysisErrorProjection.js";
 import { jsonValueSchema } from "../../../../src/domain/jsonValue.js";
@@ -29,6 +29,38 @@ import {
   readManagedSnapshot,
 } from "../../../../src/dotnet/ManagedSnapshot.js";
 import * as boundedFileBytes from "../../../../src/process/BoundedFileBytes.js";
+import { buildManagedMemberCapacityFixture } from "../../../fixtures/managedMemberCapacity.js";
+
+it("keeps missing members unknown when the opposite inspection retains only types", async () => {
+  const directory = await createTestTempDirectory(
+    "rea-managed-type-recovery-comparison-",
+  );
+  const completePath = join(directory, "complete.dll");
+  const limitedPath = join(directory, "limited.dll");
+  await writeFile(
+    completePath,
+    buildManagedPeFixture({ additionalEmptyTypes: 2 }),
+  );
+  await writeFile(limitedPath, buildManagedMemberCapacityFixture());
+  for (const [leftPath, rightPath] of [
+    [completePath, limitedPath],
+    [limitedPath, completePath],
+  ]) {
+    const result = await compareManagedMemberPaths({
+      leftPath: leftPath!,
+      rightPath: rightPath!,
+    });
+    if (!result.ok) throw result.error;
+    const report = managedMemberComparisonResultSchema.parse(
+      result.value.normalized_result,
+    );
+    expect(report.coverage.status).toBe("partial");
+    expect(report.methods).toHaveLength(1);
+    expect(report.fields).toHaveLength(1);
+    expect(report.methods[0]?.status).toBe("unknown");
+    expect(report.fields[0]?.status).toBe("unknown");
+  }
+});
 
 it.each([
   ["accessibility", 6, 0x0011],
@@ -112,7 +144,7 @@ const compare = (
         authority: "shipped-artifact",
       },
     );
-  const result = compareManagedMembersEvidenceValidated(
+  const result = executeManagedMemberComparison(
     compareManagedMembersInputSchema.parse({
       left: observe(left, edit.left),
       right: observe(right, edit.right),
@@ -120,9 +152,36 @@ const compare = (
   );
   if (!result.ok) throw result.error;
   return managedMemberComparisonResultSchema.parse(
-    result.value.normalized_result,
+    result.value.evidence.normalized_result,
   );
 };
+
+describe("managed member comparison request envelope", () => {
+  it("rejects missing and extra fields before reading source Evidence", () => {
+    const missing = executeManagedMemberComparison({ left: null });
+    expect(missing).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisInputError",
+        issues: [{ path: ["right"], reason: "missing_argument" }],
+      },
+    });
+
+    const extra = executeManagedMemberComparison({
+      left: null,
+      right: null,
+      ignored: true,
+    });
+    expect(extra).toMatchObject({
+      ok: false,
+      error: {
+        _tag: "AnalysisInputError",
+        issues: [{ path: ["ignored"], reason: "unknown_argument" }],
+      },
+    });
+  });
+});
+
 const withCilDigests =
   (byToken: Readonly<Record<string, string>>) => (inspection: Inspection) => ({
     ...inspection,
@@ -468,15 +527,27 @@ describe("managed member comparison subject identity", () => {
       },
     );
 
-    expect(() => parseManagedMemberEvidence(mismatched)).toThrow(
-      `Managed Evidence inspect_managed_members (${mismatched.evidence_id}) subject SHA-256 ${target.sha256} does not match normalized artifact SHA-256 ${otherDigest}`,
+    const rejected = readManagedMemberEvidence(mismatched, "left");
+    expect(rejected).toMatchObject({
+      ok: false,
+      error: { _tag: "EvidenceIntegrityError" },
+    });
+    if (!rejected.ok)
+      expect(rejected.error.message).toContain(
+        `Managed Evidence inspect_managed_members (${mismatched.evidence_id}) subject SHA-256 ${target.sha256} does not match normalized artifact SHA-256 ${otherDigest}`,
+      );
+    const parsedAligned = readManagedMemberEvidence(aligned, "left");
+    const parsedWithoutSubject = readManagedMemberEvidence(
+      unavailableSubject,
+      "right",
     );
-    expect(parseManagedMemberEvidence(aligned).result.artifact.sha256).toBe(
+    if (!parsedAligned.ok) throw parsedAligned.error;
+    if (!parsedWithoutSubject.ok) throw parsedWithoutSubject.error;
+    expect(parsedAligned.value.result.artifact.sha256).toBe(target.sha256);
+    expect(parsedAligned.value.evidence.evidence_id).toBe(aligned.evidence_id);
+    expect(parsedWithoutSubject.value.result.artifact.sha256).toBe(
       target.sha256,
     );
-    expect(
-      parseManagedMemberEvidence(unavailableSubject).result.artifact.sha256,
-    ).toBe(target.sha256);
   });
 });
 
@@ -507,11 +578,12 @@ describe("managed member comparison path workflow", () => {
       left: observe(0xff, "/tmp/partial-left.dll"),
       right: observe(0xfe, "/tmp/partial-right.dll"),
     });
-    const result = compareManagedMembersEvidenceValidated(input);
+    const result = executeManagedMemberComparison(input);
     if (!result.ok) throw result.error;
     const comparison = managedMemberComparisonResultSchema.parse(
-      result.value.normalized_result,
+      result.value.evidence.normalized_result,
     );
+    expect(result.value.summary).toEqual(comparison.summary);
     expect(comparison.coverage.status).toBe("partial");
     expect(comparison.matching.structural_method_shape).toBe(0);
     expect(comparison.methods).toHaveLength(2);

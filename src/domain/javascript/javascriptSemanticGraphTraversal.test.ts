@@ -4,6 +4,7 @@ import {
   unknownSemanticGraphTestEvidence,
 } from "../../../tests/support/javascriptSemanticGraphFixture.js";
 import { expect, it } from "vitest";
+import { z } from "zod";
 
 import {
   JAVASCRIPT_SEMANTIC_NODE_KINDS,
@@ -24,7 +25,11 @@ import type {
   JavaScriptSemanticGraphNode,
   JavaScriptSemanticGraphRelation,
 } from "./javascriptSemanticGraphSchemas.js";
-import { queryJavaScriptSemanticGraph } from "./javascriptSemanticQuery.js";
+import {
+  queryJavaScriptSemanticGraph,
+  queryJavaScriptSemanticGraphValidated,
+} from "./javascriptSemanticQuery.js";
+import { javaScriptSemanticQueryInputSchema } from "./javascriptSemanticQuerySchemas.js";
 import type { JsonValue } from "../jsonValue.js";
 
 const SHA = "a".repeat(64);
@@ -266,7 +271,10 @@ it("excludes candidate edges unless the caller explicitly opts in", () => {
     direction: "forward-influence" as const,
     allowed_relations: ["supplies-request-field" as const],
   };
-  const conservative = queryJavaScriptSemanticGraph(graph, input);
+  const conservative = queryJavaScriptSemanticGraphValidated(
+    graph,
+    javaScriptSemanticQueryInputSchema.parse(input),
+  );
   const optedIn = queryJavaScriptSemanticGraph(graph, {
     ...input,
     include_ambiguous_dynamic_edges: true,
@@ -279,6 +287,16 @@ it("excludes candidate edges unless the caller explicitly opts in", () => {
   expect(optedIn.relations).toMatchObject([
     { relation: "supplies-request-field", resolution: "candidate" },
   ]);
+});
+
+it("rejects an empty relation selection at the raw query boundary", () => {
+  expect(() =>
+    queryJavaScriptSemanticGraph(graphWithCandidateEdge(), {
+      seed: { kind: "literal", value: "TOKEN" },
+      direction: "forward-influence",
+      allowed_relations: [],
+    }),
+  ).toThrow(z.ZodError);
 });
 
 it("retains every structural application node linked to one semantic node", () => {

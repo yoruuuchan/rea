@@ -14,7 +14,7 @@ import { artifactInventoryResultSchema } from "../../../src/domain/artifactGraph
 import { createTestTempDirectory } from "../../fixtures/temporaryDirectory.js";
 import { cliTest } from "../../support/cli/cliFixture.js";
 
-cliTest.for([
+const graphExamples = [
   {
     name: "Android",
     command: "project-android-application-graph",
@@ -39,7 +39,9 @@ cliTest.for([
     operation: "project_harmony_application_graph",
     example: HARMONY_APPLICATION_GRAPH_EXAMPLE,
   },
-] as const)(
+] as const;
+
+cliTest.for(graphExamples)(
   "CLI executes the canonical $name graph example without target files",
   async ({ command, operation, example }, { cli }) => {
     const root = await createTestTempDirectory("rea-mobile-graph-example-");
@@ -56,6 +58,34 @@ cliTest.for([
       expect(evidence.operation).toBe(operation);
       expect(evidence.normalized_result).toMatchObject({
         coverage: { status: "partial", inventory_complete: true },
+      });
+    }
+  },
+);
+
+cliTest.for(graphExamples)(
+  "CLI classifies malformed $name source Evidence separately from request errors",
+  async ({ command, example }, { cli }) => {
+    const source = example.inventory_evidence[0]!;
+    for (const { input, code } of [
+      {
+        input: {
+          inventory_evidence: [{ ...source, evidence_id: "not-a-digest" }],
+        },
+        code: "evidence_integrity_mismatch",
+      },
+      {
+        input: { inventory_evidence: [source], unexpected: true },
+        code: "invalid_request",
+      },
+      { input: { inventory_evidence: [] }, code: "invalid_request" },
+    ]) {
+      const result = await cli.run({
+        arguments: [command, JSON.stringify(input), "--json"],
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.json).toMatchObject({
+        code,
       });
     }
   },

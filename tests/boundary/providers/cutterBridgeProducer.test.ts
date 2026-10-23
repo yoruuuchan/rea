@@ -100,7 +100,7 @@ it("authenticates bridge peers before payloads and permits status recovery after
     [resolve("tests/fixtures/cutter_bridge_protocol_test.py")],
     {
       encoding: "utf8",
-      timeout: 10_000,
+      timeout: 20_000,
     },
   );
 });

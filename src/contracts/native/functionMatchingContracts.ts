@@ -5,6 +5,10 @@ import { evidenceInputSchema } from "../../domain/evidenceReference.js";
 // Evidence/reference union without a pre-admission recursive SDK clone.
 const input = z.unknown().nonoptional();
 input._zod.processJSONSchema = evidenceInputSchema._zod.processJSONSchema;
+// Borrow the outer selections too: admission must account for their width before
+// any array traversal/copy. The owner authenticates each selected carrier later.
+const observations = z.custom<unknown[]>(Array.isArray);
+observations._zod.processJSONSchema = z.array(input)._zod.processJSONSchema;
 
 /** Inventories stay portable; optional observations avoid all-function decompilation. */
 export const matchNativeFunctionsInputSchema = z.strictObject({
@@ -14,17 +18,19 @@ export const matchNativeFunctionsInputSchema = z.strictObject({
   right: input.describe(
     "Right list_procedures Evidence or exact retained reference",
   ),
-  left_observations: z
-    .array(input)
+  left_observations: observations
     .default([])
     .describe(
       "Optional same-context list_names, procedure_info, read_bytes or analyze_function Evidence",
     ),
-  right_observations: z
-    .array(input)
+  right_observations: observations
     .default([])
     .describe(
       "Optional same-context list_names, procedure_info, read_bytes or analyze_function Evidence",
     ),
   detail: z.enum(["summary", "complete"]).default("summary"),
 });
+
+export type MatchNativeFunctionsInput = z.output<
+  typeof matchNativeFunctionsInputSchema
+>;

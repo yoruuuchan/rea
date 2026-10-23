@@ -268,6 +268,7 @@ describe("HopperClient startup failures", () => {
         name: "REA Hopper bridge",
         version: "1.0.0",
         processId: retriedProcess?.pid,
+        maxRequestBytes: 16 * 1024 * 1024,
       },
     });
     await expect(
@@ -300,6 +301,7 @@ describe("HopperClient startup failures", () => {
         name: "REA Hopper bridge",
         version: "1.0.0",
         processId: launcher.processes[0]?.pid,
+        maxRequestBytes: 16 * 1024 * 1024,
       },
     });
     await expect(

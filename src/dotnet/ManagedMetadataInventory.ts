@@ -101,6 +101,21 @@ const validateIdentityTableCounts = (
     });
 };
 
+/** Module identity is independent of assembly references, attributes and resources. */
+export const readManagedModuleIdentity = (
+  bytes: Buffer,
+  layout: ManagedMetadataLayout,
+): Pick<ManagedMetadataInventory, "module" | "issues"> => {
+  const issues: ManagedParseIssue[] = [];
+  validateIdentityTableCounts(layout, issues);
+  const module =
+    readManagedValue(
+      () => readModule(bytes, layout, heapExtent(layout)),
+      issues,
+    ) ?? null;
+  return { module, issues };
+};
+
 const readReferences = (
   bytes: Buffer,
   layout: ManagedMetadataLayout,
@@ -188,14 +203,14 @@ export const readManagedMetadataInventory = (
   layout: ManagedMetadataLayout,
   resourceDirectory: ManagedResourceDirectory | null,
   memberLists: TypeMemberListFacts,
+  identity: Pick<
+    ManagedMetadataInventory,
+    "module" | "issues"
+  > = readManagedModuleIdentity(bytes, layout),
 ): ManagedMetadataInventory => {
   const issues: ManagedParseIssue[] = [...memberLists.issues];
-  validateIdentityTableCounts(layout, issues);
-  const module =
-    readManagedValue(
-      () => readModule(bytes, layout, heapExtent(layout)),
-      issues,
-    ) ?? null;
+  issues.push(...identity.issues);
+  const { module } = identity;
   const assembly =
     readManagedValue(
       () => readAssembly(bytes, layout, heapExtent(layout)),

@@ -482,6 +482,7 @@ cliTest(
       KIMI_CODE_HOME: kimiHome,
       ...missingHopperAndGhidraEnvironment(home),
       REA_ANALYSIS_PROVIDER: "auto",
+      REA_BRIDGE_MAX_REQUEST_BYTES: "33554432",
       REA_GHIDRA_STARTUP_TIMEOUT_MS: "2700001",
       REA_HOPPER_STARTUP_TIMEOUT_MS: "2800002",
       REA_JEB_MCP_TIMEOUT_MS: "2900003",
@@ -520,6 +521,7 @@ cliTest(
       "rea",
     );
     expect(codexRegistration).toMatchObject({ tool_timeout_sec: 3021 });
+    expect(codexConfig).toContain('REA_BRIDGE_MAX_REQUEST_BYTES = "33554432"');
     expect(codexConfig).toContain('REA_JEB_MCP_TIMEOUT_MS = "2900003"');
     expect(codexConfig).toContain(
       'REA_CAPTURE_DECODER_OLD_GENERATION_MIB = "256"',
@@ -541,6 +543,7 @@ cliTest(
       toolTimeoutMs: 3_020_003,
       env: {
         REA_ANALYSIS_PROVIDER: "auto",
+        REA_BRIDGE_MAX_REQUEST_BYTES: "33554432",
         REA_GHIDRA_STARTUP_TIMEOUT_MS: "2700001",
         REA_HOPPER_STARTUP_TIMEOUT_MS: "2800002",
         REA_JEB_MCP_TIMEOUT_MS: "2900003",

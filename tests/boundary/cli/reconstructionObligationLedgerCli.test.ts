@@ -79,18 +79,13 @@ describe("reconstruction obligation ledger CLI parity", () => {
       stdout = cause.stdout;
     }
     expect(JSON.parse(stdout)).toMatchObject({
-      code: "invalid_request",
-      category: "invalid_input",
+      code: "evidence_integrity_mismatch",
+      category: "integrity_mismatch",
       retryable: false,
       details: {
-        operation: "build_reconstruction_obligation_ledger",
-        issues: [
-          expect.objectContaining({
-            message: expect.stringContaining(
-              "Evidence bundle manifests are not canonical",
-            ),
-          }),
-        ],
+        reason: expect.stringContaining(
+          "Evidence bundle manifests are not canonical",
+        ),
       },
     });
   }, 20_000);

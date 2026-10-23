@@ -760,7 +760,7 @@ describe("managed exported types", () => {
 
     expect(parsed.exported_types).toBeNull();
     expect(comparisonLimitations(parsed, parsed)).toContain(
-      "At least one managed member observation predates ExportedType inspection; its exported and forwarded types are unknown.",
+      "At least one managed member observation did not examine ExportedType rows; its exported and forwarded types are unknown.",
     );
   });
 
@@ -1264,7 +1264,7 @@ describe("managed member decoding budget", () => {
     });
   });
 
-  it("still rejects dense one-byte instructions before exceeding capacity", () => {
+  it("rejects dense one-byte instructions while retaining admitted types", () => {
     // All NOPs: unlike wide instructions, each IL byte adds a decoded record.
     // A true oversized transient must remain an actionable resource limit.
     const il = Buffer.alloc(270_001);
@@ -1282,12 +1282,12 @@ describe("managed member decoding budget", () => {
     );
 
     expect(result.coverage).toMatchObject({
-      state: "unavailable",
+      state: "partial",
       issues: [{ code: "resource-limit", scope: "metadata.representation" }],
     });
     // Report the originating IL coordinate, not a generic decoding error.
     expect(result.coverage.issues[0]?.offset).toBeGreaterThan(0);
-    expect(result.types).toEqual([]);
+    expect(result.types).toHaveLength(1);
     expect(result.methods).toEqual([]);
   });
 
@@ -1338,9 +1338,11 @@ describe("managed member decoding budget", () => {
     );
 
     expect(result.coverage).toMatchObject({
-      state: "unavailable",
+      state: "partial",
       issues: [{ code: "resource-limit" }],
     });
+    expect(result.methods).toEqual([]);
+    expect(result.types).toHaveLength(1);
   });
 });
 

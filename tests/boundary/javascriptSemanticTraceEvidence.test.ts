@@ -297,6 +297,22 @@ const assertSuccessfulTraceParity = async (
   const cliResult = javaScriptSemanticTraceResultSchema.parse(
     cliEvidence.normalized_result,
   );
+  expect(cliEvidence.parameters.query).toMatchObject({
+    seed: query.seed,
+    direction: query.direction,
+    include_ambiguous_dynamic_edges: false,
+    expected: null,
+  });
+  if (query.allowed_relations === undefined)
+    expect(cliEvidence.parameters.query).not.toHaveProperty(
+      "allowed_relations",
+    );
+  else
+    expect(cliEvidence.parameters.query).toHaveProperty(
+      "allowed_relations",
+      query.allowed_relations,
+    );
+
   assertTraceContextsResolve(cliResult);
 
   const mcpResponse = await harness.client.callTool({

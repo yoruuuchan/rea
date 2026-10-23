@@ -296,6 +296,35 @@ Exported C and embedded resources remain useful independent evidence, but a
 timeout does not establish complete analysis or absence of code. See the
 [deadline and client guide](https://github.com/morluto/rea/blob/main/docs/mcp-contracts.md#ghidra-first-query-deadlines-and-recovery).
 
+## Bridge request ceiling
+
+Hopper and Cutter share `REA_BRIDGE_MAX_REQUEST_BYTES`. Unset, both sides use
+16777216 bytes. The payload budget excludes the terminating LF. A decimal
+integer from 7464 to 536870887 raises or lowers that ceiling. The floor fits
+the largest bounded symbol-name command. A tight Cutter status still returns
+its session id and up to 64 completion receipts. Its path is included when it
+fits, and is unknown when it does not, so an older descriptor path is not
+paired with the new generation. The maximum is the encoded payload, one byte under Node's string ceiling so
+the framing LF still fits. Cutter measures, signs, and writes a fitting
+response in bounded chunks. The bridge searches only the newly read bytes
+for the framing LF. The client unescapes each socket chunk into one response
+string before parsing it, so this ceiling does not keep the paged wire frame
+and another concatenated copy. Invalid values are configuration errors and do not fall back to 16777216. Set the variable in the environment that starts REA, restart REA,
+and start Hopper or Cutter from that same environment. An out-of-band bridge
+without the setting stays at 16777216 bytes. The client reports that mismatch
+during discovery only after the hello proves a live authenticated bridge, and
+does not send a status request or the command. A stale descriptor is ignored.
+Discovery fails if any such live ceiling differs, even when another live
+session matches. A command response discarded for that ceiling stays an
+unknown execution with `output_truncated`. A hello
+that never sends its authenticated frame does not hold the accept loop.
+At most 8 connection threads run; a further accept is closed, and a failure
+to start a thread does not stop the listener. `completed_connection` is the
+longest prefix of connections that have terminated. Dense scalar replies are
+encoded in bounded batches.
+The 25000 ms Cutter request deadline and the 256-candidate discovery budget
+still have no runtime override.
+
 ## Static memory and original file bytes
 
 For Ghidra, `read_bytes` reads initialized analysis memory, including loader

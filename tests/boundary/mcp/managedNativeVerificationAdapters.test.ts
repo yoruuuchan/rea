@@ -38,6 +38,7 @@ const signatureEvidence = () =>
     },
     { id: "native", name: "Native", version: "simulated" },
     {
+      predicateType: "rea.native-signature",
       operation: "inspect_signature",
       parameters: {},
       result: { signed: true },

@@ -28,10 +28,8 @@ import {
   parseImmutableEvidenceBundle,
 } from "../../src/domain/evidenceBundle.js";
 import { ArtifactResourceScope } from "../../src/artifacts/ArtifactResourceScope.js";
-import {
-  deliverAnalysisEvidence,
-  inspectAnalysisViewFromBundle,
-} from "../../src/application/EvidenceBundleCommands.js";
+import { deliverAnalysisEvidence } from "../../src/application/EvidenceBundleCommands.js";
+import { inspectAnalysisView } from "../../src/application/analysisView/AnalysisViewService.js";
 import { readImmutableEvidenceBundle } from "../../src/application/EvidenceBundleFiles.js";
 import { requireAuthenticationHeadroom } from "../../src/application/JsonAuthenticationHeadroom.js";
 import { SOURCE_TO_BUNDLE_COMPARISON_EXAMPLE } from "../../src/contracts/javascript/javascriptApplicationWorkflowExamples.js";
@@ -215,14 +213,13 @@ it("preserves the view operation and caller reason when bundle I/O is cancelled"
   const reason = new Error("cancel managed bundle page");
   const resources = new ArtifactResourceScope();
   try {
-    const pending = inspectAnalysisViewFromBundle(
+    const pending = inspectAnalysisView(
       {
         source: { kind: "retained-evidence", evidence_id: parent.evidence_id },
         view: { kind: "summary" },
       },
-      path,
-      resources,
-      controller.signal,
+      undefined,
+      { evidenceBundlePath: path, resources, signal: controller.signal },
     );
     await held.firstRead;
     controller.abort(reason);
@@ -369,7 +366,7 @@ it.each(["JSON assembly", "bundle authentication"])(
     const resources = new ArtifactResourceScope();
     try {
       expect(
-        await inspectAnalysisViewFromBundle(
+        await inspectAnalysisView(
           {
             source: {
               kind: "retained-evidence",
@@ -377,8 +374,8 @@ it.each(["JSON assembly", "bundle authentication"])(
             },
             view: { kind: "summary" },
           },
-          path,
-          resources,
+          undefined,
+          { evidenceBundlePath: path, resources },
         ),
       ).toMatchObject({
         ok: false,

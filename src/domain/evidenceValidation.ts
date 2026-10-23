@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { parseEvidence, type Evidence } from "./evidence.js";
+import { parseEvidence, immutableEvidence, type Evidence } from "./evidence.js";
 import { EvidenceIntegrityError } from "./evidenceErrors.js";
 import { describeValidationFailure } from "./validationFailure.js";
 import { err, ok, type Result } from "./result.js";
@@ -8,9 +8,21 @@ import { err, ok, type Result } from "./result.js";
 /** Authenticate one source record, preserving unexpected implementation failures. */
 export const readEvidence = (
   input: unknown,
+): Result<Evidence, EvidenceIntegrityError> =>
+  authenticateEvidence(input, parseEvidence);
+
+/** Authenticate and seal source records retained independently of mutable input. */
+export const readImmutableEvidence = (
+  input: unknown,
+): Result<Evidence, EvidenceIntegrityError> =>
+  authenticateEvidence(input, immutableEvidence);
+
+const authenticateEvidence = (
+  input: unknown,
+  parse: (input: unknown) => Evidence,
 ): Result<Evidence, EvidenceIntegrityError> => {
   try {
-    return ok(parseEvidence(input));
+    return ok(parse(input));
   } catch (cause: unknown) {
     if (!(cause instanceof z.ZodError)) throw cause;
     return err(integrityFailure(cause));

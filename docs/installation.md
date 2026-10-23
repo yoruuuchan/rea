@@ -696,10 +696,12 @@ manual dependency repair.
 
 When the package-manager step fails, setup reports the failing command and its
 captured output, so a package conflict is distinguishable from an authorization
-failure. On CachyOS, an unversioned compatibility package such as
-`zlib-ng-compat` may conflict with Hopper's versioned `zlib` dependency. Resolve
-the package conflict yourself or install Hopper's official package manually,
-then rerun `rea setup`.
+failure. Hopper is optional, so setup still applies the approved client
+registrations and skill, then reports `needs_human` with the Hopper failure. On
+Arch Linux and CachyOS, the unversioned compatibility package `zlib-ng-compat`
+may conflict with Hopper's versioned `zlib` dependency. Resolve the package
+conflict yourself, install Hopper's official package manually, or use another
+provider such as Ghidra; rerun `rea setup` after installing Hopper.
 
 The supported Linux demo forwards additional launches into its existing
 application, even across private displays. REA therefore reserves one Linux

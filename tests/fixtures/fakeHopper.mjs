@@ -8,7 +8,12 @@ const [
   diagnosticMode = "quiet",
   healthMode = "ready",
   inventoryFailure = "none",
+  advertisedRequestBytes,
 ] = process.argv.slice(2);
+const maxRequestBytes =
+  advertisedRequestBytes === undefined
+    ? 16 * 1024 * 1024
+    : Number(advertisedRequestBytes);
 let diagnosticOutputEmitted = false;
 const heldReplies = new Map();
 const sockets = new Set();
@@ -219,6 +224,7 @@ const server = createServer((socket) => {
                 version: "1.0.0",
                 run_id: runId,
                 process_id: process.pid,
+                max_request_bytes: maxRequestBytes,
               },
             },
             true,

@@ -123,9 +123,9 @@ describe("loadEnvironmentSource", () => {
     expect(projected.message).toContain("different capture");
   });
 
-  it("refuses manifests of another view kind, non-capture evidence and non-Evidence JSON", () => {
+  it("refuses manifests of another view kind, non-capture evidence and non-Evidence JSON", async () => {
     const fixture = environmentServeFixture();
-    const surface = inspectAnalysisView({
+    const surface = await inspectAnalysisView({
       source: { kind: "inline", evidence: fixture.capture },
       view: { kind: "api-surface" },
     });
@@ -161,14 +161,14 @@ describe("loadEnvironmentSource", () => {
     );
   });
 
-  it("indexes nothing for a manifest that cites no records and leaves tampered captures to authentication", () => {
+  it("indexes nothing for a manifest that cites no records and leaves tampered captures to authentication", async () => {
     const fixture = environmentServeFixture();
     const capture = analysisViewCaptureEvidence({
       ...analysisViewCaptureFixture(),
       records: [],
       total_records: 0,
     });
-    const manifest = inspectAnalysisView({
+    const manifest = await inspectAnalysisView({
       source: { kind: "inline", evidence: capture },
       view: { kind: "environment-manifest" },
     });
@@ -302,7 +302,7 @@ describe("loadEnvironmentSource payload attribution", () => {
 });
 
 describe("loadEnvironmentSource recorded request lines", () => {
-  it("keeps the delimiter of an explicit empty query in the recorded exchange", () => {
+  it("keeps the delimiter of an explicit empty query in the recorded exchange", async () => {
     const capture = environmentManifestCaptureFixture();
     const record = capture.records.find((entry) =>
       JSON.stringify(entry.reported).includes("/api/users/2"),
@@ -314,7 +314,7 @@ describe("loadEnvironmentSource recorded request lines", () => {
     reported.request.url = `${reported.request.url}?`;
     record.reported = reported;
     const evidence = analysisViewCaptureEvidence(capture);
-    const manifest = inspectAnalysisView({
+    const manifest = await inspectAnalysisView({
       source: { kind: "inline", evidence },
       view: { kind: "environment-manifest" },
     });

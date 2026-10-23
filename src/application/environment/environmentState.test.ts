@@ -82,7 +82,7 @@ describe("loadEnvironmentState", () => {
     expect(state.entities.length).toBeGreaterThan(0);
   });
 
-  it("refuses non-Evidence JSON, another view kind, another capture's state and other template rules", () => {
+  it("refuses non-Evidence JSON, another view kind, another capture's state and other template rules", async () => {
     const notEvidence = loadEnvironmentState({}, source);
     if (notEvidence.ok || !(notEvidence.error instanceof AnalysisInputError))
       throw new Error("Expected an input refusal");
@@ -113,7 +113,7 @@ describe("loadEnvironmentState", () => {
         ],
       },
     });
-    const ruleless = inspectAnalysisView({
+    const ruleless = await inspectAnalysisView({
       source: { kind: "inline", evidence: fixture.capture },
       view: { kind: "environment-state", template_rules: [] },
     });
@@ -263,7 +263,7 @@ describe("deriveEnvironmentState", () => {
     });
   });
 
-  it("projects the authenticated capture as retained Evidence, so a capture inline admission refuses still yields its state", () => {
+  it("projects the authenticated capture as retained Evidence, so a capture inline admission refuses still yields its state", async () => {
     const capture = timedCaptureEvidence(
       Array.from({ length: 20 }, (_, index) => [
         "GET",
@@ -271,7 +271,7 @@ describe("deriveEnvironmentState", () => {
         { id: index, text: "x".repeat(200_000) },
       ]),
     );
-    const inline = inspectAnalysisView({
+    const inline = await inspectAnalysisView({
       source: { kind: "inline", evidence: capture },
       view: { kind: "environment-state", template_rules: [] },
     });

@@ -19,6 +19,7 @@ import { mcpInputSchemaProfileSchema } from "./mcpInputSchemaProfile.js";
 import { mcpOutputSchemaProfileSchema } from "./mcpOutputSchemaProfile.js";
 import { mcpResponseBudgetSchema } from "./mcpResponseBudget.js";
 import { asarMaxHeaderBytesSchema } from "./asarHeaderAdmission.js";
+import { bridgeMaxRequestBytesSchema } from "./bridgeMaxRequestBytes.js";
 import { captureDecoderOldGenerationMiBSchema } from "./captureDecoderHeap.js";
 import { regexMatchingDeadlineMsSchema } from "./regexMatchingDeadline.js";
 import { regexWorkerHeapRequestMiBSchema } from "./regexWorkerHeapRequest.js";
@@ -32,6 +33,7 @@ import { parseLoaderArgs, parseStringArray } from "./parsers.js";
 
 const environmentSchema = z.object({
   REA_ANALYSIS_PROVIDER: analysisProviderSelectorSchema.default("auto"),
+  REA_BRIDGE_MAX_REQUEST_BYTES: bridgeMaxRequestBytesSchema.optional(),
   REA_MCP_MAX_RESPONSE_BYTES: mcpResponseBudgetSchema.optional(),
   REA_ASAR_MAX_HEADER_BYTES: asarMaxHeaderBytesSchema.optional(),
   REA_CAPTURE_DECODER_OLD_GENERATION_MIB:

@@ -1,8 +1,5 @@
 import type { Evidence } from "../domain/evidence.js";
-import {
-  parseEvidenceBundle,
-  type EvidenceBundle,
-} from "../domain/evidenceBundle.js";
+import type { ReconstructionObligationSources } from "./ReconstructionObligationLedgerRequest.js";
 import {
   reconstructionObligationLedgerSchema,
   type ReconstructionObligation,
@@ -52,22 +49,21 @@ interface EvaluationContext {
 
 export const evaluateReconstructionObligationLedger = ({
   candidates: candidatesInput,
-  bundle: bundleInput,
+  sources,
   manifest,
   generationLimitations,
 }: {
   readonly candidates: readonly ReconstructionObligationCandidate[];
-  readonly bundle: EvidenceBundle;
+  readonly sources: ReconstructionObligationSources;
   readonly manifest: ReconstructionObligationManifest;
   readonly generationLimitations: readonly string[];
 }): ReconstructionObligationLedger => {
-  const bundle = parseEvidenceBundle(bundleInput);
-  const allCandidates = [...candidatesInput].sort((left, right) =>
+  const { bundle, records } = sources;
+  const candidates = [...candidatesInput].sort((left, right) =>
     compareUnicodeCodePoints(left.obligation_id, right.obligation_id),
   );
-  const orphanManifestIds = findOrphanManifestIds(allCandidates, manifest);
-  const candidates = allCandidates;
-  const context = createEvaluationContext(candidates, bundle, manifest);
+  const orphanManifestIds = findOrphanManifestIds(candidates, manifest);
+  const context = createEvaluationContext(candidates, records, manifest);
   const obligations = applyDependencyDiagnostics(
     candidates.map((candidate) => evaluateObligation(candidate, context)),
     context,
@@ -77,7 +73,7 @@ export const evaluateReconstructionObligationLedger = ({
   const evidenceLinks = obligationLedgerEvidenceLinks(obligations, manifest);
   const limitations = ledgerLimitations(
     generationLimitations,
-    allCandidates.length,
+    candidates.length,
     orphanManifestIds,
   );
   const coverage = reconstructionObligationCoverage(limitations);
@@ -115,15 +111,13 @@ export const evaluateReconstructionObligationLedger = ({
 
 const createEvaluationContext = (
   candidates: readonly ReconstructionObligationCandidate[],
-  bundle: EvidenceBundle,
+  evidence: ReadonlyMap<string, Evidence>,
   manifest: ReconstructionObligationManifest,
 ): EvaluationContext => ({
   candidates: new Map(
     candidates.map((candidate) => [candidate.obligation_id, candidate]),
   ),
-  evidence: new Map(
-    bundle.records.map((evidence) => [evidence.evidence_id, evidence]),
-  ),
+  evidence,
   bindings: groupManifestBindings(manifest),
   contradictions: groupManifestContradictions(manifest),
 });

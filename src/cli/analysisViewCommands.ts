@@ -1,7 +1,6 @@
 import { z } from "incur";
 
-import { inspectAnalysisViewValidatedWithFiles } from "../application/analysisView/AnalysisViewService.js";
-import { inspectAnalysisViewFromBundle } from "../application/EvidenceBundleCommands.js";
+import { inspectAnalysisView } from "../application/analysisView/AnalysisViewService.js";
 import { ArtifactResourceScope } from "../artifacts/ArtifactResourceScope.js";
 import { ANALYSIS_VIEW_PROVIDER } from "../application/InvestigationProviders.js";
 import { readEvidenceBundle } from "../application/EvidenceBundleFiles.js";
@@ -21,7 +20,6 @@ import { localPathStringSchema } from "../domain/localPath.js";
 import { withCommandCancellation } from "./commandCancellation.js";
 import { finishAnalysisCommand } from "./finishAnalysisCommand.js";
 
-import { inspectAnalysisViewInputSchema } from "../domain/analysisView/analysisView.js";
 /** Project selected views of completed analysis Evidence through the CLI. */
 export const registerAnalysisViewCommands = (
   cli: CliInstance,
@@ -103,34 +101,17 @@ export const registerAnalysisViewCommands = (
           if (!input.ok) return input.error;
           // An evidence-file path is resolved against the operator's working directory.
           const value = resolveCliJsonPaths(input.value, [["source", "path"]]);
-          const parsed = inspectAnalysisViewInputSchema.safeParse(value);
-          if (!parsed.success)
-            return {
-              error: "Application workflow failed",
-              ...projectAnalysisError(
-                analysisInputErrorFromIssues(
-                  CLI_COMMANDS.inspectAnalysisView,
-                  parsed.error.issues,
-                  value,
-                ),
-              ),
-            };
           const resources = new ArtifactResourceScope();
           const bundlePath = options.evidenceBundle;
           const result = await finishAnalysisCommand(
             () =>
-              bundlePath === undefined
-                ? inspectAnalysisViewValidatedWithFiles(
-                    parsed.data,
-                    undefined,
-                    { signal, resources },
-                  )
-                : inspectAnalysisViewFromBundle(
-                    parsed.data,
-                    bundlePath,
-                    resources,
-                    signal,
-                  ),
+              inspectAnalysisView(value, undefined, {
+                signal,
+                resources,
+                ...(bundlePath === undefined
+                  ? {}
+                  : { evidenceBundlePath: bundlePath }),
+              }),
             resources,
             ANALYSIS_VIEW_PROVIDER.id,
             "inspect_analysis_view",

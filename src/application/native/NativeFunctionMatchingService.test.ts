@@ -5,6 +5,7 @@ import { nativeFunctionMatchingSchema } from "../../domain/native/functionMatchi
 import { createEvidence } from "../../domain/evidence.js";
 import { createAnalysisProfile } from "../../domain/analysisProfile.js";
 import { functionDossierSchema } from "../../domain/hopperValues.js";
+import { procedureInfoSchema } from "../../domain/native/procedureInfo.js";
 import {
   nativeMatchingInventory,
   nativeMatchingDetails,
@@ -628,34 +629,92 @@ it("does not use generated symbols and preserves literal named FUN_ symbols when
   );
 });
 
-it("rejects tampered, non-inventory and mixed-target observations with typed failures", async () => {
+it("assigns source authentication, role selection, context, and lookup failures to their owning boundary", async () => {
   const left = nativeMatchingInventory("1", [
     { address: "0x10", value: "main" },
   ]);
-  for (const input of [
-    { left: { ...left, normalized_result: [] }, right: left },
-    { left: nativeMatchingDetails("1", "0x10", "c3")[0], right: left },
+  const cases = [
     {
-      left,
-      right: left,
-      left_observations: nativeMatchingDetails("2", "0x10", "c3"),
+      input: { left: { ...left, normalized_result: [] }, right: left },
+      tag: "EvidenceIntegrityError",
     },
     {
-      left,
-      right: left,
-      left_observations: [
-        { kind: "retained-evidence", evidence_id: `ev_${"a".repeat(64)}` },
-      ],
+      input: { left: nativeMatchingDetails("1", "0x10", "c3")[0], right: left },
+      tag: "AnalysisInputError",
+      path: ["left"],
     },
-  ]) {
+    {
+      input: {
+        left,
+        right: left,
+        left_observations: nativeMatchingDetails("2", "0x10", "c3"),
+      },
+      tag: "EvidenceIntegrityError",
+    },
+    {
+      input: {
+        left: nativeMatchingInventory("1", [
+          { address: "not-an-address", value: "main" },
+        ]),
+        right: left,
+      },
+      tag: "EvidenceIntegrityError",
+    },
+    {
+      input: { left, right: left, left_observations: [left] },
+      tag: "AnalysisInputError",
+      path: ["left_observations", 0],
+    },
+    {
+      input: {
+        left,
+        right: left,
+        left_observations: [
+          createEvidence(nativeMatchingTarget("1"), nativeMatchingProvider, {
+            operation: "procedure_info",
+            parameters: { procedure: "0x10" },
+            result: {
+              ...procedureInfoSchema.parse(
+                nativeMatchingDetails("1", "0x10", "c3")[0]!.normalized_result,
+              ),
+              entrypoint: "not-an-address",
+            },
+          }),
+        ],
+      },
+      tag: "EvidenceIntegrityError",
+    },
+    {
+      input: {
+        left,
+        right: left,
+        left_observations: [
+          { kind: "retained-evidence", evidence_id: `ev_${"a".repeat(64)}` },
+        ],
+      },
+      tag: "EvidenceIntegrityError",
+      evidenceId: `ev_${"a".repeat(64)}`,
+      reason: "missing",
+    },
+  ] as const;
+  for (const { input, tag, ...expected } of cases) {
     const result = await matchNativeFunctions(input);
     expect(result.ok).toBe(false);
-    if (!result.ok)
-      expect([
-        "AnalysisInputError",
-        "EvidenceIntegrityError",
-        "EvidenceReferenceError",
-      ]).toContain(result.error._tag);
+    if (!result.ok) {
+      expect(result.error._tag).toBe(tag);
+      if ("path" in expected) {
+        expect(result.error).toMatchObject({
+          issues: expect.arrayContaining([
+            expect.objectContaining({ path: expected.path }),
+          ]),
+        });
+      }
+      if ("evidenceId" in expected)
+        expect(result.error).toMatchObject({
+          evidenceId: expected.evidenceId,
+          reason: expected.reason,
+        });
+    }
   }
 });
 
@@ -703,5 +762,196 @@ it("keeps duplicate candidate storage linear and emits every input occurrence ex
   expect(report.matches[0]?.right).toHaveLength(1000);
   expect(new Set(report.matches[0]?.left.map((x) => x.function_id)).size).toBe(
     1000,
+  );
+});
+
+it("normalizes accepted body range address spaces before matching byte coverage", async () => {
+  const body = {
+    available: true as const,
+    provenance: "synthetic mixed-space body",
+    ranges: [
+      { start: "ram:0x10", end: "ram:0x10" },
+      { start: "other%ab:0x20", end: "other%ab:0x20" },
+    ],
+    total_bytes: 2,
+    span_bytes: null,
+    non_contiguous: true,
+    contains_entry: true,
+  };
+  const info = createEvidence(
+    nativeMatchingTarget("1"),
+    nativeMatchingProvider,
+    {
+      operation: "procedure_info",
+      parameters: { procedure: "ram:0x10" },
+      result: {
+        name: "main",
+        entrypoint: "ram:0x10",
+        basicblock_count: 1,
+        length: 2,
+        signature: null,
+        locals: [],
+        classification: null,
+        body,
+      },
+    },
+  );
+  const read = (address: string, value: string) =>
+    createEvidence(nativeMatchingTarget("1"), nativeMatchingProvider, {
+      operation: "read_bytes",
+      parameters: {},
+      result: {
+        address,
+        requested_bytes: 1,
+        returned_bytes: 1,
+        bytes_hex: value,
+        complete: true,
+      },
+    });
+  const { report } = await compare({
+    left: nativeMatchingInventory("1", [
+      { address: "ram:0x10", value: "main" },
+    ]),
+    right: nativeMatchingInventory("2", [{ address: "0x30", value: "main" }]),
+    left_observations: [
+      info,
+      read("ram:0x10", "01"),
+      read("other%AB:0x20", "02"),
+    ],
+  });
+  expect(report.matches[0]?.left[0]?.body_sha256).toBe(
+    createHash("sha256").update(Buffer.from("0102", "hex")).digest("hex"),
+  );
+});
+
+it("compares repeated bodies and entry membership after address-space normalization", async () => {
+  const procedure = (entrypoint: string, rangeAddress: string) =>
+    createEvidence(nativeMatchingTarget("1"), nativeMatchingProvider, {
+      operation: "procedure_info",
+      parameters: { procedure: entrypoint },
+      result: {
+        name: "main",
+        entrypoint,
+        basicblock_count: 1,
+        length: 2,
+        signature: null,
+        locals: [],
+        classification: null,
+        body: {
+          available: true,
+          provenance: "synthetic escaped-space body",
+          ranges: [
+            {
+              start: `${rangeAddress}:0x10`,
+              end: `${rangeAddress}:0x11`,
+            },
+          ],
+          total_bytes: 2,
+          span_bytes: 2,
+          non_contiguous: false,
+          contains_entry: true,
+        },
+      },
+    });
+  const first = procedure("ram%AB:0x10", "ram%ab");
+  const equivalent = procedure("ram%ab:0x10", "ram%AB");
+  const bytes = createEvidence(
+    nativeMatchingTarget("1"),
+    nativeMatchingProvider,
+    {
+      operation: "read_bytes",
+      parameters: { address: "ram%AB:0x10", length: 2 },
+      result: {
+        address: "ram%AB:0x10",
+        requested_bytes: 2,
+        returned_bytes: 2,
+        bytes_hex: "0102",
+        complete: true,
+      },
+    },
+  );
+  const { report } = await compare({
+    left: nativeMatchingInventory("1", [
+      { address: "ram%AB:0x10", value: "main" },
+    ]),
+    right: nativeMatchingInventory("2", [{ address: "0x20", value: "main" }]),
+    left_observations: [first, equivalent, bytes],
+  });
+  const member = report.matches[0]?.left[0];
+  expect(member?.body_sha256).toBe(
+    createHash("sha256").update(Buffer.from("0102", "hex")).digest("hex"),
+  );
+  expect(member?.limitations).not.toContain(
+    "Conflicting procedure observations; body and dossier remain unknown.",
+  );
+  expect(member?.evidence_links).toEqual(
+    expect.arrayContaining([first.evidence_id, equivalent.evidence_id]),
+  );
+});
+
+it("retains zero-byte reads with unavailable addresses when no request coordinate exists", async () => {
+  const info = createEvidence(
+    nativeMatchingTarget("1"),
+    nativeMatchingProvider,
+    {
+      operation: "procedure_info",
+      parameters: { procedure: "0x10" },
+      result: {
+        name: "main",
+        entrypoint: "0x10",
+        basicblock_count: 1,
+        length: 1,
+        signature: null,
+        locals: [],
+        classification: null,
+        body: {
+          available: true,
+          provenance: "synthetic body",
+          ranges: [{ start: "0x10", end: "0x10" }],
+          total_bytes: 1,
+          span_bytes: 1,
+          non_contiguous: false,
+          contains_entry: true,
+        },
+      },
+    },
+  );
+  const emptyRead = createEvidence(
+    nativeMatchingTarget("1"),
+    nativeMatchingProvider,
+    {
+      operation: "read_bytes",
+      parameters: {},
+      result: {
+        address: "unavailable",
+        requested_bytes: 1,
+        returned_bytes: 0,
+        bytes_hex: "",
+        complete: false,
+      },
+    },
+  );
+  const left = nativeMatchingInventory("1", [
+    { address: "0x10", value: "main" },
+  ]);
+  const right = nativeMatchingInventory("2", [
+    { address: "0x20", value: "main" },
+  ]);
+  const result = await matchNativeFunctions({
+    left,
+    right,
+    left_observations: [info, emptyRead],
+  });
+  if (!result.ok) throw result.error;
+  const report = nativeFunctionMatchingSchema.parse(
+    result.value.evidence.normalized_result,
+  );
+  expect(report.matches[0]?.left[0]).toMatchObject({
+    body_bytes: 1,
+    body_sha256: null,
+  });
+  expect(result.value.evidence.evidence_links).toContain(emptyRead.evidence_id);
+  expect(result.value.sources.map((source) => source.evidence_id)).toContain(
+    emptyRead.evidence_id,
   );
 });

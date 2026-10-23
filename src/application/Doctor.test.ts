@@ -165,6 +165,7 @@ describe("doctor native analysis configuration", () => {
   it.each([
     ["REA_ANALYSIS_PROVIDER", "Hopper"],
     ["REA_REGEX_MATCHING_DEADLINE_MS", "0"],
+    ["REA_BRIDGE_MAX_REQUEST_BYTES", "7463"],
     ["REA_CAPTURE_DECODER_OLD_GENERATION_MIB", "7"],
     ["REA_REGEX_WORKER_HEAP_REQUEST_MIB", "6"],
     ["REA_MCP_INITIALIZE_BUDGET_MS", "0"],

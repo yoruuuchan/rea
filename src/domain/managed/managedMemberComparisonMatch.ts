@@ -3,7 +3,7 @@ import {
   managedMemberInspectionSchema,
   type ManagedMemberInspection,
 } from "./managedArtifact.js";
-import { parseManagedInspectionEvidence } from "./managedInspectionEvidence.js";
+import { readManagedInspectionEvidence } from "./managedInspectionEvidence.js";
 import type {
   ManagedMemberComparisonResult,
   ManagedMemberComparisonSide,
@@ -577,19 +577,13 @@ export const keyMembers = (
   };
 };
 
-export const parseManagedMemberEvidence = (
+export const readManagedMemberEvidence = (
   evidence: unknown,
-): {
-  readonly evidenceId: string;
-  readonly result: ManagedMemberInspection;
-} => {
-  const parsed = parseManagedInspectionEvidence(
+  path: "left" | "right",
+) =>
+  readManagedInspectionEvidence(
     evidence,
     "inspect_managed_members",
     managedMemberInspectionSchema,
+    { operation: "compare_managed_members", path: [path] },
   );
-  return {
-    evidenceId: parsed.evidence.evidence_id,
-    result: parsed.result,
-  };
-};

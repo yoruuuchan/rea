@@ -14,9 +14,9 @@ import {
 } from "../../domain/evidenceErrors.js";
 import { resolveArtifactComparisonEvidence } from "./ArtifactComparisonEvidence.js";
 
-const artifactSummary = () => {
+const artifactSummary = async () => {
   const parent = ARTIFACT_COMPARISON_EXAMPLE.left;
-  const summary = inspectAnalysisView(
+  const summary = await inspectAnalysisView(
     {
       source: { kind: "inline", evidence: parent },
       view: { kind: "summary" },
@@ -66,8 +66,8 @@ const recreateSummary = (
   );
 };
 
-it("reports a missing retained parent instead of treating summary facts as inventory", () => {
-  const { summary } = artifactSummary();
+it("reports a missing retained parent instead of treating summary facts as inventory", async () => {
+  const { summary } = await artifactSummary();
   const resolved = resolveArtifactComparisonEvidence(summary, undefined);
   expect(resolved.ok).toBe(false);
   if (!resolved.ok) {
@@ -76,8 +76,8 @@ it("reports a missing retained parent instead of treating summary facts as inven
   }
 });
 
-it("uses retained Evidence resolution to reject a mismatched parent identity", () => {
-  const { summary } = artifactSummary();
+it("uses retained Evidence resolution to reject a mismatched parent identity", async () => {
+  const { summary } = await artifactSummary();
   const otherParent = ARTIFACT_COMPARISON_EXAMPLE.right;
   const resolved = resolveArtifactComparisonEvidence(
     summary,
@@ -90,8 +90,8 @@ it("uses retained Evidence resolution to reject a mismatched parent identity", (
   }
 });
 
-it("rejects a summary that declares the wrong parent operation", () => {
-  const { parent, summary } = artifactSummary();
+it("rejects a summary that declares the wrong parent operation", async () => {
+  const { parent, summary } = await artifactSummary();
   const summaryResult = artifactInventorySummaryViewResultSchema.parse(
     summary.normalized_result,
   );
@@ -108,8 +108,8 @@ it("rejects a summary that declares the wrong parent operation", () => {
     expect(resolved.error).toBeInstanceOf(EvidenceIntegrityError);
 });
 
-it("rejects summary parameters that do not identify the projected parent", () => {
-  const { parent, summary } = artifactSummary();
+it("rejects summary parameters that do not identify the projected parent", async () => {
+  const { parent, summary } = await artifactSummary();
   const forged = recreateSummary(summary, summary.normalized_result, {
     ...summary.parameters,
     parent_evidence_id: `ev_${"f".repeat(64)}`,
@@ -122,8 +122,8 @@ it("rejects summary parameters that do not identify the projected parent", () =>
     expect(resolved.error).toBeInstanceOf(EvidenceIntegrityError);
 });
 
-it("rejects summary facts that do not reproject from the complete parent", () => {
-  const { parent, summary } = artifactSummary();
+it("rejects summary facts that do not reproject from the complete parent", async () => {
+  const { parent, summary } = await artifactSummary();
   const summaryResult = artifactInventorySummaryViewResultSchema.parse(
     summary.normalized_result,
   );
@@ -146,8 +146,8 @@ it("rejects summary facts that do not reproject from the complete parent", () =>
     expect(resolved.error).toBeInstanceOf(EvidenceIntegrityError);
 });
 
-it("accepts display-only subject changes excluded from Evidence identity", () => {
-  const { parent, summary } = artifactSummary();
+it("accepts display-only subject changes excluded from Evidence identity", async () => {
+  const { parent, summary } = await artifactSummary();
   if (summary.subject === null)
     throw new Error("artifact summary fixture must identify its subject");
   const displayOnly = parseEvidence({

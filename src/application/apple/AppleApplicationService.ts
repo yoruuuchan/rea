@@ -1,8 +1,5 @@
 import type { AnalysisError } from "../../domain/analysisErrorBase.js";
-import {
-  appleApplicationProjectionInputSchema,
-  projectAppleApplication,
-} from "../../domain/apple/appleApplication.js";
+import { projectAppleInventory } from "../../domain/apple/appleApplication.js";
 import type { Result } from "../../domain/result.js";
 import { APPLE_APPLICATION_PROVIDER } from "../InvestigationProviders.js";
 import {
@@ -18,8 +15,7 @@ export const projectAppleApplicationEvidence = (
 ): Result<InventoryProjectionEvidenceResult, AnalysisError> => {
   return projectInventoryEvidence({
     rawInput,
-    schema: appleApplicationProjectionInputSchema,
-    project: projectAppleApplication,
+    project: projectAppleInventory,
     operation: OPERATION,
     predicateType: "rea.apple-application-graph",
     provider: APPLE_APPLICATION_PROVIDER,
